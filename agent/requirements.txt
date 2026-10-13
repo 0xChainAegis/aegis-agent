@@ -1,0 +1,10 @@
+langgraph>=0.2.60
+langchain-core>=0.3.20
+langchain-openai>=0.2.10
+web3>=6.20.0
+eth-account>=0.11.0
+pydantic>=2.7.0
+python-dotenv>=1.0.0
+rich>=13.7.0
+pyyaml>=6.0
+pytest>=8.0.0
