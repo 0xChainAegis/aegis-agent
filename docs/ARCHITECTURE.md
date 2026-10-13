@@ -22,7 +22,7 @@ flowchart TD
     H -->|approved| T
     H -->|rejected| D[Denied]
     T --> W[AegisWallet<br/>ETH / ERC20 / subscriptions]
-    W --> C[(EVM chain<br/>Scroll / Sepolia)]
+    W --> C[(EVM chain<br/>Ethereum Sepolia)]
     T --> A[AegisAttestation<br/>append-only on-chain log]
     W --> X[Chainlink CCIP<br/>cross-chain transfer]
     O[Chainlink Data Feeds] --> R

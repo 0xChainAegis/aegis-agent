@@ -1,16 +1,18 @@
 const hre = require("hardhat");
 
-/// @dev Known CCIP router addresses. Fill in the network you deploy to.
+/// @dev Known CCIP router addresses.
+/// NOTE: Scroll Sepolia CCIP is INACTIVE on the official directory, so the
+/// demo target is Ethereum Sepolia (active lanes to Base Sepolia etc.).
 const CCIP_ROUTERS = {
   11155111: "0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59", // Ethereum Sepolia
-  534351: "0x7059358270e0d07B864068EA604f1a60A8a2860e", // Scroll Sepolia (verify before use)
   31337: "0x0000000000000000000000000000000000000000", // local hardhat
 };
 
-/// @dev CCIP destination chain selectors (examples; verify in CCIP docs).
+/// @dev CCIP chain selectors (verified in the CCIP directory).
 const CCIP_CHAIN_SELECTORS = {
   sepolia: 16015286601757825753, // Ethereum Sepolia
-  scrollSepolia: 16674653048406173432, // Scroll Sepolia
+  baseSepolia: 10344971235874465080, // Base Sepolia
+  arbitrumSepolia: 3478487238524512106, // Arbitrum Sepolia
 };
 
 async function main() {
@@ -57,7 +59,12 @@ async function main() {
   const Oracle = await hre.ethers.getContractFactory("AegisPriceOracle");
   const oracle = await Oracle.deploy(deployer.address);
   await oracle.waitForDeployment();
-  console.log("AegisPriceOracle:", await oracle.getAddress());
+  const oracleAddress = await oracle.getAddress();
+  console.log("AegisPriceOracle:", oracleAddress);
+  console.log(
+    "Wire the feed next:\n" +
+      `  ORACLE_ADDRESS=${oracleAddress} npx hardhat run scripts/wire-feed.js --network sepolia`
+  );
 
   // 6. CCIP sender (skipped on a fresh local chain without a router)
   const router = CCIP_ROUTERS[chainId];
