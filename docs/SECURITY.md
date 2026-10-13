@@ -1,18 +1,18 @@
 # Security Design & Known Risk List
 
-This document is the security design reference for AegisAgent and the basis
-of the FinTechathon security self-assessment report.
+This document is the security design reference for AegisAgent, submitted for
+ETH Shenzhen 2026.
 
 ## 1. Threat model
 
 | Threat | Mitigation |
 |---|---|
 | Direct prompt injection ("ignore previous instructions") | Guardrail signatures block input before it reaches the LLM |
-| Indirect injection via external data (bills, merchant names) | External text is treated as untrusted data; tool results are never executed as instructions; only structured fields are read |
+| Indirect injection via external data (transaction labels, merchant names, API responses) | External text is treated as untrusted data; tool results are never executed as instructions; only structured fields are read |
 | Prompt / secret extraction | Guardrail detects extraction requests; system prompt is never part of tool outputs |
 | Excessive agent authority (stolen key or rogue model) | On-chain tiers, per-transaction ceiling, role separation; contracts cap what the agent can do |
 | Unauthorized large transfers | Two gates: graph-level human approval + on-chain owner `approveAndExecute` |
-| Payment to blocked / sanctioned payee | Bank adapter block list + on-chain chain allowlist |
+| Payment to a blocked / sanctioned recipient | recipient allowlists and chain allowlists; untrusted recipients fail closed |
 | Replay / duplicated submission | Each action has a canonical hash and a unique attestation id; pending ops are deleted once resolved |
 | Key leakage in config | `.env` gitignored; only disposable testnet keys; sample file committed |
 | Fake confirmations / inventing data | Agent cannot generate hashes or balances; only the chain/API response is shown |

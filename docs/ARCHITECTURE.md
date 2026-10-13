@@ -1,8 +1,8 @@
 # AegisAgent Architecture
 
-AegisAgent is a security-first AI financial agent that operates over two
-backends: a retail bank API (FinTechathon track) and EVM blockchains
-(ETH Shenzhen track). The same agent graph, guardrails and policy serve both.
+AegisAgent is a security-first AI financial agent operating on EVM blockchains.
+The agent graph, guardrails and policy enforce that every value-moving action
+is authorized, attested and bounded.
 
 ## 1. Layered view
 
@@ -21,7 +21,6 @@ flowchart TD
     R -->|high-risk| H
     H -->|approved| T
     H -->|rejected| D[Denied]
-    T --> B[Bank API adapter<br/>mock in demo]
     T --> W[AegisWallet<br/>ETH / ERC20 / subscriptions]
     W --> C[(EVM chain<br/>Scroll / Sepolia)]
     T --> A[AegisAttestation<br/>append-only on-chain log]
@@ -63,7 +62,6 @@ sequenceDiagram
 | Planner | Extract structured intent; never authorizes | LLM with structured output, offline rule-based fallback |
 | Policy engine | Risk level, approval decision | deterministic Python, USD-valued via Data Feeds |
 | Human approval | Pause high-risk actions | LangGraph `interrupt` + on-chain pending queue |
-| Bank adapter | Retail operations (FinTechathon) | mock bank API, transfer/bills/payees |
 | AegisWallet | Custody, bounded transfers, subscriptions | Solidity, OZ |
 | AegisAccessControl | Roles and tiers, per-agent ceilings | Solidity, OZ AccessControl |
 | AegisAttestation | Append-only action audit log | Solidity |
@@ -81,11 +79,12 @@ sequenceDiagram
 5. The agent key is isolated; contracts bound what the key can do even if it
    is compromised (tier, per-tx ceiling, allowlist)
 
-## 5. Two-competition delivery map
+## 5. Demo evidence map
 
-| Deliverable | ETH Shenzhen (10.23–10.24) | FinTechathon (11.02) |
-|---|---|---|
-| Core agent graph | same codebase | same codebase |
-| Backend | AegisWallet + CCIP + attestation | bank adapter + bills/payees |
-| Required artifacts | public GitHub + README + live demo | technical doc, PPT, code package, security self-assessment |
-| Differentiator | on-chain verification + cross-chain | banking business logic + risk controls |
+| Claim | Evidence |
+|---|---|
+| Agent can move value on-chain | AegisWallet executed transfer + transaction hash |
+| Agent cannot exceed its authority | above-limit transfer queues; only `approveAndExecute` releases it |
+| Every action is verifiable | AegisAttestation record with canonical intent hash |
+| Stable risk limits | USD valuation via Chainlink Data Feeds |
+| Cross-chain reach | Chainlink CCIP sender + message id |

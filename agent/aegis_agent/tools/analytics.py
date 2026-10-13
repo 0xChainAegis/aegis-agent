@@ -1,11 +1,10 @@
-"""Bill / transaction analysis. Serves both the banking (FinTechathon) and
-on-chain (ETH Shenzhen) variants: parse a transaction list into category
-spend, top counterparties and trend."""
+"""Transaction analytics for ETH Shenzhen: parse decoded transactions into
+category spend, top counterparties and trend."""
 
 from collections import defaultdict
 
-# Category-tagged fixture. In production this is fed by bank API rows or
-# decoded on-chain transactions.
+# Category-tagged fixture. In production this is fed by decoded on-chain
+# transactions.
 _TRANSACTIONS = [
     {"counterparty": "Netflix", "category": "entertainment", "amount": 15.49, "month": "2026-09"},
     {"counterparty": "Spotify", "category": "entertainment", "amount": 9.99, "month": "2026-09"},

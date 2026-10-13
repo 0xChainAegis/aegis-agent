@@ -28,7 +28,7 @@ guard (injection detection)
   -> intent (LLM structured extraction, offline parser fallback)
   -> policy (read / low / high / forbidden)
   -> approval (human interrupt for high risk)
-  -> execute (bank adapter or on-chain tools)
+  -> execute (on-chain tools)
 ```
 
 ## Test
