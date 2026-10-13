@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from aegis_agent.config import SETTINGS
 from aegis_agent.guardrails import injection_guard, policy
-from aegis_agent.tools import analytics, subscriptions, wallet
+from aegis_agent.tools import analytics, attestation, subscriptions, wallet
 
 
 class IntentSchema(BaseModel):
@@ -31,6 +31,7 @@ class AgentState(TypedDict, total=False):
     decision: dict[str, Any]
     approved: bool
     result: dict[str, Any]
+    attestation: dict[str, Any]
 
 
 # -------------------------------------------------------------------- nodes
@@ -110,6 +111,29 @@ def execute_node(state: AgentState) -> AgentState:
     return {"result": result}
 
 
+def attest_node(state: AgentState) -> AgentState:
+    """Commit the full action record (request, intent, decision, model,
+    approval, result) to a canonical hash; write it to the on-chain registry
+    before value moves. The same record is what a verifier re-hashes."""
+    approved = state.get("approved")
+    decision = state["decision"]
+    record = attestation.build_record(
+        request=state["user_input"],
+        intent=state["intent"],
+        decision=decision,
+        model=SETTINGS.openai_model if SETTINGS.openai_api_key else "local-rule-parser",
+        approved=approved,
+        result=state["result"],
+    )
+    record_hash = attestation.hash_record(record)
+    chain_receipt = attestation.onchain_attest(
+        record_hash,
+        risk_flag=decision["risk"] == "high",
+        approved=bool(approved),
+    )
+    return {"attestation": {"record": record, "hash": record_hash, "chain": chain_receipt}}
+
+
 # ---------------------------------------------------------------- intent parsing
 
 
@@ -187,6 +211,7 @@ def build_graph():
     graph.add_node("policy", policy_node)
     graph.add_node("approval", approval_node)
     graph.add_node("execute", execute_node)
+    graph.add_node("attest", attest_node)
 
     graph.add_edge(START, "guard")
     graph.add_conditional_edges(
@@ -201,6 +226,7 @@ def build_graph():
         {"approval": "approval", "execute": "execute"},
     )
     graph.add_edge("approval", "execute")
-    graph.add_edge("execute", END)
+    graph.add_edge("execute", "attest")
+    graph.add_edge("attest", END)
 
     return graph.compile(checkpointer=MemorySaver())

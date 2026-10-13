@@ -64,7 +64,7 @@ sequenceDiagram
 | Human approval | Pause high-risk actions | LangGraph `interrupt` + on-chain pending queue |
 | AegisWallet | Custody, bounded transfers, subscriptions | Solidity, OZ |
 | AegisAccessControl | Roles and tiers, per-agent ceilings | Solidity, OZ AccessControl |
-| AegisAttestation | Append-only action audit log | Solidity |
+| AegisAttestation | Append-only action audit log; stores canonical hash of the full record (request, intent, decision, model, approval, result) | Solidity |
 | AegisCCIPSender | Cross-chain transfers | Chainlink CCIP |
 | AegisPriceOracle | USD valuation | Chainlink Data Feeds |
 | Frontend | Demo console | single HTML file, viem |

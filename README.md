@@ -17,7 +17,7 @@ AegisAgent can actually move value on-chain, but only inside hard security bound
 - **Permission tiers** — read-only / low-risk auto / high-risk approval
 - **Human approval** — above-limit transfers queue on-chain and execute only after the owner approves
 - **Prompt-injection defense** — untrusted text is screened before the LLM sees it
-- **On-chain attestation** — every action is recorded in an append-only registry before value moves
+- **On-chain attestation** — the full record (request, intent, decision, model, approval, result) is canonicalized and hashed; the hash is recorded on-chain before value moves and can be recomputed in the browser
 - **Cross-chain** — token transfers across chains via Chainlink CCIP
 
 ## Why it is safe

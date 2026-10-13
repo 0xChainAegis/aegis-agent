@@ -42,6 +42,19 @@ def main() -> None:
         if result:
             console.print(f"[green]agent>[/] {result}")
 
+        attestation = state.get("attestation")
+        if attestation:
+            from aegis_agent.tools.attestation import verify_record
+
+            record = attestation["record"]
+            record_hash = attestation["hash"]
+            ok = verify_record(record, record_hash)
+            console.print(
+                f"[blue]attest>[/] {record_hash}  "
+                f"risk={record['decision']['risk']}  "
+                f"verify={'ok' if ok else 'FAILED'}"
+            )
+
     console.print("bye")
 
 
