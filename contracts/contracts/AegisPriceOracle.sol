@@ -2,41 +2,61 @@
 pragma solidity ^0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
-/// @title AegisPriceOracle
-/// @notice Chainlink Data Feeds wrapper used to value token amounts in USD so
-///         permission tiers and risk limits can be expressed in stable value
-///         instead of per-token units.
+/// @notice Locked native ETH/USD feed adapter. USD6 quotes round upward so tiny
+///         positive payments cannot evade a budget by truncating to zero.
 contract AegisPriceOracle is Ownable {
-    /// @dev token => Chainlink aggregator (feed quotes the token in USD, e.g. 8 decimals).
     mapping(address => address) public feeds;
-    /// @dev token => token decimals (18 assumed by default).
     mapping(address => uint8) public tokenDecimals;
-
-    event FeedSet(address indexed token, address feed, uint8 decimals);
+    bool public configurationLocked;
+    uint8 private _feedDecimals;
+    event FeedSet(address indexed token, address indexed feed, uint8 tokenDecimals);
+    event ConfigurationLocked(address indexed feed);
 
     constructor(address initialOwner) Ownable(initialOwner) {}
 
-    function setFeed(address token, address feed, uint8 decimals) external onlyOwner {
+    function setFeed(address token, address feed, uint8 decimals_) external onlyOwner {
+        require(!configurationLocked, "ORACLE_CONFIGURATION_LOCKED");
+        require(token == address(0) && decimals_ == 18, "NATIVE_ETH_ONLY");
+        require(feed.code.length > 0, "BAD_FEED");
+        uint8 feedDecimals = AggregatorV3Interface(feed).decimals();
+        require(feedDecimals <= 18, "UNSUPPORTED_DECIMALS");
         feeds[token] = feed;
-        tokenDecimals[token] = decimals;
-        emit FeedSet(token, feed, decimals);
+        tokenDecimals[token] = decimals_;
+        _feedDecimals = feedDecimals;
+        emit FeedSet(token, feed, decimals_);
     }
 
-    /// @notice Returns the USD value of `amount` of `token`, scaled to 8 decimals.
-    function getUsdValue(address token, uint256 amount) external view returns (uint256) {
-        address feed = feeds[token];
-        require(feed != address(0), "no feed");
+    function lockConfiguration() external onlyOwner {
+        require(!configurationLocked, "ORACLE_CONFIGURATION_LOCKED");
+        require(feeds[address(0)] != address(0), "FEED_NOT_SET");
+        configurationLocked = true;
+        emit ConfigurationLocked(feeds[address(0)]);
+    }
 
-        AggregatorV3Interface aggregator = AggregatorV3Interface(feed);
-        (, int256 price, , , ) = aggregator.latestRoundData();
-        require(price > 0, "bad price");
+    function latestEthQuote(uint256 amountWei) external view returns (uint256 costUsd6, uint80 roundId, int256 answer, uint256 updatedAt, uint8 decimals) {
+        (roundId, answer, updatedAt, decimals) = _quote();
+        costUsd6 = Math.mulDiv(amountWei, uint256(answer), 10 ** (12 + uint256(decimals)), Math.Rounding.Ceil);
+    }
 
-        uint8 feedDecimals = aggregator.decimals();
-        uint8 td = tokenDecimals[token];
+    // Legacy read-only USD8 accessor; payment authorization uses latestEthQuote USD6.
+    function getUsdValue(address token, uint256 amount) external view returns (uint256 valueUsd8) {
+        require(token == address(0), "NATIVE_ETH_ONLY");
+        (, int256 answer, , uint8 decimals_) = _quote();
+        return Math.mulDiv(amount, uint256(answer), 10 ** (10 + uint256(decimals_)), Math.Rounding.Ceil);
+    }
 
-        // value(8-dec USD) = amount * price * 1e8 / (10^tokenDecimals * 10^feedDecimals)
-        return (amount * uint256(price) * 1e8) / (10 ** uint256(td) * 10 ** uint256(feedDecimals));
+    function _quote() internal view returns (uint80 roundId, int256 answer, uint256 updatedAt, uint8 decimals_) {
+        require(configurationLocked, "ORACLE_NOT_LOCKED");
+        AggregatorV3Interface feed = AggregatorV3Interface(feeds[address(0)]);
+        uint80 answeredInRound;
+        (roundId, answer, , updatedAt, answeredInRound) = feed.latestRoundData();
+        require(answer > 0, "ORACLE_BAD_ANSWER");
+        require(roundId > 0 && answeredInRound >= roundId, "ORACLE_INCOMPLETE_ROUND");
+        require(updatedAt > 0 && updatedAt <= block.timestamp, "ORACLE_BAD_TIMESTAMP");
+        decimals_ = feed.decimals();
+        require(decimals_ == _feedDecimals, "ORACLE_DECIMALS_CHANGED");
     }
 }

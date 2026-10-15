@@ -4,11 +4,9 @@ pragma solidity ^0.8.24;
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
 /// @title AegisAttestation
-/// @notice On-chain, append-only audit trail of every AI agent action.
-/// @dev Each record stores a hash of the canonical intent plus a URI pointing to
-///      full parameters (IPFS / calldata blob), a risk flag and a human approval
-///      flag. Records are never deleted, which is the core of the verifiable-AI
-///      guarantee: any executed action can be reconstructed and attributed.
+/// @notice Action records written by the wallet, with mutable approval metadata.
+/// @dev Execution is proven by the wallet's NativeTransferExecuted event, not by
+///      the approved flag alone. The owner remains the trusted role administrator.
 contract AegisAttestation is AccessControl {
     bytes32 public constant ATTESTER_ROLE = keccak256("ATTESTER_ROLE");
     bytes32 public constant APPROVER_ROLE = keccak256("APPROVER_ROLE");
@@ -30,9 +28,9 @@ contract AegisAttestation is AccessControl {
     event Attested(uint64 indexed id, address indexed actor, bytes32 actionHash, bool riskFlag, bool approved);
     event ApprovalUpdated(uint64 indexed id, bool approved);
 
-    constructor(address admin, address agent) {
+    constructor(address admin, address /* agent */) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
-        _grantRole(ATTESTER_ROLE, agent);
+        // Deployment grants ATTESTER_ROLE to the wallet, never the raw agent key.
         _grantRole(APPROVER_ROLE, admin);
     }
 

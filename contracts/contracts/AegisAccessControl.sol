@@ -4,10 +4,9 @@ pragma solidity ^0.8.24;
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
 /// @title AegisAccessControl
-/// @notice Permission tiers and per-agent auto-execution limits for AegisAgent.
-/// @dev Tiers are intentionally conservative: the default agent starts at LowRisk
-///      with a hard per-transaction ceiling, and anything above it is forced into
-///      an on-chain human approval flow.
+/// @notice Permission tiers for AegisAgent. The wallet enforces USD6 limits.
+/// @dev autoLimit/canAutoExecute are retained for ABI compatibility only; native
+///      payments never use the legacy raw-token limit for authorization.
 contract AegisAccessControl is AccessControl {
     bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE");
     bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE");

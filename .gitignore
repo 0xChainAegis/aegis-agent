@@ -24,3 +24,13 @@ Thumbs.db
 .vscode/
 coverage/
 coverage.json
+
+# local runtime and test output
+backend/data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+playwright-report/
+test-results/
+contracts/deployments/localhost.json
+contracts/deployments/hardhat.json
