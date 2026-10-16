@@ -20,13 +20,13 @@
 
 ## 真实命令与结果（本机）
 
-环境：node **v22.23.3**、npm 10.9.9。注意：根 `package.json` 声明 `engines >=24`，本机 npm ci 与全部合约测试仍然通过；建议在 Node 24 环境复核一次。
+环境：**node v24.22.0 / npm 11.19.1**（本地独立安装在 `D:\黑客松\.node24`，未改系统 PATH；用于复核仓库声明的 `engines >=24`）。同一套命令也在 node v22.23.3 / npm 10.9.9 上跑过，两边结果一致。
 
 - `npm ci --ignore-scripts` → added 466 packages
-- `npm run compile` → Compiled 26 Solidity files successfully（本地 pinned solc 0.8.24）
+- `npm exec --workspace contracts -- hardhat compile --force`（Node 24）→ Compiled 26 Solidity files successfully（本地 pinned solc 0.8.24）
 - `npm exec --workspace contracts -- hardhat test test/AegisPriceOracle.test.js` → **2 passing**
 - `npm exec --workspace contracts -- hardhat test test/AegisWallet.boundaries.test.js` → **3 passing**
-- `npm run test:contracts` → **24 passing**（原有 19 项无回归 + 新增 5 项）
+- `npm run test:contracts` → **24 passing**（原有 19 项无回归 + 新增 5 项；Node 24 与 Node 22 均通过）
 - `git diff --check` → 通过（无空白问题）
 
 ## 对应任务书的边界
@@ -44,7 +44,6 @@
 
 - Sepolia 真实 Feed、公网部署与交易（本日范围外，有意未做）。
 - 后端/前端对这两种审批失败的 UI 呈现与恢复提示（本日不跨目录修改）。
-- Node 24 环境复跑（本机只有 v22.23.3）。
 
 ## 给 purple sun 的交接
 
