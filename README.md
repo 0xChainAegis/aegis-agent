@@ -93,6 +93,8 @@ RPC、合约、Feed 或执行账户未就绪时，页面应显示原因；服务
 
 ## 开发与验证
 
+三位参赛者可先看[产品手册](docs/PRODUCT-MANUAL.md)统一用户、Gas 补给场景和体验，再按[参赛协作手册](docs/PARTICIPANT-HANDBOOK.md)分工、验收和集成。其中多运行钱包档案、准备金下限与目标差额是后续产品建议，不是当前已实现能力。[英文 Claude 交接包](docs/CLAUDE-HANDOFF.en.md)用于同一基线的只读产品与界面审阅。
+
 ```bash
 npm run typecheck
 npm run build
