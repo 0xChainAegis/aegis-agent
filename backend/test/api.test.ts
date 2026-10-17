@@ -25,6 +25,9 @@ function config(dbPath = ':memory:'): Config {
 class FakeChain implements Gateway {
   preparations = 0; broadcasts = 0; mined = false; queue = false; missingEvent = false;
   timeoutAfterBroadcast = false; unavailable = false; policyChanged = false;
+  ownerOutcome: 'approve' | 'cancel' | null = null;
+  ownerObservedRevert = false;
+  ownerOutcomeChecks = 0;
   autoMine = true;
   beforeBroadcast?: (raw: Hex) => void;
   readonly raw = toHex('signed transaction fixture');
@@ -51,8 +54,24 @@ class FakeChain implements Gateway {
   async outcome(task: Task, hash: Hex, role: 'request' | 'approve' | 'cancel'): Promise<Outcome | null> {
     if (!this.mined) return null;
     if (role !== 'request' && hash !== keccak256(toHex('owner tx'))) throw new ApiError(422, 'TX_BINDING_MISMATCH', 'Not the owner transaction');
+    if (role !== 'request' && this.ownerObservedRevert) {
+      return { status: 'FAILED', transaction: { role, hash, receiptStatus: 0, blockNumber: '3', blockHash, finality: 'mined' }, reasonCode: 'TX_REVERTED' };
+    }
     const event = this.missingEvent ? undefined : role === 'cancel' ? 'NativeTransferCancelled' : this.queue && role === 'request' ? 'NativeTransferQueued' : 'NativeTransferExecuted';
     return { status: this.missingEvent ? 'FAILED' : role === 'cancel' ? 'CANCELLED' : this.queue && role === 'request' ? 'AWAITING_APPROVAL' : 'EXECUTED', transaction: { role, hash, receiptStatus: 1, event, blockNumber: '2', blockHash, finality: 'mined' }, attestationId: '1', reasonCode: this.missingEvent ? 'EXPECTED_EVENT_MISSING' : undefined, eventData: event ? { requestHash: task.requestHash!, amountWei: task.amountWei } : undefined };
+  }
+  async findOwnerOutcome(task: Task): Promise<Outcome | null> {
+    this.ownerOutcomeChecks++;
+    if (!this.ownerOutcome) return null;
+    const action = this.ownerOutcome === 'cancel' ? 'cancel' : 'approve';
+    const hash = keccak256(toHex(`discovered owner ${this.ownerOutcome}`));
+    const event = action === 'cancel' ? 'NativeTransferCancelled' : 'NativeTransferExecuted';
+    return {
+      status: action === 'cancel' ? 'CANCELLED' : 'EXECUTED',
+      transaction: { role: action, hash, receiptStatus: 1, event, blockNumber: '3', blockHash, finality: 'mined' },
+      attestationId: task.attestationId ?? '1',
+      eventData: { requestHash: task.requestHash!, amountWei: task.amountWei },
+    };
   }
   ownerTx(task: Task, action: 'approve' | 'cancel') { return { to: wallet, data: '0x1234' as Hex, value: '0', from: owner.address, chainId: 31337, action }; }
 }
@@ -63,9 +82,16 @@ async function setup(options: { dbPath?: string; chain?: FakeChain; cfg?: Config
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as { port: number }).port;
   let token: string | undefined;
-  async function call(path: string, method = 'GET', body?: unknown, key = 'test-key-0001', authorization = token) {
-    const response = await fetch(`http://127.0.0.1:${port}/api/v1${path}`, { method, headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(authorization ? { Authorization: `Bearer ${authorization}` } : {}), 'Idempotency-Key': key }, body: body === undefined ? undefined : JSON.stringify(body) });
+  async function call(path: string, method = 'GET', body?: unknown, key: string | null = 'test-key-0001', authorization = token) {
+    const response = await fetch(`http://127.0.0.1:${port}/api/v1${path}`, { method, headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(authorization ? { Authorization: `Bearer ${authorization}` } : {}), ...(key ? { 'Idempotency-Key': key } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: response.status, body: await response.json() as Record<string, any>, replay: response.headers.get('idempotency-replayed') };
+  }
+  async function rawCall(path: string, init: RequestInit, authorization: string | null | undefined = token) {
+    const response = await fetch(`http://127.0.0.1:${port}/api/v1${path}`, {
+      ...init,
+      headers: { ...(init.headers ?? {}), ...(authorization ? { Authorization: `Bearer ${authorization}` } : {}) },
+    });
+    return { status: response.status, body: await response.json() as Record<string, any> };
   }
   async function login() {
     const challenge = await call('/auth/challenge', 'POST', { address: owner.address, chainId: 31337 });
@@ -74,15 +100,15 @@ async function setup(options: { dbPath?: string; chain?: FakeChain; cfg?: Config
     assert.equal(verified.status, 200); token = verified.body.token;
     return { challenge, signature, verified };
   }
-  async function draftAndSubmit() {
-    const draft = await call('/intents', 'POST', { recipient, amountWei: '1000000000000000' }, 'create-pay-0001');
-    const preview = await call(`/intents/${draft.body.draftId}/preview`, 'POST', { expectedRevision: 1 }, 'preview-pay-0001');
-    const submit = await call(`/intents/${draft.body.draftId}/submit`, 'POST', { expectedRevision: 1, quoteId: preview.body.quoteId }, 'submit-pay-0001');
+  async function draftAndSubmit(suffix = 'pay-0001', amountWei = '1000000000000000') {
+    const draft = await call('/intents', 'POST', { recipient, amountWei }, `create-${suffix}`);
+    const preview = await call(`/intents/${draft.body.draftId}/preview`, 'POST', { expectedRevision: 1 }, `preview-${suffix}`);
+    const submit = await call(`/intents/${draft.body.draftId}/submit`, 'POST', { expectedRevision: 1, quoteId: preview.body.quoteId }, `submit-${suffix}`);
     assert.equal(submit.status, 202);
     return { draft, preview, submit };
   }
   async function close() { await new Promise<void>(resolve => server.close(() => resolve())); store.close(); }
-  return { cfg, store, chain, service, call, login, draftAndSubmit, close };
+  return { cfg, store, chain, service, call, rawCall, login, draftAndSubmit, close };
 }
 
 test('owner login uses real signatures, one-time challenge, chain binding, and protected HTTP routes', async () => {
@@ -153,6 +179,108 @@ test('accepted broadcast followed by timeout survives SQLite restart without re-
     assert.equal(task.body.status, 'EXECUTED'); assert.equal(chain.preparations, 1); assert.equal(chain.broadcasts, 1);
   } finally { await second.close(); rmSync(directory, { recursive: true, force: true }); }
 });
+test('a transaction persisted before broadcast is reused after service reconstruction and blocks the next nonce', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'aegis-prebroadcast-recovery-')); const path = join(directory, 'state.sqlite');
+  const chain = new FakeChain(); chain.autoMine = false;
+  const first = await setup({ dbPath: path, chain });
+  let firstTaskId: string; let secondTaskId: string; let persisted: ReturnType<typeof first.service.getTask>;
+  try {
+    await first.login();
+    firstTaskId = (await first.draftAndSubmit('first-payment-0001')).submit.body.taskId;
+    secondTaskId = (await first.draftAndSubmit('second-payment-001', '2')).submit.body.taskId;
+
+    const put = first.store.put.bind(first.store);
+    first.store.put = ((kind: string, id: string, taskOwner: string, payload: unknown) => {
+      put(kind, id, taskOwner, payload);
+      if (kind === 'task' && payload && typeof payload === 'object' && 'rawTransaction' in payload) {
+        throw new Error('injected stop after signed transaction persistence');
+      }
+    }) as Store['put'];
+
+    await assert.rejects(first.service.tick(), /injected stop after signed transaction persistence/);
+    persisted = first.service.getTask(owner.address, firstTaskId);
+    assert.equal(chain.preparations, 1); assert.equal(chain.broadcasts, 0);
+    assert.equal(persisted.rawTransaction, chain.raw); assert.equal(persisted.txHash, chain.hash);
+    assert.equal(persisted.senderNonce, '0'); assert.equal(persisted.requestNonce, '0');
+    assert.equal(persisted.requestHash, keccak256(toHex('bound intent')));
+    assert.equal(first.service.getTask(owner.address, secondTaskId).rawTransaction, undefined);
+  } finally { await first.close(); }
+
+  const second = await setup({ dbPath: path, chain });
+  try {
+    await second.login();
+    const recovered = second.service.getTask(owner.address, firstTaskId!);
+    assert.equal(recovered.rawTransaction, persisted!.rawTransaction);
+    assert.equal(recovered.txHash, persisted!.txHash);
+    assert.equal(recovered.senderNonce, persisted!.senderNonce);
+    assert.equal(recovered.requestNonce, persisted!.requestNonce);
+    assert.equal(recovered.requestHash, persisted!.requestHash);
+    assert.equal(second.store.list<Task>('task', owner.address).length, 2);
+
+    await second.service.tick();
+    assert.equal(chain.preparations, 1); assert.equal(chain.broadcasts, 1);
+    assert.equal(second.service.getTask(owner.address, firstTaskId!).status, 'BROADCAST');
+    assert.equal(second.service.getTask(owner.address, secondTaskId!).rawTransaction, undefined);
+
+    chain.mined = true;
+    await second.service.tick();
+    assert.equal(second.service.getTask(owner.address, firstTaskId!).status, 'EXECUTED');
+    assert.equal(chain.preparations, 1); assert.equal(chain.broadcasts, 1);
+  } finally { await second.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+test('owner outcomes discovered after restart complete or retain queued tasks without another agent payment', async t => {
+  for (const scenario of [
+    { outcome: 'approve' as const, expected: 'EXECUTED' },
+    { outcome: 'cancel' as const, expected: 'CANCELLED' },
+    { outcome: null, expected: 'AWAITING_APPROVAL' },
+  ]) {
+    await t.test(scenario.outcome ?? 'owner transaction not mined', async () => {
+      const directory = mkdtempSync(join(tmpdir(), 'aegis-owner-recovery-')); const path = join(directory, 'state.sqlite');
+      const chain = new FakeChain(); chain.queue = true;
+      const first = await setup({ dbPath: path, chain }); let taskId: string;
+      try {
+        await first.login(); taskId = (await first.draftAndSubmit()).submit.body.taskId;
+        await first.service.tick(); await first.service.tick();
+        const queued = first.service.getTask(owner.address, taskId);
+        assert.equal(queued.status, 'AWAITING_APPROVAL'); assert.equal(queued.ownerObserved, undefined);
+      } finally { await first.close(); }
+
+      chain.ownerOutcome = scenario.outcome;
+      const second = await setup({ dbPath: path, chain });
+      try {
+        await second.login(); await second.service.tick();
+        const recovered = second.service.getTask(owner.address, taskId!);
+        assert.equal(recovered.status, scenario.expected);
+        assert.equal(chain.preparations, 1); assert.equal(chain.broadcasts, 1);
+        await second.service.tick();
+        assert.equal(chain.preparations, 1); assert.equal(chain.broadcasts, 1);
+      } finally { await second.close(); rmSync(directory, { recursive: true, force: true }); }
+    });
+  }
+});
+test('a reported owner transaction that later reverts stays queued after restart', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'aegis-owner-revert-')); const path = join(directory, 'state.sqlite');
+  const chain = new FakeChain(); chain.queue = true;
+  const first = await setup({ dbPath: path, chain }); let taskId: string;
+  try {
+    await first.login(); taskId = (await first.draftAndSubmit()).submit.body.taskId;
+    await first.service.tick(); await first.service.tick();
+    chain.mined = false;
+    const pending = await first.service.observed(owner.address, taskId, keccak256(toHex('owner tx')), 'approve');
+    assert.equal(pending.status, 'AWAITING_APPROVAL'); assert.ok(pending.ownerObserved);
+  } finally { await first.close(); }
+
+  chain.mined = true; chain.ownerObservedRevert = true;
+  const second = await setup({ dbPath: path, chain });
+  try {
+    await second.login(); await second.service.tick();
+    const recovered = second.service.getTask(owner.address, taskId!);
+    assert.equal(recovered.status, 'AWAITING_APPROVAL');
+    assert.equal(recovered.lastError?.code, 'TX_REVERTED');
+    assert.equal(recovered.ownerObserved, undefined);
+    assert.equal(chain.preparations, 1); assert.equal(chain.broadcasts, 1);
+  } finally { await second.close(); rmSync(directory, { recursive: true, force: true }); }
+});
 test('receipt success without the expected business event is not a successful payment', async () => {
   const chain = new FakeChain(); chain.missingEvent = true; const app = await setup({ chain });
   try {
@@ -199,5 +327,44 @@ test('an unresolved agent transaction blocks another nonce allocation and expire
     assert.equal(chain.preparations, 1); assert.equal(chain.broadcasts, 1);
     assert.equal((await app.call(`/tasks/${first.submit.body.taskId}`)).body.status, 'BROADCAST');
     assert.equal((await app.call(`/tasks/${second.body.taskId}`)).body.status, 'SUBMITTING');
+  } finally { await app.close(); }
+});
+test('HTTP boundaries reject malformed or unauthorized writes and never expose signing material', async () => {
+  const cfg = config(); cfg.rpcUrl = 'http://rpc-user:rpc-password@127.0.0.1:8545';
+  const chain = new FakeChain(); chain.autoMine = false;
+  const app = await setup({ cfg, chain });
+  try {
+    const unauthorized = await app.rawCall('/intents', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'unauthorized-0001' },
+      body: JSON.stringify({ recipient, amountWei: '1' }),
+    }, null);
+    assert.equal(unauthorized.status, 401); assert.equal(app.store.list<Task>('task').length, 0);
+
+    const { verified } = await app.login();
+    const missingKey = await app.call('/intents', 'POST', { recipient, amountWei: '1' }, null);
+    assert.equal(missingKey.status, 400); assert.equal(missingKey.body.error.code, 'IDEMPOTENCY_KEY_REQUIRED');
+    const invalidKey = await app.call('/intents', 'POST', { recipient, amountWei: '1' }, 'bad key');
+    assert.equal(invalidKey.status, 400); assert.equal(invalidKey.body.error.code, 'IDEMPOTENCY_KEY_REQUIRED');
+
+    const invalidJson = await app.rawCall('/intents', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'invalid-json-0001' }, body: '{',
+    });
+    assert.equal(invalidJson.status, 400); assert.equal(invalidJson.body.error.code, 'INVALID_JSON');
+    const unknownField = await app.call('/intents', 'POST', { recipient, amountWei: '1', skipApproval: true }, 'unknown-field-01');
+    assert.equal(unknownField.status, 400); assert.equal(unknownField.body.error.code, 'INVALID_REQUEST');
+    assert.equal(app.store.list<Task>('task').length, 0);
+
+    const { submit } = await app.draftAndSubmit(); await app.service.tick();
+    const configResponse = await app.rawCall('/config', { method: 'GET' }, null);
+    const list = await app.call('/tasks');
+    const detail = await app.call(`/tasks/${submit.body.taskId}`);
+    const evidence = await app.call(`/tasks/${submit.body.taskId}/evidence`);
+    assert.equal(configResponse.body.rpcUrl, null);
+    for (const response of [configResponse, list, detail, evidence, unknownField]) {
+      const payload = JSON.stringify(response.body);
+      assert.equal(payload.includes(chain.raw), false);
+      assert.equal(payload.includes(LOCAL_AGENT_KEY), false);
+      assert.equal(payload.includes(verified.body.token), false);
+    }
   } finally { await app.close(); }
 });
