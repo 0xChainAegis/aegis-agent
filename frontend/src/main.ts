@@ -2,6 +2,7 @@ import { decodeFunctionData, formatEther, formatUnits, isAddress, parseAbi, pars
 import { api, ApiError, hasSession, setToken, type Data } from './api';
 import { connectWallet, disconnectProvider, localWalletAvailable, sendOwnerTransaction } from './wallet';
 import { icon } from './icons';
+import { bindingFromConfig, loadSettings, observationFromSnapshot, parseSettings, sameBinding, saveSettings, storageKey, suggestTopUp, suggestionKey, type ReserveBinding, type ReserveObservation, type Suggestion } from './reserve';
 import './style.css';
 
 type View = 'overview' | 'operations' | 'approvals' | 'verification' | 'settings';
@@ -37,7 +38,14 @@ const state = {
   ownerReview: null as { tx: Data; task: Data; action: 'approve' | 'cancel' } | null,
   localWalletConfirm: false,
   walletKind: sessionStorage.getItem('aegis.wallet-kind') || '',
+  walletError: '',
+  reserve: {
+    bindingKey: '', threshold: '', target: '', lastTaskId: '',
+    notice: null as { text: string; key: string } | null,
+    draft: null as ReserveDraft | null,
+  },
 };
+interface ReserveDraft { draftId: string; recipient: string; topUpWei: string; balanceWei: string; thresholdWei: string; targetWei: string; blockNumber: string; observedAt: string }
 
 const nav: [View, string, string, string][] = [
   ['overview', 'grid', '总览', 'Overview'],
@@ -142,7 +150,7 @@ function operationsView(): string {
   if (state.filter === 'completed') list = list.filter(t => column(t) === 'done');
   if (state.query) list = list.filter(t => JSON.stringify(t).toLowerCase().includes(state.query.toLowerCase()));
   return `<section class="page-heading"><div><div class="eyebrow">${isApproval ? 'OWNER APPROVAL' : 'WALLET WORKSPACE'}</div><h1>${title}</h1><p>${isApproval ? '逐项核对收款地址与金额，使用 Owner 钱包签名。' : '提出操作，检查预算，在需要时保留你的最终决定。'}</p></div><button class="button subtle" data-action="refresh">${icon('refresh')}刷新状态</button></section>
-    ${state.view === 'overview' ? metrics() : ''}
+    ${state.view === 'overview' ? metrics() + reserveCard() : ''}
     <section class="operations-section"><div class="section-toolbar"><div class="view-tabs" role="tablist" aria-label="操作筛选">${[['all', isApproval ? '待审批' : '全部操作'], ['active', '进行中'], ['completed', '已完成']].map(([key, label]) => `<button class="view-tab ${state.filter === key ? 'selected' : ''}" data-filter="${key}" role="tab" aria-selected="${state.filter === key}">${label}${key === 'all' ? `<span>${list.length}</span>` : ''}</button>`).join('')}</div><div class="toolbar-right"><label class="search-field">${icon('search')}<input id="task-search" type="search" aria-label="搜索操作" placeholder="搜索操作或地址" value="${esc(state.query)}" /></label><span class="toolbar-pill">${icon('layers')}看板</span></div></div>
     ${isApproval ? `<div class="approval-grid">${list.length ? list.map(t => taskCard(t)).join('') : emptyState('approve', '暂时没有待审批操作', '超过自动额度的请求会在这里等待 Owner。')}</div>` : `<div class="board" data-testid="operations-board">${columns.map(([key, label, color]) => { const tasks = list.filter(t => column(t) === key); return `<section class="board-column ${key}" aria-label="${label}"><div class="column-heading"><span class="column-status ${color}"></span><h2>${label}</h2><span class="column-count">${tasks.length}</span>${key === 'draft' ? `<button class="icon-button" data-action="new-operation" aria-label="新建操作">${icon('plus')}</button>` : `<span class="column-more">···</span>`}</div><div class="column-cards">${tasks.length ? tasks.map(t => taskCard(t)).join('') : `<div class="column-empty">${icon(key === 'done' ? 'check' : key === 'approval' ? 'clock' : 'layers')}<span>${key === 'draft' ? '从下方开始一笔操作' : key === 'approval' ? '无需你处理' : '暂无操作'}</span></div>`}</div></section>`; }).join('')}</div>`}</section>`;
 }
@@ -155,10 +163,140 @@ function metrics(): string {
   const remaining = get(budget, 'remainingUsd6', 'remainingDailyUsd6');
   const oracle = object(get(state.wallet, 'oracle') || state.quote);
   const ratio = spent !== undefined && limit !== undefined && Number(limit) > 0 ? Math.min(100, Math.max(0, Number(spent) / Number(limit) * 100)) : 0;
-  return `<section class="metrics" aria-label="实际钱包概况"><article class="metric-card balance-card"><div class="metric-label">${icon('wallet')}钱包余额<span>ETH</span></div><div class="metric-value" data-testid="wallet-balance">${balance !== undefined ? eth(balance) : '—'}<small> ETH</small></div><div class="metric-footer"><span class="mono">${short(walletAddress(), 7)}</span><button class="icon-button small" data-copy="${esc(walletAddress())}" aria-label="复制钱包合约地址">${icon('copy')}</button><span class="live-label">${state.wallet ? '链上余额' : connected() ? '读取中' : '连接后读取'}</span></div></article>
+  return `<section class="metrics" aria-label="实际钱包概况"><article class="metric-card balance-card"><div class="metric-label">${icon('wallet')}钱包余额<span>ETH</span></div><div class="metric-value" data-testid="wallet-balance">${balance !== undefined ? eth(balance) : '—'}<small> ETH</small></div><div class="metric-footer"><span class="mono">${short(walletAddress(), 7)}</span><button class="icon-button small" data-copy="${esc(walletAddress())}" aria-label="复制钱包合约地址">${icon('copy')}</button><span class="live-label">${state.wallet ? '链上余额' : state.walletError ? '读取失败' : connected() ? '读取中' : '连接后读取'}</span></div></article>
     <article class="metric-card"><div class="metric-label">${icon('activity')}今日美元预算<span>UTC</span></div><div class="metric-value">${spent !== undefined ? usd(spent) : '—'}<small> / ${limit !== undefined ? usd(limit) : '—'}</small></div><div class="budget-track"><span style="width:${ratio}%"></span></div><div class="metric-footer muted">${remaining !== undefined ? `剩余 ${usd(remaining)}` : '按执行时价格累计支出'}<span class="push-right">链上约束</span></div></article>
     <article class="metric-card"><div class="metric-label">${icon('approve')}需要你处理</div><div class="metric-value">${state.wallet ? state.tasks.filter(t => column(t) === 'approval').length : '—'}<small> 笔待审批</small></div><div class="metric-footer muted"><span class="status-dot amber"></span>批准不会绕过硬预算</div></article>
     <article class="metric-card"><div class="metric-label">${icon('verify')}价格状态</div><div class="metric-value metric-text">${get(oracle, 'stale') === true ? '已过期' : get(oracle, 'updatedAt', 'updatedAtSeconds') ? '已读取' : get(state.config, 'readiness.feedFresh') === true ? '预检可用' : '等待数据'}<span class="status-dot ${get(oracle, 'stale') === true ? 'red' : get(oracle, 'updatedAt', 'updatedAtSeconds') ? 'green' : 'neutral'}"></span></div><div class="metric-footer muted">${expectedChain() === 31337 ? '本地 Mock Feed · 非公网行情' : get(oracle, 'updatedAt', 'updatedAtSeconds') ? `更新于 ${dateTime(get(oracle, 'updatedAt', 'updatedAtSeconds'))}` : '执行时重查 Chainlink Feed'}</div></article></section>`;
+}
+
+// ---- Gas reserve for the single configured operating wallet (browser-local recommendation) ----
+type ReserveKind = 'locked' | 'loading' | 'unavailable' | 'unset' | 'invalid' | 'healthy' | 'low';
+interface ReserveModel { kind: ReserveKind; binding: ReserveBinding | null; observation: ReserveObservation | null; suggestion: Suggestion | null; thresholdWei: bigint; targetWei: bigint; key: string; error: string; inflight: Data | null }
+function ethExact(wei: bigint): string { return formatEther(wei); }
+function observedTime(item: string): string { const d = new Date(item); return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
+function reserveTaskKey(binding: ReserveBinding): string { return `${storageKey(binding)}.last-task`; }
+function syncReserveSettings() {
+  const binding = bindingFromConfig(state.config);
+  const key = binding ? storageKey(binding) : '';
+  if (key === state.reserve.bindingKey) return;
+  state.reserve.bindingKey = key; state.reserve.notice = null; state.reserve.draft = null;
+  const saved = binding ? loadSettings(binding) : { threshold: '', target: '' };
+  state.reserve.threshold = saved.threshold; state.reserve.target = saved.target;
+  try { state.reserve.lastTaskId = binding ? sessionStorage.getItem(reserveTaskKey(binding)) || '' : ''; } catch { state.reserve.lastTaskId = ''; }
+}
+/** Any submitted, not yet final task to the operating wallet blocks a new suggestion from being prepared. */
+function inflightTopUp(tasks: Data[], recipient: string): Data | null {
+  return tasks.find(t => !t._draft && taskRecipient(t).toLowerCase() === recipient && ['ready', 'approval'].includes(column(t))) || null;
+}
+function reserveModel(): ReserveModel {
+  const binding = bindingFromConfig(state.config);
+  const base: ReserveModel = { kind: 'loading', binding, observation: null, suggestion: null, thresholdWei: 0n, targetWei: 0n, key: '', error: '', inflight: null };
+  if (!connected()) return { ...base, kind: 'locked' };
+  if (!state.online) return { ...base, kind: 'unavailable', error: '服务离线，无法读取运行钱包余额。' };
+  if (!binding || !validConfig()) return { ...base, kind: 'unavailable', error: '服务配置缺少网络、金库或运行钱包地址，或链上未就绪。' };
+  if (state.walletError) return { ...base, kind: 'unavailable', error: `无法读取链上余额：${state.walletError}` };
+  if (!state.wallet) return base;
+  const observed = observationFromSnapshot(state.wallet, binding);
+  if (!observed.ok) return { ...base, kind: 'unavailable', error: observed.error };
+  const settings = parseSettings(state.reserve.threshold, state.reserve.target);
+  const inflight = inflightTopUp(state.tasks, binding.recipient);
+  if (!settings.ok) return { ...base, observation: observed.observation, inflight, kind: settings.empty ? 'unset' : 'invalid', error: settings.error };
+  const suggestion = suggestTopUp(observed.observation.balanceWei, settings.thresholdWei, settings.targetWei);
+  return { ...base, kind: suggestion.kind, observation: observed.observation, suggestion, inflight, thresholdWei: settings.thresholdWei, targetWei: settings.targetWei, key: suggestionKey(binding, observed.observation.balanceWei, settings.thresholdWei, settings.targetWei, suggestion.topUpWei) };
+}
+function reserveCard(): string {
+  const m = reserveModel();
+  const labels: Record<ReserveKind, [string, string]> = { locked: ['连接后读取', ''], loading: ['读取中', ''], unavailable: ['无法判断', 'blocked'], unset: ['未设置', ''], invalid: ['设置无效', 'blocked'], healthy: ['未低于下限', 'green'], low: ['低于你设置的下限', 'approval'] };
+  const [label, tone] = labels[m.kind];
+  const recipient = m.binding ? value(state.config, 'recipientAddress') : '';
+  const o = m.observation;
+  const budget = object(get(state.wallet, 'budget'));
+  const policy = (key: string) => get(budget, key) !== undefined ? usd(get(budget, key)) : '—';
+  const lastTask = state.reserve.lastTaskId ? state.tasks.find(t => id(t) === state.reserve.lastTaskId) : undefined;
+  const notice = state.reserve.notice && state.reserve.notice.key === m.key ? state.reserve.notice.text : '';
+  let result = '';
+  if (m.kind === 'locked') result = `<p class="reserve-message">连接 Owner 钱包并签名登录后读取运行钱包余额。</p>`;
+  else if (m.kind === 'loading') result = `<p class="reserve-message"><span class="spinner"></span>正在读取链上余额…</p>`;
+  else if (m.kind === 'unavailable') result = `<p class="reserve-message error-text" data-testid="reserve-error">${icon('info')}${esc(m.error)}</p><p class="reserve-caveat">余额未知时不按 0 处理，也不会提示准备金不足或准备付款。</p>`;
+  else if (m.kind === 'unset' || m.kind === 'invalid') result = `<p class="reserve-message ${m.kind === 'invalid' ? 'error-text' : ''}" data-testid="reserve-error">${icon('info')}${esc(m.error)}</p>`;
+  else if (m.kind === 'healthy') result = `<p class="reserve-message" data-testid="reserve-healthy">${icon('check')}当前余额未低于你设置的下限 ${esc(ethExact(m.thresholdWei))} ETH，暂无补给建议。</p>`;
+  else if (m.kind === 'low' && m.suggestion) {
+    const blocked = Boolean(m.inflight) || disabled();
+    result = `<div class="reserve-suggestion"><span>建议补给（本金）</span><strong data-testid="reserve-suggestion">${esc(ethExact(m.suggestion.topUpWei))}<small> ETH</small></strong><span class="mono">= 目标 ${esc(ethExact(m.targetWei))} − 当前 ${esc(ethExact(o!.balanceWei))}</span></div>
+      <p class="reserve-caveat">只表示余额低于你自己设置的下限，不证明某个任务一定会失败，也不预测还能执行多少笔交易。美元成本与是否需要审批以下一步的预览为准。</p>
+      ${notice ? `<div class="missing-note" role="alert" data-testid="reserve-review-note">${icon('info')}${esc(notice)}</div>` : ''}
+      ${m.inflight ? `<div class="missing-note" data-testid="reserve-inflight">${icon('clock')}已有进行中的付款 AEG-${esc(id(m.inflight).slice(-6).toUpperCase())}（${esc(statusLabel(m.inflight))}）。请先查看原任务，不要再建一笔。<button class="text-button" data-open-task="${esc(id(m.inflight))}">查看原任务</button></div>` : ''}
+      <button class="button primary" data-action="reserve-prepare" data-testid="reserve-prepare" data-reserve-key="${esc(m.key)}" ${blocked ? 'disabled' : ''}>${state.busy === 'reserve' ? '<span class="spinner"></span>正在重新读取…' : `${icon('arrow')}${notice ? '已核对新金额，准备预览' : '重新读取并准备预览'}`}</button>
+      <p class="reserve-caveat">准备前会重新读取配置与余额；有变化会先请你再次核对。生成预览不会付款，仍需你确认提交。</p>`;
+  }
+  if (notice && m.kind !== 'low') result += `<div class="missing-note" role="status" data-testid="reserve-review-note">${icon('info')}${esc(notice)}</div>`;
+  return `<section class="reserve-card" data-testid="reserve-card" data-state="${m.kind}" aria-label="运行钱包 Gas 准备金">
+    <div class="reserve-head"><div><div class="eyebrow">GAS RESERVE · CONFIGURED OPERATING WALLET</div><h2>运行钱包 Gas 准备金</h2><p>Configured operating wallet：服务配置中唯一的允许收款运行钱包。它不是后台执行账户，也不是金库。</p></div><span class="badge ${tone}" data-testid="reserve-status">${label}</span></div>
+    <div class="reserve-grid">
+      <div class="reserve-facts">
+        <div class="reserve-balance"><span>当前 ETH 准备金</span><strong data-testid="reserve-balance">${o ? esc(ethExact(o.balanceWei)) : '—'}<small> ETH</small></strong></div>
+        ${detailRow('运行钱包', recipient, true)}${detailRow('网络', m.binding ? `${mode()} · Chain ${m.binding.chainId}` : '')}${detailRow('观测', o ? `区块 #${o.blockNumber} · ${short(o.blockHash, 8)} · ${observedTime(o.observedAt)}` : '')}
+      </div>
+      <div class="reserve-settings">
+        <label>准备金下限 · ETH<input id="reserve-threshold" data-testid="reserve-threshold" class="mono" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="例如 0.05" value="${esc(state.reserve.threshold)}" ${!m.binding ? 'disabled' : ''} /></label>
+        <label>目标余额 · ETH<input id="reserve-target" data-testid="reserve-target" class="mono" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="例如 0.1" value="${esc(state.reserve.target)}" ${!m.binding ? 'disabled' : ''} /></label>
+        <p class="reserve-caveat">这是你在本浏览器保存的建议设置，按 Chain ID、金库与运行钱包分开。不是链上策略，不会自动补给。</p>
+      </div>
+      <div class="reserve-result">${result}${lastTask ? `<button class="text-button reserve-last" data-open-task="${esc(id(lastTask))}" data-testid="reserve-last-task">${icon('activity')}最近补给 AEG-${esc(id(lastTask).slice(-6).toUpperCase())} · ${esc(statusLabel(lastTask))}</button>` : ''}</div>
+    </div>
+    <p class="reserve-policy">服务器链上策略（只读，此处不修改）：自动额度 ${policy('autoThresholdUsd6')} · 单笔硬上限 ${policy('hardPerTxUsd6')} · 今日共享预算剩余 ${policy('remainingUsd6')}。这些限制按 ETH/USD Feed 给补给本金计价；Feed 不是 Gas 价格预言机。补款交易本身的网络手续费由执行账户另付，不计入补给数量和美元预算。</p>
+  </section>`;
+}
+function reserveDraftFor(draft: Data | null): ReserveDraft | null {
+  const ctx = state.reserve.draft;
+  return ctx && draft && id(draft) === ctx.draftId && taskAmount(draft) === ctx.topUpWei && taskRecipient(draft).toLowerCase() === ctx.recipient ? ctx : null;
+}
+function reserveDraftSection(draft: Data | null): string {
+  const ctx = reserveDraftFor(draft);
+  if (!ctx) return '';
+  return `<div class="detail-section" data-testid="reserve-draft-context"><h3>Gas 准备金补给</h3>${detailRow('运行钱包', ctx.recipient, true)}${detailRow('观测余额', `${ethExact(BigInt(ctx.balanceWei))} ETH · 区块 #${ctx.blockNumber}`)}${detailRow('你的下限 / 目标', `${ethExact(BigInt(ctx.thresholdWei))} / ${ethExact(BigInt(ctx.targetWei))} ETH`)}${detailRow('补给本金', `${ethExact(BigInt(ctx.topUpWei))} ETH`)}<p class="reserve-caveat">补款交易手续费由执行账户另付。读取余额与付款不是原子操作：若其间运行钱包余额被其他交易改变，到账后不一定恰好等于目标。确认后金额不会被改写。</p></div>`;
+}
+
+async function prepareReserve(shownKey: string) {
+  if (disabled()) return;
+  await run('reserve', async () => {
+    state.reserve.notice = null;
+    const shownBinding = bindingFromConfig(state.config);
+    const freshConfig = await api('/config');
+    const binding = bindingFromConfig(freshConfig);
+    if (!binding || get(freshConfig, 'readiness.ready') !== true || Number(get(freshConfig, 'readiness.rpcChainId')) !== binding.chainId) throw new Error('服务配置或链上就绪状态不完整，已停止准备补给。');
+    state.config = freshConfig;
+    if (!sameBinding(shownBinding, binding)) { state.wallet = null; syncReserveSettings(); throw new Error('网络、金库或运行钱包配置已变化。请等待重新读取余额并核对设置。'); }
+    let snapshot: Data; let taskList: unknown;
+    try { [snapshot, taskList] = await Promise.all([api('/wallets/current'), api<unknown>('/tasks')]); }
+    catch (error) { state.wallet = null; state.walletError = errorMessage(error); throw error; }
+    const tasks = get(taskList, 'tasks');
+    if (Array.isArray(tasks)) state.tasks = tasks as Data[];
+    const observed = observationFromSnapshot(snapshot, binding);
+    if (!observed.ok) { state.wallet = null; state.walletError = observed.error; throw new Error(observed.error); }
+    state.wallet = snapshot; state.walletError = '';
+    const settings = parseSettings(state.reserve.threshold, state.reserve.target);
+    if (!settings.ok) throw new Error(settings.error);
+    const { balanceWei, blockNumber, observedAt } = observed.observation;
+    const suggestion = suggestTopUp(balanceWei, settings.thresholdWei, settings.targetWei);
+    const key = suggestionKey(binding, balanceWei, settings.thresholdWei, settings.targetWei, suggestion.topUpWei);
+    if (suggestion.kind !== 'low') { state.reserve.notice = { key, text: '最新余额已不低于你设置的下限，无需补给。没有创建付款草稿。' }; return; }
+    if (key !== shownKey) { state.reserve.notice = { key, text: `余额或配置已变化，建议补给已更新为 ${ethExact(suggestion.topUpWei)} ETH（区块 #${blockNumber}）。请核对新金额后再准备。` }; return; }
+    const running = inflightTopUp(state.tasks, binding.recipient);
+    if (running) throw new Error(`已有进行中的付款 AEG-${id(running).slice(-6).toUpperCase()}，请先查看原任务。`);
+    const recipient = String(freshConfig.recipientAddress);
+    const amountWei = suggestion.topUpWei.toString();
+    // Always a new draft: never PATCH whichever draft happens to be open.
+    const draft = await api('/intents', 'POST', { recipient, amountWei, purpose: `Gas 准备金补给：补到目标 ${ethExact(settings.targetWei)} ETH` });
+    const missing = get(draft, 'missingFields');
+    if (taskRecipient(draft).toLowerCase() !== binding.recipient || taskAmount(draft) !== amountWei || (Array.isArray(missing) && missing.length)) throw new Error('服务返回的草稿与补给建议不一致，已停止。');
+    const quote = await api(`/intents/${encodeURIComponent(id(draft))}/preview`, 'POST', { expectedRevision: get(draft, 'revision', 'version', 'draftVersion') });
+    state.draft = draft; state.quote = quote;
+    state.message = ''; state.recipient = recipient; state.amount = formatEther(suggestion.topUpWei); state.purpose = value(draft, 'purpose');
+    state.reserve.draft = { draftId: id(draft), recipient: binding.recipient, topUpWei: amountWei, balanceWei: balanceWei.toString(), thresholdWei: settings.thresholdWei.toString(), targetWei: settings.targetWei.toString(), blockNumber, observedAt };
+    state.drawer = 'draft';
+    if (value(quote, 'status') === 'BLOCKED') notify(value(quote, 'message', 'reason', 'blockReason') || reasons(quote) || '这笔补给未通过规则检查，尚未发起付款。', true);
+  });
 }
 
 function taskCard(task: Data): string {
@@ -204,7 +342,7 @@ function drawer(): string {
   const s = isDraft && quote ? value(quote, 'status') : status(task);
   const c = isDraft && quote ? column({ status: s }) : column(task);
   const transactions = Array.isArray(task.transactions) ? task.transactions as Data[] : [];
-  return `<div class="drawer-backdrop" data-action="close-drawer"></div><aside class="drawer" aria-label="操作详情" role="dialog" aria-modal="true"><div class="drawer-header"><span>${icon(isDraft ? 'layers' : 'activity')} ${isDraft ? '确认操作' : '操作详情'}</span><button class="icon-button" data-action="close-drawer" aria-label="关闭详情">${icon('close')}</button></div><div class="drawer-body"><div class="drawer-title"><div class="eyebrow">${isDraft ? 'REVIEW BEFORE SUBMIT' : `AEG-${esc(taskId.slice(-6).toUpperCase())}`}</div><h2>${esc(taskName(task))}</h2><span class="badge ${c}">${isDraft && !quote ? '等待预览' : statusLabel({ status: s })}</span></div><div class="transfer-hero"><span>付款金额</span><strong>${eth(taskAmount(task))}<small> ETH</small></strong>${get(quote, 'costUsd6') !== undefined ? `<span>预计 ${usd(get(quote, 'costUsd6'))} · 执行时重新计价</span>` : ''}</div><div class="detail-section"><h3>付款信息</h3>${detailRow('收款地址', taskRecipient(task), true)}${detailRow('所在网络', `${mode()} · Chain ${expectedChain() || '—'}`)}${detailRow('钱包合约', walletAddress(), true)}${detailRow('任务 ID', taskId, true)}${detailRow('策略版本', value(quote, 'policyVersion') || value(task, 'policyVersion'))}</div>
+  return `<div class="drawer-backdrop" data-action="close-drawer"></div><aside class="drawer" aria-label="操作详情" role="dialog" aria-modal="true"><div class="drawer-header"><span>${icon(isDraft ? 'layers' : 'activity')} ${isDraft ? '确认操作' : '操作详情'}</span><button class="icon-button" data-action="close-drawer" aria-label="关闭详情">${icon('close')}</button></div><div class="drawer-body"><div class="drawer-title"><div class="eyebrow">${isDraft ? 'REVIEW BEFORE SUBMIT' : `AEG-${esc(taskId.slice(-6).toUpperCase())}`}</div><h2>${esc(taskName(task))}</h2><span class="badge ${c}">${isDraft && !quote ? '等待预览' : statusLabel({ status: s })}</span></div><div class="transfer-hero"><span>付款金额</span><strong>${eth(taskAmount(task))}<small> ETH</small></strong>${get(quote, 'costUsd6') !== undefined ? `<span>预计 ${usd(get(quote, 'costUsd6'))} · 执行时重新计价</span>` : ''}</div>${isDraft ? reserveDraftSection(task) : ''}<div class="detail-section"><h3>付款信息</h3>${detailRow('收款地址', taskRecipient(task), true)}${detailRow('所在网络', `${mode()} · Chain ${expectedChain() || '—'}`)}${detailRow('钱包合约', walletAddress(), true)}${detailRow('任务 ID', taskId, true)}${detailRow('策略版本', value(quote, 'policyVersion') || value(task, 'policyVersion'))}</div>
     ${quote && Object.keys(quote).length ? `<div class="detail-section"><h3>规则预检</h3>${detailRow('状态', s === 'READY' ? '已通过预检，提交时仍会重新检查' : value(quote, 'reason', 'message', 'blockReason') || reasons(quote) || s)}${detailRow('美元最高成本', get(quote, 'maxUsdCost6') !== undefined ? usd(get(quote, 'maxUsdCost6')) : '')}${detailRow('报价有效至', dateTime(get(quote, 'quoteExpiresAtSeconds', 'expiresAt')))}${detailRow('授权路径', get(quote, 'requiresApproval') === true || /APPROVAL/.test(value(quote, 'decision', 'path')) ? '需要 Owner 审批' : value(quote, 'decision', 'path') || '以提交后链上结果为准')}</div>` : ''}
     ${taskReason(task) ? `<div class="info-panel error-panel">${icon('info')}<p>${esc(taskReason(task))}</p></div>` : ''}
     ${transactions.length ? `<div class="detail-section"><h3>交易记录</h3>${transactions.map(tx => { const hash = value(tx, 'txHash', 'hash', 'transactionHash'); const link = explorer(hash); return `<div class="transaction-item"><div><span>${esc(value(tx, 'action', 'kind', 'type') || '链上交易')}</span><span>${esc(value(tx, 'status') || '待核对')}</span></div>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener noreferrer" class="mono">${esc(short(hash, 12))}${icon('external')}</a>` : `<span class="mono">${esc(hash || '尚未取得交易哈希')}</span>`}</div>`; }).join('')}</div>` : ''}
@@ -252,15 +390,19 @@ async function refresh(initial = false) {
       for (let index = 0; index < results.length; index++) {
         const result = results[index];
         if (result.status === 'fulfilled') {
-          if (index === 0) state.wallet = object(result.value);
+          if (index === 0) { state.wallet = object(result.value); state.walletError = ''; }
           else { const response = result.value; const list = Array.isArray(response) ? response : get(response, 'tasks', 'items'); if (Array.isArray(list)) state.tasks = list as Data[]; }
-        } else if (result.reason instanceof ApiError && result.reason.status === 401) { state.address = ''; state.wallet = null; state.tasks = []; state.ownerReview = null; state.drawer = ''; sessionStorage.removeItem('aegis.address'); }
-        else if (result.reason instanceof ApiError && result.reason.status === 0) state.online = false;
+        } else {
+          // A failed snapshot is "unavailable", never a stale or zero balance.
+          if (index === 0) { state.wallet = null; state.walletError = errorMessage(result.reason); }
+          if (result.reason instanceof ApiError && result.reason.status === 401) { state.address = ''; state.wallet = null; state.tasks = []; state.ownerReview = null; state.drawer = ''; sessionStorage.removeItem('aegis.address'); }
+          else if (result.reason instanceof ApiError && result.reason.status === 0) state.online = false;
+        }
       }
       if (state.drawer && state.drawer !== 'draft') { try { state.detail = await api(`/tasks/${encodeURIComponent(state.drawer)}`); } catch { /* Retain the last server response while the network recovers. */ } }
     }
   } catch (error) { state.online = false; if (!initial && state.busy) throw error; }
-  finally { state.initialLoading = false; render(); }
+  finally { state.initialLoading = false; syncReserveSettings(); render(); }
 }
 
 async function run(name: string, operation: () => Promise<void>) {
@@ -301,9 +443,13 @@ async function createIntent() {
 async function submitIntent() {
   if (!state.draft || !state.quote || disabled()) return;
   await run('submit', async () => {
+    const reserveContext = reserveDraftFor(state.draft);
     const result = await api(`/intents/${encodeURIComponent(id(state.draft!))}/submit`, 'POST', { expectedRevision: get(state.draft, 'revision', 'version', 'draftVersion'), quoteId: get(state.quote, 'quoteId', 'id') });
     const taskId = value(result, 'taskId', 'id');
     if (!taskId) throw new Error('服务没有返回任务 ID。请查看操作列表，不要重复提交。');
+    const binding = bindingFromConfig(state.config);
+    if (reserveContext && binding) { state.reserve.lastTaskId = taskId; try { sessionStorage.setItem(reserveTaskKey(binding), taskId); } catch { /* Task list still recovers it. */ } }
+    state.reserve.draft = null; state.reserve.notice = null;
     state.draft = null; state.quote = null; state.message = ''; state.recipient = ''; state.amount = ''; state.purpose = '';
     state.drawer = taskId; state.detail = result; state.evidence = null;
     await refresh();
@@ -378,6 +524,13 @@ app.addEventListener('input', event => {
   const input = event.target as HTMLInputElement;
   const fields: Record<string, 'message' | 'recipient' | 'amount' | 'purpose' | 'query'> = { 'intent-message': 'message', recipient: 'recipient', amount: 'amount', purpose: 'purpose', 'task-search': 'query' };
   if (fields[input.id]) { state[fields[input.id]] = input.value; if (input.id === 'task-search') render(); }
+  if (input.id === 'reserve-threshold' || input.id === 'reserve-target') {
+    state.reserve[input.id === 'reserve-threshold' ? 'threshold' : 'target'] = input.value;
+    state.reserve.notice = null;
+    const binding = bindingFromConfig(state.config);
+    if (binding) saveSettings(binding, state.reserve.threshold, state.reserve.target);
+    render();
+  }
 });
 app.addEventListener('keydown', event => { if (event.key === 'Escape' && !state.busy) { state.ownerReview = null; state.localWalletConfirm = false; state.drawer = ''; render(); } if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && (event.target as HTMLElement).id === 'intent-message') { event.preventDefault(); void createIntent(); } });
 app.addEventListener('click', event => {
@@ -397,6 +550,7 @@ app.addEventListener('click', event => {
     case 'confirm-local-wallet': void run('connect', async () => { if (!validConfig() || !localWalletAvailable(state.config)) throw new Error('当前环境不允许本地测试钱包。'); const session = await connectWallet(31337, state.config!); state.address = session.address; state.chainId = session.chainId; state.walletKind = 'local'; sessionStorage.setItem('aegis.wallet-kind', 'local'); sessionStorage.setItem('aegis.address', session.address); state.localWalletConfirm = false; await refresh(); notify('已登录本地公开开发账户，仅用于 Local 测试。'); }); break;
     case 'disconnect': setToken(''); disconnectProvider(); sessionStorage.removeItem('aegis.address'); sessionStorage.removeItem('aegis.wallet-kind'); state.walletKind = ''; state.address = ''; state.wallet = null; state.tasks = []; state.drawer = ''; notify('本次会话已断开。'); break;
     case 'send-intent': void createIntent(); break;
+    case 'reserve-prepare': void prepareReserve(button.dataset.reserveKey || ''); break;
     case 'confirm-transfer': void submitIntent(); break;
     case 'close-drawer': state.drawer = ''; state.ownerReview = null; render(); break;
     case 'edit-draft': state.drawer = ''; state.composerMode = 'manual'; render(); document.getElementById('recipient')?.focus(); break;
