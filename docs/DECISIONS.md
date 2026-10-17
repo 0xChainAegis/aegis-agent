@@ -1,12 +1,15 @@
 # AegisAgent decisions
 
-Updated: 2026-10-15. Read this with the latest code and `docs/HANDOFF.md`.
+Updated: 2026-10-17. Read this with the latest code and `docs/HANDOFF.md`.
+
+Current product direction is recorded in [the October 17 product decision](PRODUCT-DECISION-2026-10-17.md): gas-reserve top-up assistance for agent operating wallets. The existing implementation is the bounded payment core. The first frontend slice uses one real configured recipient; balance thresholds, target suggestions and later multi-wallet profiles remain work to verify, not completed capabilities. Claude owns the assigned frontend task; integration work must not overwrite it.
 
 ## Product and authority
 
-- The product is a constrained native ETH payment wallet. Ordinary ETH payments
-  and topping up an agent's operating wallet share the same payment core. A
-  balance-monitoring top-up adapter is optional; automatic top-up is not an
+- The selected product story is gas-reserve top-up assistance for an agent's
+  operating wallet, using the existing constrained native ETH payment core.
+  The first slice reads one real recipient balance and proposes a top-up for
+  explicit confirmation. Automatic monitoring or automatic top-up is not an
   implemented feature or a prerequisite for the demo.
 - **Owner means the user who controls the on-chain wallet owner address.** Owner
   signs login messages and queued approve/cancel transactions in a wallet. The

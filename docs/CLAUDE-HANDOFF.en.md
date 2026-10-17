@@ -1,5 +1,12 @@
 # AegisAgent product and frontend review handoff
 
+> Archived October 16 review prompt. MIA has already assigned a separate October
+> 17 implementation prompt to Claude Code. Continue that assignment; do not
+> restart this read-only review. The current [product decision](PRODUCT-DECISION-2026-10-17.md)
+> takes precedence over the two-wallet proposal below: first implement one real
+> configured recipient using the existing API, then consider two profiles after
+> the backend/shared schema is agreed. No parallel frontend writer is needed.
+
 Prepared for MIA Ether on 16 October 2026. Copy the instruction block below into Claude. This first assignment is review only. It does not authorize a new competing frontend implementation.
 
 ```text

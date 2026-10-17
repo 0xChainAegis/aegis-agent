@@ -20,7 +20,7 @@ substitute for reading the latest HEAD, PRs and test output.
   recipient/account 2, a $3,000 Mock Feed, $5/$10/$15 policy and a 1 ETH vault.
   `contracts/deployments/localhost.json` is runtime output, not a secret store.
 
-## Verification checkpoint
+## Verification checkpoint — 2026-10-16 baseline
 
 - Contract compilation: **passed**, 26 Solidity files.
 - Contract tests: **19 passed** on the local Hardhat chain.
@@ -66,13 +66,37 @@ substitute for reading the latest HEAD, PRs and test output.
 - Owner keys must remain in the browser wallet. The local agent development key
   is publicly known and allowed only on loopback chain 31337. Never fund it on a
   public chain; configure a distinct human-created Sepolia executor if needed.
-- The top-up story is an optional adapter on the same fixed-payment core. Choose
-  one primary demonstration; do not promise an autonomous monitor before it exists.
+- The October 17 product decision selects gas-reserve top-up assistance on the
+  same fixed-payment core. Claude owns the first one-recipient frontend slice;
+  do not promise an autonomous monitor before it exists.
 - Cross-domain changes need explicit agreement. Do not replace TS with Python,
   alter USD units or expand token/chain scope to finish a daily task.
 - Sepolia readiness and model-provider decisions are human integration work due
   by 10/19. If unverified then, keep the honest local demonstration; block claims
   requiring public proof, cut optional work and tell the Owner what is missing.
+
+## Integration checkpoint — 2026-10-17
+
+PR [#2](https://github.com/0xChainAegis/aegis-agent/pull/2) and
+[#3](https://github.com/0xChainAegis/aegis-agent/pull/3) were combined in an isolated
+worktree based on `a3bd9fbbea94745d1f601852ab21570ffd2ff853`. Both PRs add tests
+and evidence; they do not modify the production payment implementation. The
+integration is intended for `codex/integration-wallet-ui`, not `main`.
+
+On Node 24.19.0 with lockfile-installed dependencies, `npm run check` passed:
+backend/frontend type checks, production builds, 24 contract tests and 26 backend
+test counts (including parent and nested tests). `npm run test:e2e` passed both
+browser tests on a newly started local Hardhat chain, deployment and database.
+The first build attempt hit a Windows sandbox access error; rerunning the same
+code with normal permissions passed. See [the integration report](daily/2026-10-17/integration.md).
+
+These checks do not validate a live LLM, Sepolia, real Chainlink Feed or the new
+Gas preparation UI that Claude is still implementing. Continue that frontend
+assignment on its own branch, preserve its current work, and incorporate the
+latest integration branch before its eventual PR.
+
+The selected user flow and staged scope are in
+[the October 17 product decision](PRODUCT-DECISION-2026-10-17.md).
 
 ## Handoff entry format
 

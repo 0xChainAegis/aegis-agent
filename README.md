@@ -95,6 +95,8 @@ RPC、合约、Feed 或执行账户未就绪时，页面应显示原因；服务
 
 三位参赛者可先看[产品手册](docs/PRODUCT-MANUAL.md)统一用户、Gas 补给场景和体验，再按[参赛协作手册](docs/PARTICIPANT-HANDBOOK.md)分工、验收和集成。其中多运行钱包档案、准备金下限与目标差额是后续产品建议，不是当前已实现能力。[英文 Claude 交接包](docs/CLAUDE-HANDOFF.en.md)用于同一基线的只读产品与界面审阅。
 
+当前开发顺序和页面取舍见[10 月 17 日产品决定](docs/PRODUCT-DECISION-2026-10-17.md)。Claude 已领取的实现任务先完成一个真实运行钱包的 Gas 准备金流程，再协调多个钱包档案。
+
 ```bash
 npm run typecheck
 npm run build
