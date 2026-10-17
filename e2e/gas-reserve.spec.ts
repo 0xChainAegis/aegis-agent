@@ -2,9 +2,9 @@ import {test,expect} from '@playwright/test';
 import {balanceOf,config,eth,login,pausePolling,rpc,setReserve,tasks,trackWrites} from './reserve-helpers';
 
 // Gas-reserve card for the single configured operating wallet (config.recipientAddress).
-// These cases never pay. The one real payment lives in wallet.topup.spec.ts, which sorts
-// after wallet.spec.ts: wallet.spec.ts needs the whole $15 shared daily budget of the fresh
-// chain, and Playwright runs files alphabetically with workers:1.
+// These cases never pay from the treasury. The real reserve payment is in wallet.topup.spec.ts.
+// npm run test:e2e:reserve starts this group with its own fresh chain and SQLite database,
+// independently of the baseline wallet group. No cross-file budget ordering is required.
 
 const MILLI=10n**15n; // 0.001 ETH in wei
 

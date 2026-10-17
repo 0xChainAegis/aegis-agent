@@ -98,6 +98,37 @@ latest integration branch before its eventual PR.
 The selected user flow and staged scope are in
 [the October 17 product decision](PRODUCT-DECISION-2026-10-17.md).
 
+## Gas reserve delivery — 2026-10-17
+
+Claude's bundle (21,515 bytes, SHA-256
+`5566b0c7f8eacdb0fe26a7ebf07a7a6df4ec5a59c29047ddc00501c5272d11cb`)
+contains `ff4ad70` and `0e74045` on top of `a3bd9fb`. It was imported and merged
+with the latest verified integration `413c157` without conflicts, preserving the
+author's commits. The original delivery did not change backend, contracts or
+shared interfaces.
+
+The single configured operating-wallet card now reads a real recipient balance,
+saves scoped browser-local thresholds, computes the exact target difference,
+rechecks before drafting, and uses explicit confirmation and existing task
+evidence. Missing data stays unknown. Amount changes require a second review.
+An existing in-flight task for this recipient blocks another preparation.
+
+Real local integration checks passed on Node 24.19.0: `npm run check` (type checks,
+builds, 24 contract tests and 26 backend test counts), and all six browser cases.
+The integration owner corrected the E2E entry to run the existing wallet group
+and reserve group in separate processes with fresh chains and databases:
+`npm run test:e2e` passed **2 wallet + 4 reserve cases**. It no longer relies on
+file-name ordering to preserve daily-budget headroom. No limits or assertions
+were relaxed. Actual results replace the original NOT RUN delivery table in
+[MIA's report](daily/2026-10-17/mia.md).
+
+These remain local-chain/Mock Feed results. No scheduler, live LLM, real Feed,
+Sepolia payment, multi-wallet registry or cross-browser top-up deduplication is
+established. A future coordinated API change can bind `recipientAddress` directly
+inside the balance snapshot; the current UI relies on the single backend's config.
+Human participants should now try the preparation, confirmation, approval and
+rejection paths themselves, then prioritize one real task and public Feed evidence.
+
 ## Handoff entry format
 
 Append a dated entry or link to a reviewed PR after each task:

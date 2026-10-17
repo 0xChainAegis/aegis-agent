@@ -10,10 +10,10 @@ Output report, not the task instruction file.
 - Task branch: `2026-10-17-mia03ther-aegis-agent`
 - Working copy: a fresh, isolated clone in the agent's cloud sandbox. No existing working copy on MIA's
   computer was opened or changed, so there was no overlap with another agent.
-- Teammate branches checked (`git rev-list` against the base): `purple/1016-recovery-boundaries`,
-  `qi/1016-oracle-approval-regressions`, `qi/1017-direct-call-security-cases` have no commits beyond the
-  base (already merged); `docs/verifiable-policy` only adds `docs/VERIFIABLE-POLICY.md`. None touch
-  `frontend/` or `e2e/`. The GitHub PR API was not reachable from the sandbox, so open PRs were not listed.
+- Local integration review combined this delivery with `413c157`, which contains the reviewed
+  PR #2 and PR #3 test changes. The cloud report's claim that those teammate branches were already
+  merged into `a3bd9fb` was inaccurate; their verified integration occurred afterward. Other branch
+  and PR statuses were not established by this delivery.
 - No `AGENTS.md` exists in the repository.
 
 ## Changed files
@@ -28,7 +28,7 @@ Output report, not the task instruction file.
 | `e2e/reserve-helpers.ts` (new) | Shared RPC/login/write-tracking helpers (not a spec file) |
 | `docs/daily/2026-10-17/mia.md` | This report |
 
-Not touched: `backend/`, `contracts/`, `packages/shared/`, root package/lock files, `scripts/`,
+Not touched by the original Claude commits: `backend/`, `contracts/`, `packages/shared/`, root package/lock files, `scripts/`,
 `playwright.config.ts`, CI, task instructions, other reports.
 
 ## What the user does / what the app does
@@ -60,29 +60,31 @@ States are distinct: `locked` (not logged in), `loading`, `unavailable` (offline
 incomplete snapshot — shown as "—", never 0 and never "low"), `unset`, `invalid`, `healthy`, `low`.
 The card exposes `data-state` for tests.
 
-## Checks — actual results
+## Checks — local integration results, October 17
 
-Environment problem: the cloud sandbox has Node v22.22.0 and **no access to the npm registry or
-nodejs.org** (proxy 403), so `npm ci --ignore-scripts` could not run and there is no `node_modules`.
-A separate clone on MIA's computer was requested but no folder was connected during the session.
+The authoring cloud sandbox could not install dependencies, so the original delivery had no real
+build or browser result. The integration assistant subsequently verified the bundle SHA-256
+`5566b0c7f8eacdb0fe26a7ebf07a7a6df4ec5a59c29047ddc00501c5272d11cb`, imported its two commits,
+and ran the checks below on Windows with Node 24.19.0 and npm 11.17.0. Existing locked dependencies
+from the successful October 17 offline `npm ci --ignore-scripts` were reused; no dependencies changed.
 
 | Command | Result |
 |---|---|
-| `npm ci --ignore-scripts` | **NOT RUN** (registry unreachable) |
-| `npm run typecheck --workspace frontend` | **NOT RUN** |
-| `npm run build --workspace frontend` | **NOT RUN** |
-| `npm run test:e2e -- e2e/gas-reserve.spec.ts e2e/wallet.spec.ts` | **NOT RUN** |
+| `npm run check` | **PASSED**: backend/frontend type checks and builds; 24 contract tests; 26 backend test counts including nested tests |
+| Original three-file Playwright command | **PASSED**: all 6 tests (50.7 s), before correcting the ordering dependency |
+| `npm run test:e2e` after test-entry correction | **PASSED**: wallet group 2/2 (23.5 s), reserve group 4/4 (30.8 s), independent fresh stacks |
 | `git diff --check` | **PASSED** (no output) |
 
-Provisional checks that are *not* substitutes for the above:
+Authoring-only provisional checks, which are *not* substitutes for the real checks above:
 
 - `tsc 6.0.3 --strict` on `frontend/src/main.ts` with a hand-written `viem` type shim: 0 errors.
 - `reserve.ts` transpiled and run under Node 22 with a stub `parseEther`/`isAddress`: assertions for
   valid/invalid settings, low/healthy suggestion, binding, and rejected snapshots (missing/decimal
   balance, wrong chain, wrong treasury, non-chain source, bad hash/time, null) all passed.
 
-No screenshots were produced. The topup spec writes `reserve-low.png`, `reserve-preview.png` and
-`reserve-after-refresh.png` into `test-results/` when it runs.
+The successful local top-up test produced `reserve-low.png`, `reserve-preview.png` and
+`reserve-after-refresh.png` under its `test-results/` directory. These show actual local-chain
+behavior with a Mock Feed; they are not Sepolia or live Chainlink evidence.
 
 ## Test design (what the E2E checks once run)
 
@@ -105,13 +107,16 @@ No screenshots were produced. The topup spec writes `reserve-low.png`, `reserve-
   log with the same request hash; reload → same task visible, card `healthy`, no new writes, task count
   +1 only, delta still 10^15.
 
-**Why a separate topup file:** `wallet.spec.ts` uses the entire $15 shared daily budget of a fresh chain
-($3 + $6 executed, then a $6 request it cancels). Any payment before it blocks that cancel case. Playwright
-runs files alphabetically with `workers: 1`, so `wallet.topup.spec.ts` runs after `wallet.spec.ts`, when
-$6 remains and the $3 top-up fits. To cover the payment, run all three files:
+**Test isolation correction:** the baseline wallet flow spends $9, then needs $6 of remaining
+daily allowance to queue the request it cancels. Cancellation does not spend that $6. A $3 top-up
+before that flow can prevent the cancellation case from queuing. The integration owner therefore
+changed the default entry to run two separate Playwright processes, each with a fresh local chain,
+deployment and SQLite database; file-name ordering is no longer the isolation mechanism:
 
 ```bash
-npm run test:e2e -- e2e/gas-reserve.spec.ts e2e/wallet.spec.ts e2e/wallet.topup.spec.ts
+npm run test:e2e           # both independent groups, stops on failure
+npm run test:e2e:wallet    # existing 2 wallet cases only
+npm run test:e2e:reserve   # 3 reserve UI cases + 1 real top-up
 ```
 
 ## Reproduce / shortest manual demo
@@ -146,7 +151,7 @@ npm run dev              # terminal 3, open http://localhost:5173
   unsubmitted DRAFT; nothing is paid).
 - No scheduler, automatic top-up, per-agent budget, x402/CCIP/CRE/ERC-8004/RAG/EZKL, new wallet SDK or
   LLM. Parser remains `rule_parser`.
-- All required checks above are **not run** yet.
+- Local checks above passed. Real Sepolia, real Feed and a live LLM remain unverified.
 
 ## Next action for purple sun (backend)
 

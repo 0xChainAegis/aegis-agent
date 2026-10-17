@@ -2,7 +2,7 @@
 
 Updated: 2026-10-17. Read this with the latest code and `docs/HANDOFF.md`.
 
-Current product direction is recorded in [the October 17 product decision](PRODUCT-DECISION-2026-10-17.md): gas-reserve top-up assistance for agent operating wallets. The existing implementation is the bounded payment core. The first frontend slice uses one real configured recipient; balance thresholds, target suggestions and later multi-wallet profiles remain work to verify, not completed capabilities. Claude owns the assigned frontend task; integration work must not overwrite it.
+Current product direction is recorded in [the October 17 product decision](PRODUCT-DECISION-2026-10-17.md): gas-reserve top-up assistance for agent operating wallets. The first frontend slice now reads one real configured recipient balance, stores browser-local thresholds and targets, rechecks the suggestion, and uses the bounded payment core after explicit confirmation. It passed local-chain browser checks with a Mock Feed. Multi-wallet profiles, automatic monitoring, Sepolia/real Feed and a live LLM remain unverified or unimplemented.
 
 ## Product and authority
 

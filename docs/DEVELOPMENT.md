@@ -69,6 +69,13 @@ the actual `playwright.config.*` and integration owner instructions. Then use
 `npm run test:e2e` with its required services. If the suite/config/browser is not
 available, record that exact blocker; do not report it as a passed check.
 
+The default E2E entry runs `test:e2e:wallet` and then `test:e2e:reserve` in separate
+Playwright processes. Each starts a fresh local chain, deployment and SQLite DB;
+stop a manually running preview stack first. This prevents the reserve payment
+from consuming the daily-budget headroom required by the wallet cancellation
+case. Use either named script for focused checks. Keep new browser tests in the
+appropriate group when adding spec files; do not rely on file-name ordering.
+
 ## What every task must return
 
 1. Short outcome and changed paths, plus any verified no-change work.

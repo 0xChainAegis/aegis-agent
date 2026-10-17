@@ -1,10 +1,10 @@
 import {test,expect} from '@playwright/test';
 import {authed,balanceOf,config,eth,login,rpc,setReserve,tasks,trackWrites} from './reserve-helpers';
 
-// The single real-chain top-up payment for the gas-reserve card. This file is named to sort
-// after wallet.spec.ts on purpose: wallet.spec.ts uses the full $15 shared daily budget of the
-// fresh local chain ($3 + $6 executed, then a $6 request it cancels). Running this $3 payment
-// first would block that cancel case. Playwright runs files alphabetically with workers:1.
+// The real-chain top-up payment for the gas-reserve card runs in the separate reserve group.
+// The baseline wallet flow spends $9 and later needs $6 of headroom to queue its cancellation
+// case. npm run test:e2e runs the two groups in independent Playwright processes, each with
+// a fresh local chain and SQLite database, so this payment cannot consume that headroom.
 
 const MILLI=10n**15n; // 0.001 ETH
 
