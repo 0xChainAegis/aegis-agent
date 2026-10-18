@@ -1,5 +1,12 @@
 # AegisAgent handoff
 
+Latest release: October 18. `main` is the only retained local/remote branch.
+All former daily, integration and release branch references below are historical.
+The current release passed 27 contract tests, 26 backend test counts and six
+browser cases (2 wallet + 4 reserve) on Node 24.19.0 with a local Mock Feed.
+Read [the current release report](daily/2026-10-18/mia-release.md) and
+`docs/DEVELOPMENT.md` before using an older task prompt.
+
 Snapshot: 2026-10-15 integration work. This file is a dated checkpoint, not a
 substitute for reading the latest HEAD, PRs and test output.
 

@@ -1,5 +1,10 @@
 # 每日 Agent 任务包：10/16–10/24
 
+> 10 月 18 日协作规则已更新：只保留 `main`，不再新建日期分支、集成分支或
+> release 分支。下面旧任务里的分支名与 PR 指令属于历史安排，统一由
+> `docs/DEVELOPMENT.md` 的当前单主线流程覆盖。各人使用独立工作目录，交付实际
+> commit、bundle 或 patch，由 MIA 串行审查、测试和推送，不能覆盖队友工作。
+
 每天把自己的提示词复制到一个新的 Agent 会话。先同步团队已同意的最新分支，
 读 `docs/DECISIONS.md`、`docs/HANDOFF.md`、`docs/DEVELOPMENT.md`。提示词不是
 “尚未完成”的证明：若 HEAD 已实现，验证后跳过重复开发，报告证据与剩余问题。

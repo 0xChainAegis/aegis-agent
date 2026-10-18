@@ -1,5 +1,12 @@
 # Verifiable Policy Inference (Design Note)
 
+> Archived design proposal, preserved on October 18 when the team consolidated
+> the repository into `main`. The original text below discusses an earlier
+> Python-oriented design and proposed EZKL work; it does not describe the current
+> TypeScript/native-ETH payment runtime. No inference-proof integration or quoted
+> benchmark in this note was verified in the current release. Current scope and
+> implementation evidence are in `docs/DECISIONS.md` and `docs/HANDOFF.md`.
+
 Status: proposal for review · Date: 2026-10-14
 Related: roadmap item "Add zkML inference proof (EZKL) for verifiable policy decisions";
 team draft "Aegis Agent 分层评价体系" (layered evaluation framework).

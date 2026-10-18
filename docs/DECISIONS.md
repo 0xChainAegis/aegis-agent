@@ -1,6 +1,12 @@
 # AegisAgent decisions
 
-Updated: 2026-10-17. Read this with the latest code and `docs/HANDOFF.md`.
+Updated: 2026-10-18. Read this with the latest code and `docs/HANDOFF.md`.
+
+Repository decision: `main` is the only local and remote branch retained after
+the October 18 consolidation. Prior daily/integration branch instructions are
+historical. MIA coordinates reviewed, tested fast-forward pushes to `main`;
+teammates use separate working copies and hand over commits/bundles without
+creating new branches. See `docs/DEVELOPMENT.md` for the current workflow.
 
 Current product direction is recorded in [the October 17 product decision](PRODUCT-DECISION-2026-10-17.md): gas-reserve top-up assistance for agent operating wallets. The first frontend slice now reads one real configured recipient balance, stores browser-local thresholds and targets, rechecks the suggestion, and uses the bounded payment core after explicit confirmation. It passed local-chain browser checks with a Mock Feed. Multi-wallet profiles, automatic monitoring, Sepolia/real Feed and a live LLM remain unverified or unimplemented.
 
@@ -63,10 +69,10 @@ Current product direction is recorded in [the October 17 product decision](PRODU
 
 - MIA: frontend and product; purple sun: TypeScript backend and API; 某齐:
   contracts, oracle and tests. The user resolves cross-domain scope decisions.
-- Use small branches and PRs against the current integration branch/main agreed
-  by the team. Forking is optional for contributors with repository write access.
-  A fork branch is not automatically merged into the organization repository.
-- Another person reviews each PR. Humans decide merges. No auto-merge, automatic
+- Use small changes based on current `main`, with one writer per working copy.
+  Do not recreate dated branches, integration branches or release branches.
+  Deliver commits or a bundle to MIA for serialized integration and publishing.
+- Another person reviews each change. Humans decide integration. No auto-merge, automatic
   permission changes, self-approved releases or unsolicited external messages.
 - Agents must not open/read/print/submit real secret files, private keys, seed
   phrases or API secrets. Configuration is performed by the Owner locally. Never

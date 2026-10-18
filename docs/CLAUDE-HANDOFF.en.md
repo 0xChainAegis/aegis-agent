@@ -1,5 +1,9 @@
 # AegisAgent product and frontend review handoff
 
+> Repository workflow update, October 18: `main` is now the only retained branch.
+> All branch creation and old integration-base references in this archived
+> prompt are superseded by `docs/DEVELOPMENT.md`. Do not recreate those branches.
+
 > Archived October 16 review prompt. MIA has already assigned a separate October
 > 17 implementation prompt to Claude Code. Continue that assignment; do not
 > restart this read-only review. The current [product decision](PRODUCT-DECISION-2026-10-17.md)

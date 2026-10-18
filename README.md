@@ -1,5 +1,7 @@
 # AegisAgent
 
+本项目在 ETH Shenzhen 2026 Hackathon 赛期内从零开发。当前统一使用 `main`；团队协作方式见 [开发说明](docs/DEVELOPMENT.md)。
+
 让 Agent 在明确的收款人、美元预算和审批规则内支付 ETH，并让 Owner 看清每笔请求最终有没有付款。
 
 面向 ETH Shenzhen 2026 的当前版本聚焦**受控 native ETH 支付**：自然语言或表单生成草稿，Owner 核对后提交，独立 Agent 账户发起链上请求。小额付款自动执行，超过自动额度的付款进入链上待审批；Owner 批准也不能绕过单笔、每日预算或价格新鲜度限制。
