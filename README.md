@@ -1,16 +1,37 @@
-# AegisAgent
+<p align="center">
+  <img src="docs/images/aegis-banner.svg" alt="Aegis — ETH reserves, USD limits, your confirmation" width="100%">
+</p>
 
-English | [简体中文](README.zh-CN.md)
+<h1 align="center">AegisAgent</h1>
 
-Gas-reserve top-ups for agent operating wallets, bounded by on-chain USD budgets and explicit confirmation.
+<p align="center">
+  Gas-reserve top-ups for agent operating wallets.<br>
+  <strong>On-chain USD budgets. Explicit confirmation. Verifiable outcomes.</strong>
+</p>
+
+<p align="center">
+  English · <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-24%2B-5FAF74?style=flat-square&amp;logo=nodedotjs&amp;logoColor=white" alt="Node.js 24+"></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&amp;logo=typescript&amp;logoColor=white" alt="TypeScript 5.9"></a>
+  <a href="https://soliditylang.org/"><img src="https://img.shields.io/badge/Solidity-0.8.24-627EEA?style=flat-square&amp;logo=solidity&amp;logoColor=white" alt="Solidity 0.8.24"></a>
+  <a href="#chainlink-integration"><img src="https://img.shields.io/badge/Chainlink-Data%20Feeds-375BD2?style=flat-square&amp;logo=chainlink&amp;logoColor=white" alt="Chainlink Data Feeds integration"></a>
+  <img src="https://img.shields.io/badge/Demo-Local%20chain%2031337-C6E7D6?style=flat-square&amp;labelColor=25282D" alt="Demo on local chain 31337">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-D7BC78?style=flat-square&amp;labelColor=25282D" alt="MIT license"></a>
+</p>
+
+<p align="center">
+  <a href="#product">Product</a> ·
+  <a href="#product-screenshots">Screenshots</a> ·
+  <a href="#run-locally">Quickstart</a> ·
+  <a href="#chainlink-integration">Chainlink</a> ·
+  <a href="#validation">Validation</a> ·
+  <a href="#team">Team</a>
+</p>
 
 Built during ETH Shenzhen 2026 Hackathon. The current release runs on a local Ethereum development chain with a Mock ETH/USD Feed. Natural-language input uses a rule parser; a live LLM and public-testnet deployment have not been verified.
-
-## Team
-
-- [qiwei999](https://github.com/qiwei999) — contracts and boundary tests
-- [MIA_Ether](https://github.com/mia03ther) — frontend and integration
-- [purple sun](https://github.com/gitgdut) — backend and API
 
 ## Product
 
@@ -115,6 +136,14 @@ The browser entry starts a fresh chain and database for each group. Stop manuall
 - `packages/shared/`: API types and ABI signatures.
 - `agent/`: early Python prototype, outside the current runtime.
 
+## Team
+
+- [MIA_Ether](https://github.com/mia03ther) — **Product, Frontend & Integration**
+- [purple sun](https://github.com/gitgdut) — **Backend & API**
+- [qiwei999](https://github.com/qiwei999) — **Contracts & Boundary Testing**
+
 [Architecture](docs/ARCHITECTURE.md) · [API and local integration](docs/INTEGRATION.md) · [Security boundaries](docs/SECURITY.md)
+
+[Contributors](https://github.com/0xChainAegis/aegis-agent/graphs/contributors)
 
 MIT — see [LICENSE](LICENSE).

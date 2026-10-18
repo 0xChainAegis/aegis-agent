@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-labelledby="mark-title">
+  <title id="mark-title">Aegis A mark</title>
+  <rect width="64" height="64" rx="15" fill="#101114"/>
+  <g transform="translate(4 3) scale(.875)">
+    <path d="M32 7 60 57H46L32 31 18 57H4Z" fill="#edf0e9"/>
+    <path d="m27 42-6 10h22l-6-10Z" fill="#d7bc78"/>
+  </g>
+</svg>

@@ -1,8 +1,35 @@
-# AegisAgent
+<p align="center">
+  <img src="docs/images/aegis-banner.svg" alt="Aegis — ETH 储备、美元限额与用户确认" width="100%">
+</p>
 
-[English](README.md) | 简体中文
+<h1 align="center">AegisAgent</h1>
 
-为智能体运行钱包补充 Gas 储备，并通过链上美元预算与用户明确确认约束每笔付款。
+<p align="center">
+  为智能体运行钱包补充 Gas 储备。<br>
+  <strong>链上美元预算 · 用户明确确认 · 可核对的执行结果</strong>
+</p>
+
+<p align="center">
+  <a href="README.md">English</a> · 简体中文
+</p>
+
+<p align="center">
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-24%2B-5FAF74?style=flat-square&amp;logo=nodedotjs&amp;logoColor=white" alt="Node.js 24+"></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&amp;logo=typescript&amp;logoColor=white" alt="TypeScript 5.9"></a>
+  <a href="https://soliditylang.org/"><img src="https://img.shields.io/badge/Solidity-0.8.24-627EEA?style=flat-square&amp;logo=solidity&amp;logoColor=white" alt="Solidity 0.8.24"></a>
+  <a href="#chainlink-集成"><img src="https://img.shields.io/badge/Chainlink-Data%20Feeds-375BD2?style=flat-square&amp;logo=chainlink&amp;logoColor=white" alt="Chainlink Data Feeds 集成"></a>
+  <img src="https://img.shields.io/badge/Demo-Local%20chain%2031337-C6E7D6?style=flat-square&amp;labelColor=25282D" alt="本地链 31337 演示">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-D7BC78?style=flat-square&amp;labelColor=25282D" alt="MIT 许可证"></a>
+</p>
+
+<p align="center">
+  <a href="#产品">产品</a> ·
+  <a href="#产品截图">截图</a> ·
+  <a href="#本地运行">快速开始</a> ·
+  <a href="#chainlink-集成">Chainlink</a> ·
+  <a href="#验证">验证</a> ·
+  <a href="#团队">团队</a>
+</p>
 
 本项目诞生于 ETH Shenzhen 2026 黑客松。当前版本运行在本地以太坊开发链上，使用 Mock ETH/USD Feed。自然语言输入由规则解析器处理；在线 LLM 接入与公共测试网部署尚未验证。
 
@@ -109,6 +136,14 @@ npm run test:e2e
 - `packages/shared/`：API 类型与 ABI 签名。
 - `agent/`：早期 Python 原型，不在当前运行链路中。
 
+## 团队
+
+- [MIA_Ether](https://github.com/mia03ther) — **产品、前端与集成**
+- [purple sun](https://github.com/gitgdut) — **后端与 API**
+- [qiwei999](https://github.com/qiwei999) — **合约与边界测试**
+
 [架构](docs/ARCHITECTURE.md) · [API 与本地集成](docs/INTEGRATION.md) · [安全边界](docs/SECURITY.md)
+
+[贡献者](https://github.com/0xChainAegis/aegis-agent/graphs/contributors)
 
 MIT 许可证 — 参见 [LICENSE](LICENSE)。
