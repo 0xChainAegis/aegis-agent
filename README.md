@@ -1,5 +1,7 @@
 # AegisAgent
 
+English | [简体中文](README.zh-CN.md)
+
 Gas-reserve top-ups for agent operating wallets, bounded by on-chain USD budgets and explicit confirmation.
 
 Built during ETH Shenzhen 2026 Hackathon. The current release runs on a local Ethereum development chain with a Mock ETH/USD Feed. Natural-language input uses a rule parser; a live LLM and public-testnet deployment have not been verified.
@@ -13,6 +15,28 @@ Built during ETH Shenzhen 2026 Hackathon. The current release runs on a local Et
 - Confirm explicitly, then follow the original task through execution, Owner approval, cancellation or reconciliation.
 
 The treasury balance, executor's transaction-gas balance and recipient's operating reserve are separate. Reserve settings are suggestions, not on-chain policy or an automatic scheduler.
+
+## Product screenshots
+
+Captured from the running application on local chain **31337**, using a **Mock ETH/USD Feed**. The demonstration thresholds are set relative to the actual prefunded wallet balance; the displayed balance is not fabricated.
+
+### 1. Check the operating reserve
+
+The balance is below the explicitly configured demo threshold. The application suggests the exact target-minus-balance amount: **0.001 ETH**.
+
+![Operating-wallet reserve and an exact 0.001 ETH top-up suggestion](docs/images/reserve-low.png)
+
+### 2. Review before paying
+
+Review the recipient, **0.001 ETH** amount and **$3.00** mock-feed valuation. Preparing a preview does not pay; the user must confirm explicitly.
+
+![Top-up preview showing recipient, amount, USD valuation and confirmation](docs/images/reserve-preview.png)
+
+### 3. Recover the completed task
+
+After the confirmed local-chain transfer and a page refresh, the reserve is healthy and the original executed task is recovered. The accompanying browser test verifies that no second payment is created.
+
+![Healthy operating reserve and the recovered task after refresh](docs/images/reserve-after-refresh.png)
 
 ## Run locally
 
@@ -42,7 +66,7 @@ npm run dev
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The API listens on port 3001 and the local RPC on 8545; chain ID is 31337. Select the explicit local test-wallet entry to sign in with the public development Owner. These development accounts and ETH have no real-world value and must not be used for public funds.
 
-The deployment funds the treasury with 1 ETH and configures a $5 automatic threshold, $10 hard per-payment cap and $15 shared UTC daily budget. The local Mock Feed initially returns $3,000 per ETH.
+The deployment funds the treasury with 1 ETH and configures a $5 threshold for execution without separate Owner approval, a $10 hard per-payment cap and a $15 shared UTC daily budget. Every payment still requires explicit user confirmation. The local Mock Feed initially returns $3,000 per ETH.
 
 ## Demo
 
