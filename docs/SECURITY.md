@@ -1,71 +1,52 @@
-# Security Design & Known Risk List
+# Security Boundaries
 
-This document is the security design reference for AegisAgent, submitted for
-ETH Shenzhen 2026.
+The current validation covers local-chain behavior with a Mock Feed. This project
+has not undergone an independent security audit; Sepolia and mainnet execution
+are not verified. Local tests do not establish safety for real funds.
 
-## 1. Threat model
+## Authority and authorization
 
-| Threat | Mitigation |
-|---|---|
-| Direct prompt injection ("ignore previous instructions") | Guardrail signatures block input before it reaches the LLM |
-| Indirect injection via external data (transaction labels, merchant names, API responses) | External text is treated as untrusted data; tool results are never executed as instructions; only structured fields are read |
-| Prompt / secret extraction | Guardrail detects extraction requests; system prompt is never part of tool outputs |
-| Excessive agent authority (stolen key or rogue model) | On-chain tiers, per-transaction ceiling, role separation; contracts cap what the agent can do |
-| Unauthorized large transfers | Two gates: graph-level human approval + on-chain owner `approveAndExecute` |
-| Payment to a blocked / sanctioned recipient | recipient allowlists and chain allowlists; untrusted recipients fail closed |
-| Replay / duplicated submission | Each action has a canonical hash and a unique attestation id; pending ops are deleted once resolved |
-| Key leakage in config | `.env` gitignored; only disposable testnet keys; sample file committed |
-| Fake confirmations / inventing data | Agent cannot generate hashes or balances; only the chain/API response is shown |
-| Fee / parameter manipulation | CCIP destination chains allowlisted; fee quoted from router; `msg.value == fee` enforced |
+- Only the configured Owner can authenticate using a single-use, expiring wallet
+  challenge bound to address, domain and chain. Login does not approve a payment.
+- The backend holds the executor identity, never the Owner key. Queued approval
+  and cancellation require an actual Owner-signed contract transaction.
+- The contract checks role/tier, recipient allowlist, nonce, deadline, policy
+  version, USD maximum, hard per-payment cap and shared UTC-day budget.
+  Approval cannot bypass these checks; pending requests reserve no budget.
+- ETH/USD data must be positive, complete and fresh with expected decimals.
+  The adapter's Feed configuration is locked. USD6 valuation rounds upward.
+- The Owner and ACL administrator remain trusted policy administrators. They can
+  change future policy; attestations are not an immutable defense against them.
+- Native ETH payment and approval entry points use reentrancy protection.
+  Legacy ERC20 and subscription payment exits are disabled.
 
-## 2. Permission tiers
+## Integrity and recovery
 
-| Tier | Allowed actions |
-|---|---|
-| Frozen | none |
-| ReadOnly | analyze, balances, listing |
-| LowRisk | above actions plus transfers within the per-tx ceiling, auto-executed |
-| HighRisk | every action queued for human approval |
+Business writes use scoped idempotency keys; editing a draft changes its revision.
+The server validates the stored quote and revision rather than trusting client
+execution fields. The UI's confirmation is not an extra on-chain Owner signature
+for every automatic payment.
 
-## 3. Execution guarantees
+Before broadcast, SQLite stores signed bytes, transaction hash, sender nonce,
+request nonce and request hash. An uncertain broadcast is reconciled against the
+original hash; recovery may rebroadcast identical bytes, never automatically
+create a replacement payment. One process owns each executor/database.
 
-- Ordering: `guard → intent → policy → approval → attestation → transfer`
-- Attestation is a precondition of every transfer; transfers in
-  `AegisWallet` are only reachable through the bounded agent path
-- All high-risk actions are visible in two places: the graph's paused state
-  and the contract's pending queue
-- Audit: on-chain records are append-only and keyed by actor
+A matching wallet execution event is required for `EXECUTED`. Approval hints are
+independently checked against sender, target, calldata, receipt and event binding.
+One mined confirmation is not irreversible finality. Multi-process signing and
+deep-reorganization recovery are not implemented; a local chain reset requires
+a fresh matching database rather than reusing old transaction evidence.
 
-## 4. Known risk list (honest residual risks)
+## Operational limits
 
-1. **Regex-only injection guard** — novel, obfuscated or multilingual
-   injections may evade signatures; residual risk is reduced by the
-   fail-closed policy and tiered limits, but not eliminated
-2. **LLM extraction errors** — intent or amount parsing can be wrong;
-   high-risk defaults and confirmations are the safety net, and the
-   offline parser is simpler rather than smarter
-3. **Agent hot key** — a hot key on the agent host is a single point of
-   compromise; contracts bound blast radius, but a robust deployment should
-   move signing to an HSM / hardware signer or a multisig
-4. **Custodial wallet** — the wallet contract holds funds; smart contract
-   bugs in the payment path are a risk requiring a full audit before any
-   non-testnet use
-5. **Oracle dependency** — USD limits depend on Chainlink feeds; stale or
-   misconfigured feeds distort risk decisions; feeds are per-token and
-   must be wired and monitored
-6. **Demo mock mode** — mock results are simulations, not evidence;
-   evaluation must use live-mode receipts
-7. **No rate limiting on the agent service** in the current scaffold;
-   the hosted service needs authentication and per-user rate limits
-8. **CCIP configuration drift** — router and selector addresses change per
-   network; unverified configs can block or misroute transfers
+The reserve threshold and target are browser-local suggestions. Rechecking is
+not an atomic guarantee of target balance or deduplication across browsers.
+The rule parser is not an LLM or a prompt-injection defense. Current records do
+not prove model reasoning, strategy quality or successful future Agent tasks.
 
-## 5. Verification checklist before release
-
-- [ ] Unit tests pass (`pytest`, `hardhat test`)
-- [ ] Contracts verified on the block explorer
-- [ ] Low-risk transfer auto-executes and is attested
-- [ ] High-risk transfer cannot execute without both approvals
-- [ ] Injection attempts are blocked and logged
-- [ ] `.env` is not committed; keys used are testnet-only
-- [ ] README documents every Chainlink integration used
+RPC or Feed failure remains visible and never silently enables simulated success.
+The local test wallet uses public development accounts only on loopback chain
+31337. Never fund those accounts on public networks. Keep executor keys, session
+tokens, raw transactions and SQLite files private. Public deployment commands
+remain disabled pending separate configuration and validation.

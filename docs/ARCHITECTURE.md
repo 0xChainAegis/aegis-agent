@@ -1,90 +1,56 @@
-# AegisAgent Architecture
+# Architecture
 
-AegisAgent is a security-first AI financial agent operating on EVM blockchains.
-The agent graph, guardrails and policy enforce that every value-moving action
-is authorized, attested and bounded.
+AegisAgent provides gas-reserve recommendations for one configured operating
+wallet and executes explicitly confirmed native ETH payments under on-chain
+USD limits. The current verified environment is a local Hardhat chain with a
+Mock Feed. A real Sepolia deployment and live Chainlink Feed remain unverified.
 
-## 1. Layered view
+## Components
 
-```mermaid
-flowchart TD
-    U[User — Web console / CLI] --> G
-    subgraph Agent
-        G[Guardrail layer<br/>injection & extraction detection]
-        P[Planner — LLM<br/>intent extraction + task plan]
-        R[Risk & policy engine<br/>permission tiers · limits]
-        H{Human approval<br/>high-risk pause}
-        T[Tool execution<br/>whitelisted tools only]
-    end
-    G --> P --> R
-    R -->|read / low-risk| T
-    R -->|high-risk| H
-    H -->|approved| T
-    H -->|rejected| D[Denied]
-    T --> W[AegisWallet<br/>ETH / ERC20 / subscriptions]
-    W --> C[(EVM chain<br/>Ethereum Sepolia)]
-    T --> A[AegisAttestation<br/>append-only on-chain log]
-    W --> X[Chainlink CCIP<br/>cross-chain transfer]
-    O[Chainlink Data Feeds] --> R
-```
+- `frontend/`: Vite and TypeScript DOM interface; wallet login, reserve card,
+  draft review, approval, task history and transaction evidence.
+- `backend/`: Node.js 24+, TypeScript HTTP API, viem RPC/signing adapter, Zod
+  validation and built-in SQLite persistence.
+- `packages/shared/`: API types and current contract ABI signatures.
+- `contracts/`: Solidity wallet, access control, attestation and locked ETH/USD
+  oracle adapter; Hardhat builds, tests and local deployment.
+- `agent/`: historical Python prototype, outside the current runtime.
 
-## 2. Request lifecycle
+## Identities and balances
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant G as Guard
-    participant P as Planner(LLM)
-    participant R as Policy
-    participant H as Human
-    participant W as Wallet
-    participant A as Attestation
+The Owner signs login challenges and approval/cancellation transactions. The
+backend executor is a separate authorized account that submits payment requests.
+The operating wallet is the configured recipient, not the executor by definition.
 
-    U->>G: raw request
-    G-->>U: block (injection detected)
-    G->>P: clean text
-    P->>R: intent, amount, recipient
-    R->>R: classify read / low / high / forbidden
-    alt high-risk
-        R->>H: approval request
-        H-->>R: approved / rejected
-    end
-    R->>A: record intent hash, risk flag, approval
-    R->>W: execute transfer / subscription
-    W-->>U: result + attestation id
-```
+Balance snapshots distinguish the treasury contract (`walletBalanceWei`),
+executor gas (`agentBalanceWei`) and recipient reserve (`recipientBalanceWei`).
+The current snapshot identifies chain, treasury and observed block; the recipient
+address comes from `/api/v1/config` rather than the snapshot itself.
 
-## 3. Components
+## Reserve and payment lifecycle
 
-| Component | Responsibility | Tech |
-|---|---|---|
-| Guardrail | Block prompt injection / extraction before the LLM | regex signatures + scoring, no LLM dependency |
-| Planner | Extract structured intent; never authorizes | LLM with structured output, offline rule-based fallback |
-| Policy engine | Risk level, approval decision | deterministic Python, USD-valued via Data Feeds |
-| Human approval | Pause high-risk actions | LangGraph `interrupt` + on-chain pending queue |
-| AegisWallet | Custody, bounded transfers, subscriptions | Solidity, OZ |
-| AegisAccessControl | Roles and tiers, per-agent ceilings | Solidity, OZ AccessControl |
-| AegisAttestation | Append-only action audit log; stores canonical hash of the full record (request, intent, decision, model, approval, result) | Solidity |
-| AegisCCIPSender | Cross-chain transfers | Chainlink CCIP |
-| AegisPriceOracle | USD valuation | Chainlink Data Feeds |
-| Frontend | Demo console | single HTML file, viem |
+1. Read the configured recipient balance. Browser-local threshold and target
+   settings produce `target - balance` only when below the threshold; unavailable
+   balance data remains unknown.
+2. Re-read configuration, balance and in-flight tasks before preparing a draft.
+   A changed suggestion requires review. These reads do not reserve funds.
+3. Form input or the deterministic `rule_parser` creates a draft. No live LLM
+   participates. Preview binds the draft revision, ETH amount, USD maximum,
+   policy version and expiry; the user must explicitly confirm submission.
+4. The backend persists the signed transaction and its identities before
+   broadcast. The contract enforces recipient, executor role/tier, nonce,
+   deadline, policy version and freshly priced USD limits.
+5. LowRisk requests within the automatic threshold execute. Other permitted
+   requests queue for Owner `approveAndExecute`; hard-limit failures are rejected.
+   Approval rechecks the original request against current conditions.
+6. Matching contract events determine task outcome. A queued request or a
+   successful receipt without the expected event is not evidence of payment.
 
-## 4. Security invariants
+ETH quantities use integer wei; USD budgets use USD6 with upward rounding.
+Chainlink ETH/USD values transferred principal, not gas prices. Sender fees are
+outside this budget. Reserve settings are recommendations, not on-chain policy,
+and concurrent wallet activity can change the final balance.
 
-1. Attestation is written before value moves, and the record is immutable
-2. Authorization is computed by the policy engine and contracts, never by the LLM
-3. High-risk operations have two independent gates: graph-level approval and
-   on-chain owner approval
-4. Tools are a strict whitelist; unknown intents fail closed
-5. The agent key is isolated; contracts bound what the key can do even if it
-   is compromised (tier, per-tx ceiling, allowlist)
-
-## 5. Demo evidence map
-
-| Claim | Evidence |
-|---|---|
-| Agent can move value on-chain | AegisWallet executed transfer + transaction hash |
-| Agent cannot exceed its authority | above-limit transfer queues; only `approveAndExecute` releases it |
-| Every action is verifiable | AegisAttestation record with canonical intent hash |
-| Stable risk limits | USD valuation via Chainlink Data Feeds |
-| Cross-chain reach | Chainlink CCIP sender + message id |
+See [API and local operation](INTEGRATION.md), [security boundaries](SECURITY.md)
+and the [contract rules](../contracts/README.md). Automatic monitoring, multiple
+wallet profiles, CCIP and x402 are outside the current flow.

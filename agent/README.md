@@ -1,5 +1,9 @@
 # AegisAgent — Python agent
 
+This directory is an early prototype, outside the current application runtime.
+For the current TypeScript backend, Gas reserve UI and verified behavior, use
+the [repository README](../README.md).
+
 Security-first LangGraph agent.
 
 ## Install

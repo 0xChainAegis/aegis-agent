@@ -5,7 +5,7 @@ A Vite + TypeScript interface for the real `/api/v1` native ETH payment flow. No
 Run from the repository workspace:
 
 ```sh
-npm install
+npm ci --ignore-scripts
 npm run dev:frontend
 ```
 
@@ -18,6 +18,13 @@ Open `http://127.0.0.1:5173`. Vite proxies `/api` to `http://127.0.0.1:3001`. St
 - Local means real transactions on a local development chain with a **Mock Feed**, not public Chainlink market data. The interface labels this distinction. The current natural-language parser is a deterministic rule parser, not an LLM.
 
 ## Payment flow
+
+Overview includes a reserve card for the configured operating wallet. It reads
+the actual recipient balance, stores browser-local threshold/target preferences,
+and calculates the exact top-up with BigInt arithmetic. Preparing re-reads the
+configuration, balance and tasks; a changed suggestion requires another review.
+The card uses the same preview and explicit confirmation path described below.
+Missing data is shown as unavailable, never zero. No automatic scheduler runs.
 
 1. Describe an ETH payment or enter an address and ETH amount. ETH is parsed using `viem.parseEther`; integer wei strings are sent to the API.
 2. Review the server draft and current chain preview. Missing fields must be supplied; a blocked preview cannot be submitted. The sample recipient is filled only after an explicit user click.

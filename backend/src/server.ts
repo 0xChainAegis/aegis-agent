@@ -16,7 +16,7 @@ const patchSchema = draftSchema.extend({ expectedRevision: revision }).strict();
 const previewSchema = z.object({ expectedRevision: revision, maxUsdCost6: integer.optional() }).strict();
 const submitSchema = z.object({ expectedRevision: revision, quoteId: z.string().uuid() }).strict();
 const docs: Record<string, { title: string; markdown: string }> = {
-  overview: { title: 'Aegis 受限 ETH 支付', markdown: '# Aegis\n\n普通 ETH 转账与 Agent 钱包补 ETH 是两种候选场景，共用受限 native ETH 支付核心。当前入口只支持人工确认的付款；补款监控尚未实现。\n\n自然语言只生成草稿。确认后由 agent 发请求，超过自动额度的请求等待 owner 链上 approveAndExecute。高风险付款最终交易由 owner 签名。' },
+  overview: { title: 'Aegis 运行钱包补给', markdown: '# Aegis\n\n读取运行钱包真实 ETH 余额，按用户设置的下限与目标建议补给金额。重新读取后生成预览，用户确认才提交。准备金设置保存在浏览器，后台不会自动监控或补款。\n\n自然语言只生成草稿。付款由 agent 在合约预算与收款范围内发起；超过自动额度的请求等待 owner 链上 approveAndExecute。审批时仍检查报价与硬预算。' },
   roles: { title: '角色与签名', markdown: '# 角色与签名\n\nOwner 用钱包签一次性登录消息，并在浏览器签规则修改、充值及高风险审批交易。登录不授权付款。后台只保存受限 agent 执行密钥，绝不保存 owner 私钥。\n\n当前是单 owner 资金池；Bearer 会话过期后需重新登录。' },
   chainlink: { title: 'Chainlink 与硬规则', markdown: '# Chainlink\n\n合约在请求及审批执行时读取 ETH/USD Data Feed，检查正价格与时间新鲜度，并最终校验 USD 单笔、累计日预算、允许收款人、请求期限和策略版本。前端预览不是执行许可。\n\n金额使用整数 wei 与 USD6。美元输入不会被当作 ETH。CCIP、x402、CRE 与自动监控均不属于当前核心流程。' },
   evidence: { title: '交易与验证', markdown: '# 可核查的结果\n\nSUBMITTING 表示正在准备；BROADCAST 表示已发送；UNKNOWN 表示广播结果不明。链上 receipt 成功且有匹配的 NativeTransferExecuted 才能显示已付款。NativeTransferQueued 表示等待 owner。\n\n后台保存原始签名交易、原哈希与 nonce 后再发送。超时和重启优先查原哈希，不创建新付款。一次 mined 确认不代表最终不可逆。local_chain 是本地真实链交易，testnet 是测试网真实交易，mock 没有链上执行。' },
