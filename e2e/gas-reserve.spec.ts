@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect,type Locator} from '@playwright/test';
 import {balanceOf,config,eth,login,pausePolling,rpc,setReserve,tasks,trackWrites} from './reserve-helpers';
 
 // Gas-reserve card for the single configured operating wallet (config.recipientAddress).
@@ -7,6 +7,15 @@ import {balanceOf,config,eth,login,pausePolling,rpc,setReserve,tasks,trackWrites
 // independently of the baseline wallet group. No cross-file budget ordering is required.
 
 const MILLI=10n**15n; // 0.001 ETH in wei
+
+async function expectReachable(locator:Locator){
+ await locator.scrollIntoViewIfNeeded();
+ await expect.poll(()=>locator.evaluate(element=>{
+  const box=element.getBoundingClientRect();
+  const hit=document.elementFromPoint(box.x+box.width/2,box.y+box.height/2);
+  return box.x>=0&&box.y>=0&&box.right<=innerWidth+1&&box.bottom<=innerHeight+1&&Boolean(hit&&(hit===element||element.contains(hit)));
+ })).toBe(true);
+}
 
 test('healthy reserve: real balance shown, no suggestion and nothing submitted',async({page})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
@@ -26,7 +35,13 @@ test('healthy reserve: real balance shown, no suggestion and nothing submitted',
  await expect(card).toHaveAttribute('data-state','healthy');
  await expect(page.getByTestId('reserve-healthy')).toBeVisible();
  await expect(page.getByTestId('reserve-prepare')).toHaveCount(0);
+ const details=page.locator('.reserve-technical');
+ const detailsToggle=page.locator('#reserve-details-toggle');
+ await detailsToggle.click();
+ await detailsToggle.focus();
  await page.waitForTimeout(6000); // one background poll
+ await expect(details).toHaveAttribute('open','');
+ await expect(detailsToggle).toBeFocused();
  await expect(card).toHaveAttribute('data-state','healthy');
  expect(writes).toEqual([]);
  expect((await tasks(page)).length).toBe(before);
@@ -143,4 +158,27 @@ test('balance changes before preparation: suggestion refreshes and needs another
  expect((await tasks(page)).length).toBe(before);
  expect(await balanceOf(cfg.recipientAddress)).toBe(balance+2n*10n**14n);
  await pausePolling(page,false);
+});
+
+test('mobile reserve inputs and preview remain reachable in both composer modes',async({page})=>{
+ await page.setViewportSize({width:390,height:844});
+ const writes=trackWrites(page);
+ await login(page);
+ const cfg=await config(page);
+ const balance=await balanceOf(cfg.recipientAddress);
+ const before=(await tasks(page)).length;
+ await setReserve(page,eth(balance+MILLI/2n),eth(balance+MILLI));
+ for(const mode of ['natural','manual']){
+  await page.locator(`[data-composer="${mode}"]`).click();
+  await expectReachable(page.getByTestId('reserve-threshold'));
+  await expectReachable(page.getByTestId('reserve-target'));
+  await expectReachable(page.getByTestId('reserve-prepare'));
+ }
+ await page.getByTestId('reserve-prepare').click();
+ await expect(page.locator('.transfer-hero strong')).toHaveText('0.001 ETH');
+ await expectReachable(page.getByTestId('confirm-transfer'));
+ await page.getByRole('button',{name:'关闭详情',exact:true}).click();
+ expect(writes.some(w=>w.path.endsWith('/submit'))).toBe(false);
+ expect((await tasks(page)).length).toBe(before);
+ expect(await balanceOf(cfg.recipientAddress)).toBe(balance);
 });

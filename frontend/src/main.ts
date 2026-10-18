@@ -111,6 +111,7 @@ function render() {
   const focused = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
   const focusId = focused?.id;
   const selection = focused?.selectionStart;
+  const reserveDetailsOpen = document.querySelector<HTMLDetailsElement>('.reserve-technical')?.open || false;
   const contentScroll = document.querySelector('.content')?.scrollTop || 0;
   const drawerScroll = document.querySelector('.drawer-body')?.scrollTop || 0;
   const pendingCount = state.tasks.filter(t => column(t) === 'approval').length;
@@ -136,6 +137,7 @@ function render() {
     ${state.localWalletConfirm ? localWalletModal() : ''}
     ${state.toast ? `<div class="toast ${state.toastError ? 'error' : 'success'}" role="${state.toastError ? 'alert' : 'status'}">${icon(state.toastError ? 'info' : 'check')}<span>${esc(state.toast)}</span><button class="icon-button" data-action="dismiss-toast" aria-label="关闭通知">${icon('close')}</button></div>` : ''}
   </div>`;
+  const reserveDetails = document.querySelector<HTMLDetailsElement>('.reserve-technical'); if (reserveDetails) reserveDetails.open = reserveDetailsOpen;
   const content = document.querySelector('.content'); if (content) content.scrollTop = contentScroll;
   const drawerBody = document.querySelector('.drawer-body'); if (drawerBody) drawerBody.scrollTop = drawerScroll;
   if (focusId) { const next = document.getElementById(focusId) as HTMLInputElement | HTMLTextAreaElement | null; next?.focus({ preventScroll: true }); if (selection !== null && selection !== undefined && next && ['text', 'textarea', 'search'].includes(next.type)) { try { next.setSelectionRange(selection, selection); } catch { /* Non-text controls do not have a caret. */ } } }
@@ -222,8 +224,7 @@ function reserveCard(): string {
   else if (m.kind === 'healthy') result = `<p class="reserve-message" data-testid="reserve-healthy">${icon('check')}当前余额未低于你设置的下限 ${esc(ethExact(m.thresholdWei))} ETH，暂无补给建议。</p>`;
   else if (m.kind === 'low' && m.suggestion) {
     const blocked = Boolean(m.inflight) || disabled();
-    result = `<div class="reserve-suggestion"><span>建议补给（本金）</span><strong data-testid="reserve-suggestion">${esc(ethExact(m.suggestion.topUpWei))}<small> ETH</small></strong><span class="mono">= 目标 ${esc(ethExact(m.targetWei))} − 当前 ${esc(ethExact(o!.balanceWei))}</span></div>
-      <p class="reserve-caveat">只表示余额低于你自己设置的下限，不证明某个任务一定会失败，也不预测还能执行多少笔交易。美元成本与是否需要审批以下一步的预览为准。</p>
+    result = `<div class="reserve-suggestion"><span>建议补给</span><strong data-testid="reserve-suggestion">${esc(ethExact(m.suggestion.topUpWei))}<small> ETH</small></strong><span class="mono">= 目标 ${esc(ethExact(m.targetWei))} − 当前 ${esc(ethExact(o!.balanceWei))}</span></div>
       ${notice ? `<div class="missing-note" role="alert" data-testid="reserve-review-note">${icon('info')}${esc(notice)}</div>` : ''}
       ${m.inflight ? `<div class="missing-note" data-testid="reserve-inflight">${icon('clock')}已有进行中的付款 AEG-${esc(id(m.inflight).slice(-6).toUpperCase())}（${esc(statusLabel(m.inflight))}）。请先查看原任务，不要再建一笔。<button class="text-button" data-open-task="${esc(id(m.inflight))}">查看原任务</button></div>` : ''}
       <button class="button primary" data-action="reserve-prepare" data-testid="reserve-prepare" data-reserve-key="${esc(m.key)}" ${blocked ? 'disabled' : ''}>${state.busy === 'reserve' ? '<span class="spinner"></span>正在重新读取…' : `${icon('arrow')}${notice ? '已核对新金额，准备预览' : '重新读取并准备预览'}`}</button>
@@ -231,20 +232,27 @@ function reserveCard(): string {
   }
   if (notice && m.kind !== 'low') result += `<div class="missing-note" role="status" data-testid="reserve-review-note">${icon('info')}${esc(notice)}</div>`;
   return `<section class="reserve-card" data-testid="reserve-card" data-state="${m.kind}" aria-label="运行钱包 Gas 准备金">
-    <div class="reserve-head"><div><div class="eyebrow">GAS RESERVE · CONFIGURED OPERATING WALLET</div><h2>运行钱包 Gas 准备金</h2><p>Configured operating wallet：服务配置中唯一的允许收款运行钱包。它不是后台执行账户，也不是金库。</p></div><span class="badge ${tone}" data-testid="reserve-status">${label}</span></div>
+    <div class="reserve-head"><div><div class="eyebrow">运行钱包</div><h2>Gas 准备金</h2></div><span class="badge ${tone}" data-testid="reserve-status">${label}</span></div>
     <div class="reserve-grid">
       <div class="reserve-facts">
-        <div class="reserve-balance"><span>当前 ETH 准备金</span><strong data-testid="reserve-balance">${o ? esc(ethExact(o.balanceWei)) : '—'}<small> ETH</small></strong></div>
-        ${detailRow('运行钱包', recipient, true)}${detailRow('网络', m.binding ? `${mode()} · Chain ${m.binding.chainId}` : '')}${detailRow('观测', o ? `区块 #${o.blockNumber} · ${short(o.blockHash, 8)} · ${observedTime(o.observedAt)}` : '')}
+        <div class="reserve-balance"><span>当前余额</span><strong data-testid="reserve-balance">${o ? esc(ethExact(o.balanceWei)) : '—'}<small> ETH</small></strong></div>
+        ${detailRow('运行钱包', recipient, true)}${detailRow('网络', m.binding ? `${mode()} · Chain ${m.binding.chainId}` : '')}${detailRow('观测', o ? `区块 #${o.blockNumber} · ${observedTime(o.observedAt)}` : '')}
       </div>
       <div class="reserve-settings">
-        <label>准备金下限 · ETH<input id="reserve-threshold" data-testid="reserve-threshold" class="mono" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="例如 0.05" value="${esc(state.reserve.threshold)}" ${!m.binding ? 'disabled' : ''} /></label>
-        <label>目标余额 · ETH<input id="reserve-target" data-testid="reserve-target" class="mono" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="例如 0.1" value="${esc(state.reserve.target)}" ${!m.binding ? 'disabled' : ''} /></label>
-        <p class="reserve-caveat">这是你在本浏览器保存的建议设置，按 Chain ID、金库与运行钱包分开。不是链上策略，不会自动补给。</p>
+        <label>下限 · ETH<input id="reserve-threshold" data-testid="reserve-threshold" class="mono" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="例如 0.05" value="${esc(state.reserve.threshold)}" ${!m.binding ? 'disabled' : ''} /></label>
+        <label>目标 · ETH<input id="reserve-target" data-testid="reserve-target" class="mono" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="例如 0.1" value="${esc(state.reserve.target)}" ${!m.binding ? 'disabled' : ''} /></label>
+        <p class="reserve-caveat">浏览器本地保存，按网络·金库·运行钱包分开存储。不是链上策略，不会自动补给。</p>
       </div>
       <div class="reserve-result">${result}${lastTask ? `<button class="text-button reserve-last" data-open-task="${esc(id(lastTask))}" data-testid="reserve-last-task">${icon('activity')}最近补给 AEG-${esc(id(lastTask).slice(-6).toUpperCase())} · ${esc(statusLabel(lastTask))}</button>` : ''}</div>
     </div>
-    <p class="reserve-policy">服务器链上策略（只读，此处不修改）：自动额度 ${policy('autoThresholdUsd6')} · 单笔硬上限 ${policy('hardPerTxUsd6')} · 今日共享预算剩余 ${policy('remainingUsd6')}。这些限制按 ETH/USD Feed 给补给本金计价；Feed 不是 Gas 价格预言机。补款交易本身的网络手续费由执行账户另付，不计入补给数量和美元预算。</p>
+    <details class="reserve-technical">
+      <summary id="reserve-details-toggle">策略与观测详情 ${icon('down')}</summary>
+      <div class="reserve-technical-body">
+        ${o ? detailRow('区块哈希', short(o.blockHash, 10)) : ''}
+        <p class="reserve-caveat">补给建议仅表示余额低于你自己设置的下限，不证明某个任务一定会失败，也不预测还能执行多少笔交易。美元成本与是否需要审批以下一步的预览为准。补款交易手续费由执行账户另付，不计入补给数量和美元预算。</p>
+        <p class="reserve-caveat">服务器链上策略（只读）：自动额度 ${policy('autoThresholdUsd6')} · 单笔硬上限 ${policy('hardPerTxUsd6')} · 今日共享预算剩余 ${policy('remainingUsd6')}。${expectedChain() === 31337 ? 'Mock Feed · 非公网行情。' : 'Feed 不是 Gas 价格预言机。'}</p>
+      </div>
+    </details>
   </section>`;
 }
 function reserveDraftFor(draft: Data | null): ReserveDraft | null {

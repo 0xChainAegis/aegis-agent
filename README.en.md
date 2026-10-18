@@ -122,7 +122,7 @@ npm run check
 npm run test:e2e
 ```
 
-Verified locally on October 18, 2026 with Node 24.19.0: type checks and production builds; **27 contract tests**, **26 backend test counts** including nested tests; **6 browser cases** across independent wallet and reserve stacks.
+Verified locally on October 18, 2026 with Node 24.19.0: type checks and production builds; **27 contract tests**, **26 backend test counts** including nested tests; **7 browser cases** across independent wallet and reserve stacks.
 
 Contract tests cover authorization, oracle boundaries, budgets, approvals, replay and direct-call rejection. Backend tests cover HTTP boundaries, persistent recovery and event binding with explicit chain fixtures. Browser tests use real local contracts and balances with a Mock Feed, including confirmation, approval/cancellation, changed suggestions, missing data, offline failure and refresh without duplicate payment.
 
