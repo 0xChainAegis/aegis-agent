@@ -35,7 +35,7 @@ class FakeChain implements Gateway {
   async readiness() { return { ready: !this.unavailable }; }
   async snapshot(): Promise<Snapshot> {
     if (this.unavailable) throw new ApiError(503, 'CHAIN_UNAVAILABLE', 'RPC unavailable');
-    return { chainId: 31337, walletAddress: wallet, ownerAddress: owner.address, agentAddress: agent.address, walletBalanceWei: '1000000000000000000', agentBalanceWei: '1000000000000000000', recipientBalanceWei: '0', policyVersion: '1', budget: { autoThresholdUsd6: '5000000', hardPerTxUsd6: '10000000', dailyLimitUsd6: '20000000', spentTodayUsd6: '0', remainingUsd6: '20000000', window: 'UTC_CALENDAR_DAY' }, observedBlockNumber: '1', observedBlockHash: blockHash, observedAt: new Date().toISOString(), dataSource: 'chain' };
+    return { chainId: 31337, walletAddress: wallet, ownerAddress: owner.address, agentAddress: agent.address, recipientAddress: recipient, walletBalanceWei: '1000000000000000000', agentBalanceWei: '1000000000000000000', recipientBalanceWei: '0', policyVersion: '1', budget: { autoThresholdUsd6: '5000000', hardPerTxUsd6: '10000000', dailyLimitUsd6: '20000000', spentTodayUsd6: '0', remainingUsd6: '20000000', window: 'UTC_CALENDAR_DAY' }, observedBlockNumber: '1', observedBlockHash: blockHash, observedAt: new Date().toISOString(), dataSource: 'chain' };
   }
   async preview(to: Address, amountWei: string): Promise<Omit<Quote, 'quoteId' | 'draftId' | 'draftVersion'>> {
     const snapshot = await this.snapshot(); const now = Math.floor(Date.now() / 1000);
@@ -123,6 +123,19 @@ test('owner login uses real signatures, one-time challenge, chain binding, and p
     assert.equal((await app.call('/tasks')).status, 200);
     const newChallenge = await app.call('/auth/challenge', 'POST', { address: owner.address });
     assert.equal((await app.call('/auth/verify', 'POST', { address: owner.address, challengeId: newChallenge.body.challengeId, signature: '0x1234' })).status, 401);
+  } finally { await app.close(); }
+});
+test('authenticated wallet snapshot identifies the recipient whose balance was observed', async () => {
+  const app = await setup();
+  try {
+    assert.equal((await app.call('/wallets/current')).status, 401);
+    await app.login();
+    const snapshot = await app.call('/wallets/current');
+    assert.equal(snapshot.status, 200);
+    assert.equal(snapshot.body.recipientAddress, recipient);
+    assert.equal(snapshot.body.recipientBalanceWei, '0');
+    assert.equal(snapshot.body.observedBlockNumber, '1');
+    assert.equal(snapshot.body.observedBlockHash, blockHash);
   } finally { await app.close(); }
 });
 test('USD is never ETH; rule fallback is explicit and revision changes invalidate old drafts', async () => {

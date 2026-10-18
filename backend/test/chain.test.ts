@@ -32,6 +32,53 @@ function gatewayConfig(): Config {
   };
 }
 
+test('ViemGateway snapshot binds distinct balances and contract reads to one observed block', async () => {
+  const gateway = new ViemGateway(gatewayConfig());
+  const client = gateway.publicClient as any;
+  const observedBlockNumber = 42n;
+  const balanceReads: Array<{ address: Address; blockNumber: bigint }> = [];
+  const contractReads: Array<{ functionName: string; blockNumber: bigint }> = [];
+  const balances = new Map<string, bigint>([
+    [wallet.toLowerCase(), 11n],
+    [agent.address.toLowerCase(), 22n],
+    [recipient.toLowerCase(), 33n],
+  ]);
+
+  client.getChainId = async () => 31337;
+  client.getBlock = async () => ({ number: observedBlockNumber, hash: blockHash, timestamp: 1_700_000_000n });
+  client.getBalance = async ({ address, blockNumber }: { address: Address; blockNumber: bigint }) => {
+    balanceReads.push({ address, blockNumber });
+    return balances.get(address.toLowerCase())!;
+  };
+  client.readContract = async ({ functionName, blockNumber }: { functionName: string; blockNumber: bigint }) => {
+    contractReads.push({ functionName, blockNumber });
+    switch (functionName) {
+      case 'policyVersion': return 7n;
+      case 'autoLimitUsd6': return 5_000_000n;
+      case 'perTxLimitUsd6': return 10_000_000n;
+      case 'dailyLimitUsd6': return 20_000_000n;
+      case 'spendingToday': return [4_000_000n, 16_000_000n];
+      default: throw new Error(`Unexpected contract read: ${functionName}`);
+    }
+  };
+
+  const snapshot = await gateway.snapshot();
+
+  assert.equal(snapshot.recipientAddress, recipient);
+  assert.equal(snapshot.walletBalanceWei, '11');
+  assert.equal(snapshot.agentBalanceWei, '22');
+  assert.equal(snapshot.recipientBalanceWei, '33');
+  assert.equal(snapshot.observedBlockNumber, observedBlockNumber.toString());
+  assert.equal(snapshot.observedBlockHash, blockHash);
+  assert.deepEqual(balanceReads, [
+    { address: wallet, blockNumber: observedBlockNumber },
+    { address: agent.address, blockNumber: observedBlockNumber },
+    { address: recipient, blockNumber: observedBlockNumber },
+  ]);
+  assert.equal(contractReads.length, 5);
+  assert.ok(contractReads.every(read => read.blockNumber === observedBlockNumber));
+});
+
 function task(): Task {
   const now = new Date().toISOString();
   return {

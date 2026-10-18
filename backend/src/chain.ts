@@ -16,7 +16,7 @@ export interface Budget {
   spentTodayUsd6: string; remainingUsd6: string; window: 'UTC_CALENDAR_DAY';
 }
 export interface Snapshot {
-  chainId: number; walletAddress: Address; ownerAddress: Address; agentAddress: Address;
+  chainId: number; walletAddress: Address; ownerAddress: Address; agentAddress: Address; recipientAddress: Address;
   walletBalanceWei: string; agentBalanceWei: string; recipientBalanceWei: string;
   policyVersion: string; budget: Budget; observedBlockNumber: string; observedBlockHash: Hex;
   observedAt: string; dataSource: 'chain';
@@ -117,11 +117,13 @@ export class ViemGateway implements Gateway {
     try {
       await this.requireChain();
       const block = await this.publicClient.getBlock();
-      const base = { address: this.config.walletAddress, abi: walletAbi, blockNumber: block.number } as const;
+      const observedBlockNumber = block.number;
+      const recipientAddress = this.config.recipientAddress;
+      const base = { address: this.config.walletAddress, abi: walletAbi, blockNumber: observedBlockNumber } as const;
       const [walletBalance, agentBalance, recipientBalance, version, auto, perTx, daily, spending] = await Promise.all([
-        this.publicClient.getBalance({ address: this.config.walletAddress, blockNumber: block.number }),
-        this.publicClient.getBalance({ address: this.config.agentAddress, blockNumber: block.number }),
-        this.publicClient.getBalance({ address: this.config.recipientAddress, blockNumber: block.number }),
+        this.publicClient.getBalance({ address: this.config.walletAddress, blockNumber: observedBlockNumber }),
+        this.publicClient.getBalance({ address: this.config.agentAddress, blockNumber: observedBlockNumber }),
+        this.publicClient.getBalance({ address: recipientAddress, blockNumber: observedBlockNumber }),
         this.publicClient.readContract({ ...base, functionName: 'policyVersion' }),
         this.publicClient.readContract({ ...base, functionName: 'autoLimitUsd6' }),
         this.publicClient.readContract({ ...base, functionName: 'perTxLimitUsd6' }),
@@ -129,10 +131,10 @@ export class ViemGateway implements Gateway {
         this.publicClient.readContract({ ...base, functionName: 'spendingToday' }),
       ]);
       return {
-        chainId: this.config.chainId, walletAddress: this.config.walletAddress, ownerAddress: this.config.ownerAddress, agentAddress: this.config.agentAddress,
+        chainId: this.config.chainId, walletAddress: this.config.walletAddress, ownerAddress: this.config.ownerAddress, agentAddress: this.config.agentAddress, recipientAddress,
         walletBalanceWei: walletBalance.toString(), agentBalanceWei: agentBalance.toString(), recipientBalanceWei: recipientBalance.toString(),
         policyVersion: version.toString(), budget: { autoThresholdUsd6: auto.toString(), hardPerTxUsd6: perTx.toString(), dailyLimitUsd6: daily.toString(), spentTodayUsd6: spending[0].toString(), remainingUsd6: spending[1].toString(), window: 'UTC_CALENDAR_DAY' },
-        observedBlockNumber: block.number.toString(), observedBlockHash: block.hash, observedBlockTimestamp: block.timestamp.toString(), observedAt: new Date().toISOString(), dataSource: 'chain',
+        observedBlockNumber: observedBlockNumber.toString(), observedBlockHash: block.hash, observedBlockTimestamp: block.timestamp.toString(), observedAt: new Date().toISOString(), dataSource: 'chain',
       };
     } catch (error) { throw chainError(error); }
   }

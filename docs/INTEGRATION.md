@@ -52,7 +52,7 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 
 以下接口需要 Bearer 会话；业务写接口还需 `Idempotency-Key`：
 
-1. `GET /api/v1/wallets/current`：金库/Agent 余额、policyVersion、budget、观测区块。budget 含自动/单笔/每日额度与已花费/剩余；快照不是执行保证。
+1. `GET /api/v1/wallets/current`：金库/Agent 余额，以及由 `recipientAddress` 明确标识归属的 `recipientBalanceWei` 运行钱包余额、policyVersion、budget、观测区块。地址、余额和其他链上读取来自同一个观测区块；budget 含自动/单笔/每日额度与已花费/剩余。快照不是执行保证。
 2. `POST /api/v1/intents`：输入 `{message}` 或 `{recipient,amountWei,purpose?}`。返回 `draftId/intentId,version/revision,status,recipient,amountWei,missingFields,question,parser`。仅支持 native ETH；缺字段、USD/代币歧义进入 `NEEDS_INPUT`，不广播。
 3. `PATCH /api/v1/intents/:id`：输入 `{expectedRevision,...editedFields}`，编辑产生新版本，旧报价不可提交。已提交草稿不能修改。
 4. `POST /api/v1/intents/:id/preview`：输入 `{expectedRevision,maxUsdCost6?}`。返回 `quoteId,draftVersion,status,decision,costUsd6,maxUsdCost6,policyVersion,quoteExpiresAtSeconds,requestDeadlineSeconds,budget,oracle` 与报价区块。默认 cap 为当时估值加 1% 向上取整，确认界面必须显示。硬条件失败为 `BLOCKED`，与等待 Owner 不同。
