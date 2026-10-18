@@ -1,149 +1,149 @@
 <p align="center">
-  <img src="docs/images/aegis-banner.svg" alt="Aegis — ETH reserves, USD limits, your confirmation" width="100%">
+  <img src="docs/images/aegis-banner.svg" alt="Aegis — ETH 储备、美元限额与用户确认" width="100%">
 </p>
 
 <h1 align="center">AegisAgent</h1>
 
 <p align="center">
-  Gas-reserve top-ups for agent operating wallets.<br>
-  <strong>On-chain USD budgets. Explicit confirmation. Verifiable outcomes.</strong>
+  为智能体运行钱包补充 Gas 储备。<br>
+  <strong>链上美元预算 · 用户明确确认 · 可核对的执行结果</strong>
 </p>
 
 <p align="center">
-  English · <a href="README.zh-CN.md">简体中文</a>
+  <a href="README.en.md">English</a> · 简体中文
 </p>
 
 <p align="center">
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-24%2B-5FAF74?style=flat-square&amp;logo=nodedotjs&amp;logoColor=white" alt="Node.js 24+"></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&amp;logo=typescript&amp;logoColor=white" alt="TypeScript 5.9"></a>
   <a href="https://soliditylang.org/"><img src="https://img.shields.io/badge/Solidity-0.8.24-627EEA?style=flat-square&amp;logo=solidity&amp;logoColor=white" alt="Solidity 0.8.24"></a>
-  <a href="#chainlink-integration"><img src="https://img.shields.io/badge/Chainlink-Data%20Feeds-375BD2?style=flat-square&amp;logo=chainlink&amp;logoColor=white" alt="Chainlink Data Feeds integration"></a>
-  <img src="https://img.shields.io/badge/Demo-Local%20chain%2031337-C6E7D6?style=flat-square&amp;labelColor=25282D" alt="Demo on local chain 31337">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-D7BC78?style=flat-square&amp;labelColor=25282D" alt="MIT license"></a>
+  <a href="#chainlink-集成"><img src="https://img.shields.io/badge/Chainlink-Data%20Feeds-375BD2?style=flat-square&amp;logo=chainlink&amp;logoColor=white" alt="Chainlink Data Feeds 集成"></a>
+  <img src="https://img.shields.io/badge/Demo-Local%20chain%2031337-C6E7D6?style=flat-square&amp;labelColor=25282D" alt="本地链 31337 演示">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-D7BC78?style=flat-square&amp;labelColor=25282D" alt="MIT 许可证"></a>
 </p>
 
 <p align="center">
-  <a href="#product">Product</a> ·
-  <a href="#product-screenshots">Screenshots</a> ·
-  <a href="#run-locally">Quickstart</a> ·
-  <a href="#chainlink-integration">Chainlink</a> ·
-  <a href="#validation">Validation</a> ·
-  <a href="#team">Team</a>
+  <a href="#产品">产品</a> ·
+  <a href="#产品截图">截图</a> ·
+  <a href="#本地运行">快速开始</a> ·
+  <a href="#chainlink-集成">Chainlink</a> ·
+  <a href="#验证">验证</a> ·
+  <a href="#团队">团队</a>
 </p>
 
-Built during ETH Shenzhen 2026 Hackathon. The current release runs on a local Ethereum development chain with a Mock ETH/USD Feed. Natural-language input uses a rule parser; a live LLM and public-testnet deployment have not been verified.
+本项目诞生于 ETH Shenzhen 2026 黑客松。当前版本运行在本地以太坊开发链上，使用 Mock ETH/USD Feed。自然语言输入由规则解析器处理；在线 LLM 接入与公共测试网部署尚未验证。
 
-## Product
+## 产品
 
-- Read the configured operating wallet's actual ETH balance and observation block.
-- Set a browser-local reserve threshold and target; calculate the exact target-minus-balance top-up.
-- Re-read configuration, balance and pending tasks before preparing. Review a changed amount again.
-- Preview the recipient, ETH amount, USD estimate, maximum accepted cost and approval requirement.
-- Confirm explicitly, then follow the original task through execution, Owner approval, cancellation or reconciliation.
+- 读取已配置运行钱包的真实 ETH 余额及其观测区块。
+- 在浏览器本地设置储备下限与目标值，按“目标值减当前余额”精确计算补充金额。
+- 准备付款前重新读取配置、余额与待处理任务；金额发生变化时，要求再次检查。
+- 预览收款地址、ETH 金额、美元估值、可接受的最高费用及审批要求。
+- 用户明确确认后，持续跟踪原任务的执行、Owner 审批、取消或交易核对状态。
 
-The treasury balance, executor's transaction-gas balance and recipient's operating reserve are separate. Reserve settings are suggestions, not on-chain policy or an automatic scheduler.
+资金库余额、执行账户支付交易 Gas 的余额与收款钱包的运行储备相互独立。储备设置仅用于生成建议，并非链上策略，也不构成自动调度器。
 
-## Product screenshots
+## 产品截图
 
-Captured from the running application on local chain **31337**, using a **Mock ETH/USD Feed**. The demonstration thresholds are set relative to the actual prefunded wallet balance; the displayed balance is not fabricated.
+以下截图来自本地开发链（chain ID 31337），使用 Mock ETH/USD Feed。
 
-### 1. Check the operating reserve
+### 1. 发现运行储备不足
 
-The balance is below the explicitly configured demo threshold. The application suggests the exact target-minus-balance amount: **0.001 ETH**.
+读取钱包真实余额 B，以 B + 0.0005 ETH 为演示下限、B + 0.001 ETH 为目标值，得到 0.001 ETH 的补充建议。演示阈值基于实际余额设置，未伪造余额。
 
-![Operating-wallet reserve and an exact 0.001 ETH top-up suggestion](docs/images/reserve-low.png)
+![本地链真实余额低于演示下限，显示 0.001 ETH 补充建议](docs/images/reserve-low.png)
 
-### 2. Review before paying
+### 2. 检查并明确确认
 
-Review the recipient, **0.001 ETH** amount and **$3.00** mock-feed valuation. Preparing a preview does not pay; the user must confirm explicitly.
+预览收款地址与 0.001 ETH 补充金额；按本地 Mock ETH/USD Feed 的演示价格估值为 3.00 美元。预览不会转账，仍须用户明确确认。
 
-![Top-up preview showing recipient, amount, USD valuation and confirmation](docs/images/reserve-preview.png)
+![确认抽屉预览 0.001 ETH 金额及 3.00 美元 Mock Feed 估值](docs/images/reserve-preview.png)
 
-### 3. Recover the completed task
+### 3. 刷新后恢复原任务
 
-After the confirmed local-chain transfer and a page refresh, the reserve is healthy and the original executed task is recovered. The accompanying browser test verifies that no second payment is created.
+确认后的本地链转账使真实余额增加 0.001 ETH，储备恢复充足。刷新后仍显示同一个已执行任务，不会创建重复付款。
 
-![Healthy operating reserve and the recovered task after refresh](docs/images/reserve-after-refresh.png)
+![刷新后储备充足，恢复原已执行任务且没有重复付款](docs/images/reserve-after-refresh.png)
 
-## Run locally
+## 本地运行
 
-Requires Node.js 24+ and npm. Run commands from the repository root.
+需要 Node.js 24+ 与 npm。请在仓库根目录执行以下命令。
 
 ```bash
 npm ci --ignore-scripts
 ```
 
-Terminal 1:
+终端 1：
 
 ```bash
 npm run chain
 ```
 
-Terminal 2, after the RPC starts:
+终端 2，在 RPC 启动后执行：
 
 ```bash
 npm run deploy:local
 ```
 
-Terminal 3:
+终端 3：
 
 ```bash
 npm run dev
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The API listens on port 3001 and the local RPC on 8545; chain ID is 31337. Select the explicit local test-wallet entry to sign in with the public development Owner. These development accounts and ETH have no real-world value and must not be used for public funds.
+打开 [http://127.0.0.1:5173](http://127.0.0.1:5173)。API 监听 3001 端口，本地 RPC 监听 8545 端口，chain ID 为 31337。选择明确标注的本地测试钱包入口，使用公开的开发用 Owner 账户登录。这些开发账户与 ETH 没有现实价值，不得用于存放真实资金。
 
-The deployment funds the treasury with 1 ETH and configures a $5 threshold for execution without separate Owner approval, a $10 hard per-payment cap and a $15 shared UTC daily budget. Every payment still requires explicit user confirmation. The local Mock Feed initially returns $3,000 per ETH.
+部署脚本向资金库注入 1 ETH，并设置无需单独 Owner 审批的 5 美元阈值、10 美元单笔硬上限及 15 美元共享 UTC 每日预算。每笔付款仍须用户明确确认。本地 Mock Feed 的初始价格为每 ETH 3,000 美元。
 
-## Demo
+## 演示流程
 
-1. Read operating-wallet balance B on Overview. Set the threshold to B + 0.0005 ETH and target to B + 0.001 ETH. These test settings account for the prefunded local account; no balance is fabricated.
-2. Prepare the 0.001 ETH suggestion. Inspect the confirmation drawer, then confirm. Check the resulting task and receipt/event evidence.
-3. A 0.002 ETH payment at the initial mock price requires a separate Owner approval. A 0.004 ETH payment exceeds the hard cap and is blocked. Owner approval cannot override hard limits.
-4. Refresh to recover the same task. An unknown broadcast remains under reconciliation; it is not reported as a successful payment or replaced with a new payment.
+1. 在 Overview 读取运行钱包余额 B。将下限设为 B + 0.0005 ETH，目标值设为 B + 0.001 ETH。这些测试设置考虑了本地账户已预先获得资金的情况，未伪造余额。
+2. 准备 0.001 ETH 的补充建议。检查确认抽屉后明确确认，再查看生成的任务及交易回执、事件证据。
+3. 按初始模拟价格，0.002 ETH 的付款需要单独的 Owner 审批。0.004 ETH 的付款超过硬上限，将被阻止。Owner 审批不能绕过硬性限制。
+4. 刷新页面以恢复同一个任务。广播结果未知的交易会继续核对，不会被报告为付款成功，也不会被新付款替代。
 
-Budget accumulates across executed payments. Pending requests do not reserve funds or budget. Start a fresh local chain and database when repeating the complete test scenario.
+预算按已执行付款累计消耗。待处理请求不会预占资金或预算。重复完整测试场景时，请使用全新的本地链与数据库。
 
-## Chainlink integration
+## Chainlink 集成
 
-ETH/USD data is part of the contract's final authorization decision, including approval-time revalidation:
+ETH/USD 数据参与合约的最终授权判断，包括审批时的重新校验：
 
-- [AegisPriceOracle.sol](contracts/contracts/AegisPriceOracle.sol) validates feed rounds, answers, timestamps and decimals, and rounds USD6 valuations upward.
-- [AegisWallet.sol](contracts/contracts/AegisWallet.sol) enforces quote freshness, user-confirmed USD maximums, per-payment and shared daily limits, recipient permissions, nonce, deadline and policy version.
-- [chain.ts](backend/src/chain.ts) reads snapshots and quotes, simulates execution, and validates transaction and event binding.
-- [MockV3Aggregator.sol](contracts/contracts/mocks/MockV3Aggregator.sol) supplies the local demo and fault-test data.
+- [AegisPriceOracle.sol](contracts/contracts/AegisPriceOracle.sol) 校验 Feed 轮次、价格、时间戳及精度，并将 USD6 估值向上取整。
+- [AegisWallet.sol](contracts/contracts/AegisWallet.sol) 强制校验报价时效、用户确认的美元上限、单笔与共享每日限额、收款地址权限、nonce、截止时间及策略版本。
+- [chain.ts](backend/src/chain.ts) 读取快照与报价、模拟执行，并校验交易和事件的绑定关系。
+- [MockV3Aggregator.sol](contracts/contracts/mocks/MockV3Aggregator.sol) 提供本地演示与故障测试所需的数据。
 
-ETH/USD values the transferred principal; it is not a gas-price oracle. The sender pays transaction gas separately. This repository does not claim a verified Sepolia payment or live Chainlink Feed integration yet.
+ETH/USD 用于计算转账本金的美元价值，并非 Gas 价格预言机。发送方另行支付交易 Gas。本仓库尚未验证 Sepolia 付款或真实 Chainlink Feed 接入。
 
-## Validation
+## 验证
 
 ```bash
 npm run check
 npm run test:e2e
 ```
 
-Verified locally on October 18, 2026 with Node 24.19.0: type checks and production builds; **27 contract tests**, **26 backend test counts** including nested tests; **6 browser cases** across independent wallet and reserve stacks.
+2026 年 10 月 18 日使用 Node 24.19.0 在本地完成验证：类型检查与生产构建；**27 项合约测试**、**26 项后端测试（含嵌套测试）**；独立钱包与储备测试环境中的 **6 个浏览器用例**。
 
-Contract tests cover authorization, oracle boundaries, budgets, approvals, replay and direct-call rejection. Backend tests cover HTTP boundaries, persistent recovery and event binding with explicit chain fixtures. Browser tests use real local contracts and balances with a Mock Feed, including confirmation, approval/cancellation, changed suggestions, missing data, offline failure and refresh without duplicate payment.
+合约测试覆盖授权、预言机边界、预算、审批、重放及直接调用拒绝。后端测试通过明确的链测试夹具覆盖 HTTP 边界、持久化恢复与事件绑定。浏览器测试使用真实本地合约与余额以及 Mock Feed，覆盖确认、审批与取消、建议金额变化、数据缺失、离线失败，以及刷新后不重复付款。
 
-The browser entry starts a fresh chain and database for each group. Stop manually running services on ports 5173, 3001 and 8545 first. Windows can use installed Chrome; other environments may need `npx playwright install chromium`.
+浏览器测试入口为每组测试启动全新的链与数据库。运行前，请先停止手动运行且占用 5173、3001、8545 端口的服务。Windows 可使用已安装的 Chrome；其他环境可能需要执行 `npx playwright install chromium`。
 
-## Implementation
+## 实现
 
-- `frontend/`: Vite and TypeScript DOM interface.
-- `backend/`: Node.js, viem, Zod and SQLite.
-- `contracts/`: Solidity, Hardhat, deployment and contract tests.
-- `packages/shared/`: API types and ABI signatures.
-- `agent/`: early Python prototype, outside the current runtime.
+- `frontend/`：Vite 与 TypeScript DOM 界面。
+- `backend/`：Node.js、viem、Zod 与 SQLite。
+- `contracts/`：Solidity、Hardhat、部署脚本与合约测试。
+- `packages/shared/`：API 类型与 ABI 签名。
+- `agent/`：早期 Python 原型，不在当前运行链路中。
 
-## Team
+## 团队
 
-- [MIA_Ether](https://github.com/mia03ther) — **Product, Frontend & Integration**
-- [purple sun](https://github.com/gitgdut) — **Backend & API**
-- [qiwei999](https://github.com/qiwei999) — **Contracts & Boundary Testing**
+- [MIA_Ether](https://github.com/mia03ther) — **产品、前端与集成**
+- [purple sun](https://github.com/gitgdut) — **后端与 API**
+- [qiwei999](https://github.com/qiwei999) — **合约与边界测试**
 
-[Architecture](docs/ARCHITECTURE.md) · [API and local integration](docs/INTEGRATION.md) · [Security boundaries](docs/SECURITY.md)
+[架构](docs/ARCHITECTURE.md) · [API 与本地集成](docs/INTEGRATION.md) · [安全边界](docs/SECURITY.md)
 
-[Contributors](https://github.com/0xChainAegis/aegis-agent/graphs/contributors)
+[贡献者](https://github.com/0xChainAegis/aegis-agent/graphs/contributors)
 
-MIT — see [LICENSE](LICENSE).
+MIT 许可证 — 参见 [LICENSE](LICENSE)。
