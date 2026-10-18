@@ -4,6 +4,12 @@ Gas-reserve top-ups for agent operating wallets, bounded by on-chain USD budgets
 
 Built during ETH Shenzhen 2026 Hackathon. The current release runs on a local Ethereum development chain with a Mock ETH/USD Feed. Natural-language input uses a rule parser; a live LLM and public-testnet deployment have not been verified.
 
+## Team
+
+- [qiwei999](https://github.com/qiwei999) — contracts and boundary tests
+- [MIA_Ether](https://github.com/mia03ther) — frontend and integration
+- [purple sun](https://github.com/gitgdut) — backend and API
+
 ## Product
 
 - Read the configured operating wallet's actual ETH balance and observation block.
