@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="docs/images/aegis-banner.svg" alt="Aegis — ETH 储备、美元限额与用户确认" width="100%">
+  <img src="docs/images/aegis-hero.png" alt="Aegis 原创品牌主视觉：暖白背景、石墨黑字标与陶瓷材质的 A 应用图标。概念图，实际产品界面见下方截图。" width="100%">
 </p>
 
-<h1 align="center">AegisAgent</h1>
+<h1 align="center">给智能体补给。<br>让每笔支出可控。</h1>
 
 <p align="center">
-  为智能体运行钱包补充 Gas 储备。<br>
+  AegisAgent · 为智能体运行钱包补充 Gas 储备。<br>
   <strong>链上美元预算 · 用户明确确认 · 可核对的执行结果</strong>
 </p>
 
@@ -14,12 +14,9 @@
 </p>
 
 <p align="center">
-  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-24%2B-5FAF74?style=flat-square&amp;logo=nodedotjs&amp;logoColor=white" alt="Node.js 24+"></a>
-  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&amp;logo=typescript&amp;logoColor=white" alt="TypeScript 5.9"></a>
-  <a href="https://soliditylang.org/"><img src="https://img.shields.io/badge/Solidity-0.8.24-627EEA?style=flat-square&amp;logo=solidity&amp;logoColor=white" alt="Solidity 0.8.24"></a>
   <a href="#chainlink-与-ai-的位置"><img src="https://img.shields.io/badge/Chainlink-Data%20Feeds-375BD2?style=flat-square&amp;logo=chainlink&amp;logoColor=white" alt="Chainlink Data Feeds 集成"></a>
-  <img src="https://img.shields.io/badge/Demo-Local%20chain%2031337-C6E7D6?style=flat-square&amp;labelColor=25282D" alt="本地链 31337 演示">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-D7BC78?style=flat-square&amp;labelColor=25282D" alt="MIT 许可证"></a>
+  <img src="https://img.shields.io/badge/Demo-Local%20chain%2031337-59615F?style=flat-square&amp;labelColor=252B2A" alt="本地链 31337 演示">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-59615F?style=flat-square&amp;labelColor=252B2A" alt="MIT 许可证"></a>
 </p>
 
 <p align="center">
@@ -32,33 +29,17 @@
   <a href="#团队">团队</a>
 </p>
 
-<p align="center">
-  <b>一个运行钱包 · 一个资金库 · 一次明确确认</b><br>
-  读取真实 ETH 余额，按你的下限与目标给出补给建议，在链上美元限额内执行，并用合约事件核对结果。<br>
-  <a href="#产品截图"><b>查看真实本地演示截图 ↓</b></a> · <a href="#快速开始"><b>本地运行 ↓</b></a>
-</p>
-
-<p align="center">
-  <img src="docs/images/flow-strip.svg" alt="Aegis 流程：观察余额、预览数额与美元估值、用户确认、合约校验限额并执行、以链上事件核对。本地版本使用 Mock ETH/USD Feed。" width="100%">
-</p>
-
 本项目诞生于 ETH Shenzhen 2026 黑客松。
 
-| 当前状态 | 说明 |
-|---|---|
-| ✅ 已实现并验证 | 本地以太坊开发链（31337）· Mock ETH/USD Feed · 单资金库、单运行钱包的原生 ETH 补给流程 |
-| ✅ 自然语言 | 确定性的规则解析器；缺失或有歧义的内容会要求补充 |
-| ⏳ 尚未实现或验证 | 真实 Chainlink Feed 读取、Ethereum Sepolia 部署与付款、在线 LLM |
-
-<p align="center"><img src="docs/images/section-problem.svg" alt="01 问题与方案 · Problem and solution" width="100%"></p>
+- **已验证：** 本地开发链（31337）与 Mock ETH/USD Feed，单资金库、单运行钱包的原生 ETH 补给流程。
+- **意图输入：** 规则解析器生成草稿，缺失或有歧义的内容会要求补充。
+- **待交付：** 应用内真实 Chainlink Feed 验证、Sepolia 部署与付款、在线 LLM。
 
 ## 问题与方案
 
 **问题。** 智能体的运行钱包需要原生 ETH 来支付交易费用。余额耗尽时智能体会停止工作；而让它自行补款，又意味着把资金权限交给自动化流程。
 
 **方案。** Aegis 读取一个指定运行钱包的真实 ETH 余额，按用户设置的下限与目标值建议补充金额，并由资金库合约在链上美元限额内、经用户明确确认后执行转账。
-
-<p align="center"><img src="docs/images/section-architecture.svg" alt="02 架构与技术栈 · Architecture and stack" width="100%"></p>
 
 ## 架构与技术栈
 
@@ -71,8 +52,6 @@
 - 本地链 31337 用于可重复测试；Ethereum Sepolia 是唯一计划中的公共网络目标，尚未部署验证。
 - 详见 [架构](docs/ARCHITECTURE.md)、[API 与本地集成](docs/INTEGRATION.md)、[安全边界](docs/SECURITY.md)。
 
-<p align="center"><img src="docs/images/section-features.svg" alt="03 功能 · Features" width="100%"></p>
-
 ## 功能
 
 - 读取运行钱包的真实 ETH 余额，并绑定返回的运行钱包地址与观测区块。
@@ -82,8 +61,6 @@
 - 用户明确确认后，持续跟踪原任务的执行、Owner 审批、取消或交易核对状态。
 
 资金库余额、执行账户支付交易 Gas 的余额与收款钱包的运行储备相互独立。
-
-<p align="center"><img src="docs/images/section-chainlink.svg" alt="04 Chainlink 与 AI · Chainlink and AI" width="100%"></p>
 
 ## Chainlink 与 AI 的位置
 
@@ -99,8 +76,6 @@ ETH/USD 用于计算转账本金的美元价值，并非 Gas 价格预言机；�
 **AI。** 目前没有在线大模型参与：自然语言输入只由规则解析器生成草稿，缺失或有歧义的内容（例如美元金额）会要求用户补充。任何草稿都必须预览并经用户确认，解析结果不能绕过确认、链上限额、实时价格或重放保护。
 
 **状态。** 已验证：本地链 + Mock Feed。尚未验证：真实 Feed 读取、Sepolia 部署与付款、真实 LLM。
-
-<p align="center"><img src="docs/images/section-screens.svg" alt="05 产品截图 · Screenshots" width="100%"></p>
 
 ## 产品截图
 
@@ -124,8 +99,6 @@ ETH/USD 用于计算转账本金的美元价值，并非 Gas 价格预言机；�
 
 ![刷新后储备充足，恢复原已执行任务且没有重复付款](docs/images/reserve-after-refresh.png)
 
-<p align="center"><img src="docs/images/section-flow.svg" alt="06 完整用户流程 · User flow" width="100%"></p>
-
 ## 完整用户流程
 
 1. 用本地测试钱包（或浏览器钱包）以 Owner 身份签名登录；登录不授权付款。
@@ -135,8 +108,6 @@ ETH/USD 用于计算转账本金的美元价值，并非 Gas 价格预言机；�
 5. 刷新页面恢复同一个任务。广播结果未知的交易会继续核对，不会被报告为付款成功，也不会被新付款替代。
 
 预算按已执行付款累计消耗，待处理请求不会预占资金或预算。重复完整测试场景时，请使用全新的本地链与数据库。
-
-<p align="center"><img src="docs/images/section-start.svg" alt="07 快速开始 · Quickstart" width="100%"></p>
 
 ## 快速开始
 
@@ -170,8 +141,6 @@ npm run dev
 
 目录：`frontend/`（Vite + TypeScript 界面）、`backend/`（Node.js、viem、Zod、SQLite）、`contracts/`（Solidity、Hardhat、部署与合约测试）、`packages/shared/`（API 类型与 ABI）、`agent/`（早期 Python 原型，不在当前运行链路中）。
 
-<p align="center"><img src="docs/images/section-verify.svg" alt="08 验证 · Validation" width="100%"></p>
-
 ## 验证
 
 ```bash
@@ -184,8 +153,6 @@ npm run test:e2e
 合约测试覆盖授权、预言机边界、预算、审批、重放及直接调用拒绝。后端测试通过明确的链测试夹具覆盖 HTTP 边界、持久化恢复、事件绑定与运行钱包地址绑定。浏览器测试使用真实本地合约与余额以及 Mock Feed，覆盖确认、审批与取消、建议金额变化、数据缺失、运行钱包身份缺失或不一致、离线失败，以及刷新后不重复付款。
 
 浏览器测试入口为每组测试启动全新的链与数据库。运行前，请先停止手动运行且占用 5173、3001、8545 端口的服务。Windows 可使用已安装的 Chrome；其他环境可能需要执行 `npx playwright install chromium`。
-
-<p align="center"><img src="docs/images/section-team.svg" alt="09 团队 · Team" width="100%"></p>
 
 ## 团队
 

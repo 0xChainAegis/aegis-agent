@@ -1,13 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="520" height="160" viewBox="0 0 520 160" role="img" aria-labelledby="logo-title logo-desc">
-  <title id="logo-title">Aegis logo</title>
-  <desc id="logo-desc">An ivory geometric A with a champagne-gold crossbar, beside the Aegis wordmark on charcoal.</desc>
-  <rect width="520" height="160" rx="24" fill="#101114"/>
-  <g transform="translate(28 24) scale(1.7)">
-    <path d="M32 7 60 57H46L32 31 18 57H4Z" fill="#edf0e9"/>
-    <path d="m27 42-6 10h22l-6-10Z" fill="#d7bc78"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="160" viewBox="0 0 520 160" role="img" aria-labelledby="title desc">
+  <title id="title">Aegis</title>
+  <desc id="desc">A graphite A monogram with a subtle sage accent and an Aegis wordmark on warm white.</desc>
+  <rect width="520" height="160" rx="24" fill="#f8f7f3"/>
+  <rect x="27" y="30" width="100" height="100" rx="23" fill="#eeede8"/>
+  <g transform="translate(40 40) scale(1.15)">
+    <path d="M32 7 60 57H46L32 31 18 57H4Z" fill="#252b2a"/>
+    <path d="m27 42-6 10h22l-6-10Z" fill="#9aaa9f"/>
   </g>
-  <g font-family="Arial, Helvetica, sans-serif">
-    <text x="151" y="86" fill="#edf0e9" font-size="57" font-weight="700" letter-spacing="5">AEGIS</text>
-    <text x="154" y="115" fill="#a5aaa8" font-size="13" letter-spacing="2.5">AGENT OPERATING WALLET</text>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif">
+    <text x="157" y="88" fill="#252b2a" font-size="58" font-weight="600" letter-spacing="-2">Aegis</text>
+    <text x="160" y="117" fill="#666d69" font-size="17">Agent wallet control.</text>
   </g>
 </svg>
