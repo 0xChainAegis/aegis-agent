@@ -24,8 +24,9 @@ The operating wallet is the configured recipient, not the executor by definition
 
 Balance snapshots distinguish the treasury contract (`walletBalanceWei`),
 executor gas (`agentBalanceWei`) and recipient reserve (`recipientBalanceWei`).
-The current snapshot identifies chain, treasury and observed block; the recipient
-address comes from `/api/v1/config` rather than the snapshot itself.
+The snapshot identifies chain, treasury, the operating wallet's `recipientAddress`
+and the observed block. The UI accepts `recipientBalanceWei` only when that address
+matches the configured recipient; a missing or different address is rejected.
 
 ## Reserve and payment lifecycle
 

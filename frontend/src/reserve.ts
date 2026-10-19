@@ -63,7 +63,7 @@ export function sameBinding(a: ReserveBinding | null, b: ReserveBinding | null):
 
 /**
  * Validate an authenticated GET /api/v1/wallets/current snapshot against the binding.
- * Only recipientBalanceWei is the operating-wallet balance; walletBalanceWei (treasury)
+ * Only recipientBalanceWei is the operating-wallet balance, and only when snapshot.recipientAddress equals the bound recipient; walletBalanceWei (treasury)
  * and agentBalanceWei (executor gas) are never used here. A missing field is an error,
  * never a zero balance.
  */
@@ -73,6 +73,9 @@ export function observationFromSnapshot(snapshot: Data | null, binding: ReserveB
   if (snapshot.dataSource !== 'chain') return { ok: false, error: '余额快照不是链上数据，无法判断。' };
   if (Number(snapshot.chainId) !== binding.chainId) return { ok: false, error: '余额快照的网络与当前配置不一致，已停止判断。' };
   if (String(snapshot.walletAddress ?? '').toLowerCase() !== binding.treasury) return { ok: false, error: '余额快照的金库地址与当前配置不一致，已停止判断。' };
+  // The balance is only meaningful for the wallet it names: a missing or different identity is never shown as a balance.
+  if (typeof snapshot.recipientAddress !== 'string' || !isAddress(snapshot.recipientAddress)) return { ok: false, error: '快照缺少运行钱包地址，无法确认余额属于哪个钱包，已停止判断（不按 0 处理）。' };
+  if (snapshot.recipientAddress.toLowerCase() !== binding.recipient) return { ok: false, error: '余额快照的运行钱包地址与当前配置不一致，已停止判断。' };
   const balance = snapshot.recipientBalanceWei;
   if (typeof balance !== 'string' || !UINT.test(balance)) return { ok: false, error: '快照缺少运行钱包余额，无法判断（不按 0 处理）。' };
   const blockNumber = snapshot.observedBlockNumber;

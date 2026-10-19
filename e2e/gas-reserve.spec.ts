@@ -182,3 +182,87 @@ test('mobile reserve inputs and preview remain reachable in both composer modes'
  expect((await tasks(page)).length).toBe(before);
  expect(await balanceOf(cfg.recipientAddress)).toBe(balance);
 });
+
+// Recipient identity binding. recipientBalanceWei is only valid together with the recipientAddress it belongs to.
+// Each case below runs in its own fresh page. FIXTURES (rendering only, not chain evidence) alter the real
+// /wallets/current response in flight; the periodic poll is paused so only the awaited requests can change state.
+const OTHER_RECIPIENT='0x90F79bf6EB2c4f870365E785982E1f101E93b906';
+const SNAPSHOT='**/api/v1/wallets/current';
+async function mutateSnapshot(page:import('@playwright/test').Page,mutate:(body:any)=>void){
+ await page.route(SNAPSHOT,async route=>{const response=await route.fetch();const body=await response.json();mutate(body);await route.fulfill({response,json:body});});
+}
+const isSnapshot=(r:import('@playwright/test').Response)=>new URL(r.url()).pathname==='/api/v1/wallets/current'&&r.request().method()==='GET';
+
+test('recipient identity mismatch, missing or malformed: balance is not shown, nothing can be prepared',async({page})=>{
+ const writes=trackWrites(page);
+ await login(page);
+ const cfg=await config(page);
+ expect(OTHER_RECIPIENT.toLowerCase()).not.toBe(cfg.recipientAddress.toLowerCase());
+ const card=page.getByTestId('reserve-card');
+ const balance=await balanceOf(cfg.recipientAddress);
+ const before=(await tasks(page)).length;
+ await setReserve(page,eth(balance+MILLI/2n),eth(balance+MILLI));
+ await expect(card).toHaveAttribute('data-state','low');
+ await pausePolling(page,true);
+ const cases:[string,(body:any)=>void,RegExp][]=[
+  ['different recipient',body=>{body.recipientAddress=OTHER_RECIPIENT;},/运行钱包地址与当前配置不一致/],
+  ['same address with another case still matches the bound identity',body=>{body.recipientAddress=String(body.recipientAddress).toLowerCase();},/^$/],
+  ['missing recipient',body=>{delete body.recipientAddress;},/缺少运行钱包地址/],
+  ['null recipient',body=>{body.recipientAddress=null;},/缺少运行钱包地址/],
+  ['malformed recipient',body=>{body.recipientAddress='0x1234';},/缺少运行钱包地址/],
+ ];
+ for(const [label,mutate,message] of cases){
+  await mutateSnapshot(page,mutate);
+  const [response]=await Promise.all([page.waitForResponse(isSnapshot),page.locator('[data-action="refresh"]').first().click()]);
+  expect(response.status(),label).toBe(200);
+  if(label.startsWith('same address')){
+   // Case-insensitive equality is the same identity: the real balance is still shown.
+   await expect(card,label).toHaveAttribute('data-state','low');
+   await expect(page.getByTestId('reserve-balance'),label).toHaveText(`${eth(balance)} ETH`);
+  }else{
+   await expect(card,label).toHaveAttribute('data-state','unavailable');
+   await expect(page.getByTestId('reserve-balance'),label).toHaveText('— ETH');
+   await expect(page.getByTestId('reserve-error'),label).toContainText(message);
+   await expect(page.getByTestId('reserve-suggestion'),label).toHaveCount(0);
+   await expect(page.getByTestId('reserve-prepare'),label).toHaveCount(0);
+  }
+  await page.unroute(SNAPSHOT);
+  // Real data is accepted again: no sticky error, no zero balance.
+  await Promise.all([page.waitForResponse(isSnapshot),page.locator('[data-action="refresh"]').first().click()]);
+  await expect(card,label).toHaveAttribute('data-state','low');
+  await expect(page.getByTestId('reserve-balance'),label).toHaveText(`${eth(balance)} ETH`);
+ }
+ expect(writes).toEqual([]);
+ expect((await tasks(page)).length).toBe(before);
+ expect(await balanceOf(cfg.recipientAddress)).toBe(balance);
+ await pausePolling(page,false);
+});
+
+test('recipient identity changes before preparation: preparation stops, no draft, drawer or payment',async({page})=>{
+ const writes=trackWrites(page);
+ await login(page);
+ const cfg=await config(page);
+ const card=page.getByTestId('reserve-card');
+ const balance=await balanceOf(cfg.recipientAddress);
+ const before=(await tasks(page)).length;
+ await setReserve(page,eth(balance+MILLI/2n),eth(balance+MILLI));
+ await expect(card).toHaveAttribute('data-state','low');
+ await expect(page.getByTestId('reserve-suggestion')).toHaveText('0.001 ETH');
+ await pausePolling(page,true);
+ await mutateSnapshot(page,body=>{body.recipientAddress=OTHER_RECIPIENT;});
+ // The prepare handler re-reads the snapshot; wait for that intercepted response and for the handler to finish.
+ const [response]=await Promise.all([page.waitForResponse(isSnapshot),page.getByTestId('reserve-prepare').click()]);
+ expect((await response.json()).recipientAddress).toBe(OTHER_RECIPIENT);
+ await expect(page.getByTestId('intent-message')).toBeEnabled(); // busy cleared: the prepare operation has completed
+ await expect(card).toHaveAttribute('data-state','unavailable');
+ await expect(page.getByTestId('reserve-error')).toContainText('运行钱包地址与当前配置不一致');
+ await expect(page.getByTestId('reserve-balance')).toHaveText('— ETH');
+ await expect(page.getByTestId('reserve-prepare')).toHaveCount(0);
+ await expect(page.getByTestId('confirm-transfer')).toHaveCount(0);
+ await expect(page.locator('.drawer')).toHaveCount(0);
+ expect(writes).toEqual([]); // no intent, preview or submission
+ await page.unroute(SNAPSHOT);
+ expect((await tasks(page)).length).toBe(before);
+ expect(await balanceOf(cfg.recipientAddress)).toBe(balance);
+ await pausePolling(page,false);
+});
