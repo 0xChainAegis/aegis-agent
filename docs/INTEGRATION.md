@@ -18,12 +18,16 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 
 后端不自动读取 `.env`。可使用进程环境变量 `AEGIS_MODE`、`AEGIS_DEPLOYMENT_FILE`、`AEGIS_RPC_URL`、`AEGIS_CHAIN_ID`、`AEGIS_DB_PATH`、`AEGIS_PORT`、`AEGIS_AGENT_PRIVATE_KEY`。只有本地 31337 + loopback RPC 可默认使用公开账户 1；测试网没有显式 Agent 密钥会阻断执行。后台不持有 Owner 私钥。旧公网部署脚本已禁用，需要单独人工审阅与验证。
 
+可选的意图解析模式由 `AEGIS_LLM_MODE=off|stub|live` 控制，默认 `off`。live 模式需要 `AEGIS_LLM_PROVIDER=anthropic|openai`、`AEGIS_LLM_MODEL` 和进程环境中的 API key；key 不写入仓库、不返回 API。`stub` 只用于离线演示和可重复测试，不代表真实模型效果。
+
 ## 实际与模拟来源
 
 - `local_chain`：真实本地链交易与事件；当前部署使用本地 Mock Feed，不是公网 Chainlink 行情或 Sepolia。
 - `testnet`：预留配置路径；本轮尚未完成 Sepolia 端到端验证，不作为已验证交付。
 - `mock`：不广播、不伪造随机交易 hash。RPC/Feed 出错不会切换成该模式。
-- `parser.kind=rule_parser,model=null`：本次实际使用规则解析。配置模型名不代表调用过 LLM。
+- `parser.kind=rule_parser,model=null`：默认规则解析或模型失败后的确定性 fallback。配置模型名不代表调用过 LLM。
+- `parser.kind=llm,model=<model>`：只有严格 JSON 通过地址、金额、字段白名单校验后才会出现。缺字段、冲突、超时、429、乱码、schema 多字段或注入命中都会回退规则解析；解析器只产生草稿，不授权、不提交、不付款。
+- stub 模式显示 `model=stub-intent-v1`，用于验证接口和边界；它不是 live LLM 的证明。
 
 金额使用十进制整数字符串：`amountWei` 表示 wei；`costUsd6,maxUsdCost6` 及预算表示 USD6（`1000000` = $1）。界面小数只用于展示，不能将 ETH/USD 小数 `Number` 作为交易金额。
 
@@ -47,14 +51,14 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 公共读取：
 
 - `GET /health` 或 `/api/v1/health` 返回 readiness；未就绪 HTTP 503，不模拟成功。
-- `GET /api/v1/config` 返回链、部署地址、`abiVersion,abi.wallet,abi.oracle`、readiness、实际 parser 与静态文档链接。含凭据的 RPC 不直接暴露。
+- `GET /api/v1/config` 返回链、部署地址、`abiVersion,abi.wallet,abi.oracle`、readiness、实际 parser 与静态文档链接。`planner` 包含 `mode/provider/model/llmEnabled`，但不返回 API key、完整提示词或凭据。含凭据的 RPC 不直接暴露。
 - `GET /api/v1/docs/:slug` 返回固定 allowlist 的 Markdown 和链接，没有 RAG。
 
 以下接口需要 Bearer 会话；业务写接口还需 `Idempotency-Key`：
 
 1. `GET /api/v1/wallets/current`：金库/Agent 余额，以及由 `recipientAddress` 明确标识归属的 `recipientBalanceWei` 运行钱包余额、policyVersion、budget、观测区块。地址、余额和其他链上读取来自同一个观测区块；budget 含自动/单笔/每日额度与已花费/剩余。快照不是执行保证。
-2. `POST /api/v1/intents`：输入 `{message}` 或 `{recipient,amountWei,purpose?}`。返回 `draftId/intentId,version/revision,status,recipient,amountWei,missingFields,question,parser`。仅支持 native ETH；缺字段、USD/代币歧义进入 `NEEDS_INPUT`，不广播。
-3. `PATCH /api/v1/intents/:id`：输入 `{expectedRevision,...editedFields}`，编辑产生新版本，旧报价不可提交。已提交草稿不能修改。
+2. `POST /api/v1/intents`：输入 `{message}` 或 `{recipient,amountWei,purpose?}`。返回 `draftId/intentId,version/revision,status,recipient,amountWei,missingFields,question,parser`。仅支持 native ETH；缺字段、USD/代币歧义、多个收款人或冲突金额进入 `NEEDS_INPUT`，不广播。模型只产生草稿，不能改变 policy、approval、signer、nonce 或 calldata。
+3. `PATCH /api/v1/intents/:id`：输入 `{expectedRevision,...editedFields}`，编辑产生新版本，旧报价不可提交；多轮消息会保留上一轮已知字段，只让一个明确的新地址或 ETH 金额覆盖旧值。已提交草稿不能修改。
 4. `POST /api/v1/intents/:id/preview`：输入 `{expectedRevision,maxUsdCost6?}`。返回 `quoteId,draftVersion,status,decision,costUsd6,maxUsdCost6,policyVersion,quoteExpiresAtSeconds,requestDeadlineSeconds,budget,oracle` 与报价区块。默认 cap 为当时估值加 1% 向上取整，确认界面必须显示。硬条件失败为 `BLOCKED`，与等待 Owner 不同。
 5. `POST /api/v1/intents/:id/submit`：输入 `{expectedRevision,quoteId}`。后端核对保存的动作、业务版本和报价期限，返回 HTTP 202 与 `taskId,status,stateVersion`。客户端不能覆盖 nonce、策略版本或金额。
 6. `GET /api/v1/tasks/:id` 或 `/api/v1/tasks`：读取权威状态、transactions、requestHash、requestNonce、attestationId、availableActions 和 verification。列表仅返回登录 Owner 的任务。
@@ -103,7 +107,7 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 
 请求 hash 使用与合约一致的编码，绑定 domain、chainId、Wallet、Agent、收款人、amountWei、maxUsdCost6、nonce、deadline、policyVersion。它不是自然语言、模型推理与执行后完整记录的证明。结果证据来自回执/事件；一次 mined 确认不代表最终不可逆。
 
-2026 年 10 月 19 日本地验证通过类型检查、生产构建、27 项合约测试、28 项后端测试计数（含嵌套测试）和 9 条浏览器用例（钱包组 2 条、储备组 7 条）。后端链侧使用显式假适配器；浏览器分成两组，各自从零启动真实本地 RPC、部署、SQLite、API 和界面，核对接收余额增量及对应事件。覆盖付款、Owner 审批、取消、硬预算拒绝、准备金建议重查、刷新和缺失/离线数据。当前使用 Mock Feed；公开测试网和真实 Feed 尚未验证。
+2026 年 10 月 20 日本地验证通过类型检查、生产构建、27 项合约测试、36 项后端测试计数（含嵌套测试）和 9 条浏览器用例（钱包组 2 条、储备组 7 条）。后端链侧使用显式假适配器；浏览器分成两组，各自从零启动真实本地 RPC、部署、SQLite、API 和界面，核对接收余额增量及对应事件。覆盖付款、Owner 审批、取消、硬预算拒绝、准备金建议重查、刷新、缺失/离线数据，以及 LLM 草稿严格 schema、注入回退、模型不得补全字段和无任务创建。当前使用 Mock Feed；公开测试网和真实 Feed 尚未验证。
 
 ## 重置本地链
 

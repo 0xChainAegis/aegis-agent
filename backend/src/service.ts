@@ -4,7 +4,8 @@ import { type Intent, type Task } from '@aegis/shared';
 import type { Config } from './config.js';
 import { Store } from './store.js';
 import { type Gateway, type Quote, type Outcome, chainError } from './chain.js';
-import { parseDraft, type DraftInput } from './parser.js';
+import type { DraftInput } from './parser.js';
+import { createLlmClient, parseDraftWithLlm, type LlmIntentClient } from './llm.js';
 import { ApiError, Mutex } from './errors.js';
 
 export interface InternalTask extends Task {
@@ -21,7 +22,7 @@ function canonical(value: unknown): string {
 export class AegisService {
   readonly writes = new Mutex();
   readonly worker = new Mutex();
-  constructor(readonly config: Config, readonly store: Store, readonly chain: Gateway) {
+  constructor(readonly config: Config, readonly store: Store, readonly chain: Gateway, readonly llmClient: LlmIntentClient | null = createLlmClient(config.llm)) {
     if (!config.deploymentReady) return;
     const namespace = { mode: config.mode, chainId: config.chainId, wallet: config.walletAddress.toLowerCase(), agent: config.agentAddress.toLowerCase(), owner: config.ownerAddress.toLowerCase() };
     const previous = store.get<typeof namespace>('metadata', 'deployment');
@@ -75,9 +76,9 @@ export class AegisService {
       return result;
     });
   }
-  createIntent(owner: Address, input: DraftInput): Intent {
+  async createIntent(owner: Address, input: DraftInput): Promise<Intent> {
     const id = randomUUID(); const now = new Date().toISOString();
-    const intent: Intent = { ...parseDraft(input, this.config.configuredModel), draftId: id, intentId: id, version: 1, revision: 1, createdAt: now, updatedAt: now };
+    const intent: Intent = { ...await parseDraftWithLlm(input, this.config, undefined, this.llmClient), draftId: id, intentId: id, version: 1, revision: 1, createdAt: now, updatedAt: now };
     this.store.put('intent', id, owner, intent);
     return intent;
   }
@@ -86,11 +87,11 @@ export class AegisService {
     if (!intent) throw new ApiError(404, 'INTENT_NOT_FOUND', '找不到该草稿');
     return intent;
   }
-  patchIntent(owner: Address, id: string, expected: number, input: DraftInput): Intent {
+  async patchIntent(owner: Address, id: string, expected: number, input: DraftInput): Promise<Intent> {
     const previous = this.getIntent(owner, id);
     if (previous.version !== expected) throw new ApiError(409, 'REVISION_CONFLICT', '草稿已更新，请读取最新版本');
     if (this.store.list<InternalTask>('task', owner).some(task => task.draftId === id)) throw new ApiError(409, 'INTENT_ALREADY_SUBMITTED', '已提交的付款内容不能编辑；请新建草稿');
-    const intent: Intent = { ...previous, ...parseDraft(input, this.config.configuredModel, previous), version: previous.version + 1, revision: previous.version + 1, updatedAt: new Date().toISOString() };
+    const intent: Intent = { ...previous, ...await parseDraftWithLlm(input, this.config, previous, this.llmClient), version: previous.version + 1, revision: previous.version + 1, updatedAt: new Date().toISOString() };
     this.store.put('intent', id, owner, intent);
     return intent;
   }

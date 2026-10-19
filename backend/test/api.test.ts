@@ -10,6 +10,7 @@ import { AegisService } from '../src/service.js';
 import { createApiServer } from '../src/server.js';
 import { loadConfig, LOCAL_AGENT_KEY, type Config } from '../src/config.js';
 import { ApiError } from '../src/errors.js';
+import { StubIntentClient, type LlmIntentClient } from '../src/llm.js';
 import type { Gateway, Snapshot, Quote, Prepared, Outcome } from '../src/chain.js';
 import type { Task } from '@aegis/shared';
 
@@ -75,10 +76,10 @@ class FakeChain implements Gateway {
   }
   ownerTx(task: Task, action: 'approve' | 'cancel') { return { to: wallet, data: '0x1234' as Hex, value: '0', from: owner.address, chainId: 31337, action }; }
 }
-async function setup(options: { dbPath?: string; chain?: FakeChain; cfg?: Config } = {}) {
+async function setup(options: { dbPath?: string; chain?: FakeChain; cfg?: Config; llmClient?: LlmIntentClient } = {}) {
   const cfg = options.cfg ?? config(options.dbPath);
   const store = new Store(cfg.dbPath); const chain = options.chain ?? new FakeChain();
-  const service = new AegisService(cfg, store, chain); const server = createApiServer(service);
+  const service = new AegisService(cfg, store, chain, options.llmClient); const server = createApiServer(service);
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as { port: number }).port;
   let token: string | undefined;
@@ -379,5 +380,43 @@ test('HTTP boundaries reject malformed or unauthorized writes and never expose s
       assert.equal(payload.includes(LOCAL_AGENT_KEY), false);
       assert.equal(payload.includes(verified.body.token), false);
     }
+  } finally { await app.close(); }
+});
+
+test('LLM drafts stay drafts, invalid model output falls back, and no task or payment is created', async () => {
+  const cfg = config();
+  cfg.configuredModel = 'stub-intent-v1';
+  cfg.llm = { ...cfg.llm, mode: 'stub', provider: 'stub', model: 'stub-intent-v1', apiKey: null, baseUrl: 'http://127.0.0.1', timeoutMs: 100 };
+  let calls = 0;
+  const llmClient = new StubIntentClient(({ message }) => {
+    calls += 1;
+    if (message.includes('bad')) {
+      return { action: 'transfer', recipient, amountEth: '0.001', purpose: 'bad', missingFields: [], question: null, approve: true };
+    }
+    return { action: 'transfer', recipient, amountEth: '0.001', purpose: '支付服务费', missingFields: [], question: null };
+  });
+  const app = await setup({ cfg, llmClient });
+  try {
+    await app.login();
+    const good = await app.call('/intents', 'POST', { message: `请给 ${recipient} 转 0.001 ETH，支付服务费` }, 'llm-good-0001');
+    assert.equal(good.status, 201);
+    assert.equal(good.body.status, 'DRAFT');
+    assert.equal(good.body.amountWei, '1000000000000000');
+    assert.equal(good.body.parser.kind, 'llm');
+    assert.equal(good.body.parser.fallback, false);
+    assert.equal(app.store.list('task').length, 0);
+
+    const bad = await app.call('/intents', 'POST', { message: `bad ${recipient} 0.001 ETH` }, 'llm-bad-0001');
+    assert.equal(bad.status, 201);
+    assert.equal(bad.body.parser.kind, 'rule_parser');
+    assert.equal(bad.body.parser.fallback, true);
+    assert.equal(bad.body.parser.reason, 'LLM_SCHEMA_INVALID');
+    assert.equal(app.store.list('task').length, 0);
+    assert.equal(calls, 2);
+
+    const configResponse = await app.rawCall('/config', { method: 'GET' }, null);
+    assert.equal(configResponse.body.planner.mode, 'stub');
+    assert.equal(configResponse.body.planner.model, 'stub-intent-v1');
+    assert.equal(JSON.stringify(configResponse.body).includes('sk-'), false);
   } finally { await app.close(); }
 });

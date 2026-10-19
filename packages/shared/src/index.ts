@@ -2,7 +2,7 @@ export const SCHEMA_VERSION = 'aegis.v1' as const;
 export type RuntimeMode = 'local_chain' | 'testnet' | 'mock';
 export type TaskStatus = 'DRAFT' | 'NEEDS_INPUT' | 'READY' | 'SUBMITTING' | 'BROADCAST' | 'UNKNOWN' | 'AWAITING_APPROVAL' | 'EXECUTED' | 'BLOCKED' | 'REQUOTE_REQUIRED' | 'CANCELLED' | 'EXPIRED' | 'FAILED';
 export type Hex = `0x${string}`;
-export interface ParserInfo { kind: 'rule_parser'; model: null; configuredModel: string | null; fallback: boolean; reason: string }
+export interface ParserInfo { kind: 'rule_parser' | 'llm'; model: string | null; configuredModel: string | null; fallback: boolean; reason: string }
 export interface Intent {
   draftId: string; intentId: string; version: number; revision: number; status: TaskStatus;
   message: string; recipient: Hex | null; to: Hex | null; amountWei: string | null; purpose: string;
