@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="280" viewBox="0 0 1200 280" role="img" aria-labelledby="title desc">
+  <title id="title">Aegis</title>
+  <desc id="desc">The Aegis A mark and wordmark on graphite, with a quiet sage and cool-grey ribbon.</desc>
+  <defs>
+    <linearGradient id="band" x1="560" y1="0" x2="1200" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9aaa9f" stop-opacity="0"/><stop offset=".55" stop-color="#9aaa9f" stop-opacity=".22"/><stop offset="1" stop-color="#8ea3b0" stop-opacity=".32"/>
+    </linearGradient>
+    <linearGradient id="line" x1="560" y1="0" x2="1200" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#eeede8" stop-opacity="0"/><stop offset=".6" stop-color="#eeede8" stop-opacity=".24"/><stop offset="1" stop-color="#eeede8" stop-opacity=".10"/>
+    </linearGradient>
+    <clipPath id="frame"><rect width="1200" height="280" rx="28"/></clipPath>
+  </defs>
+  <g clip-path="url(#frame)">
+    <rect width="1200" height="280" fill="#191e1d"/>
+    <path d="M560 330C760 300 860 120 1010 70C1100 40 1160 50 1240 90" fill="none" stroke="url(#band)" stroke-width="70" stroke-linecap="round"/>
+    <path d="M600 318C790 292 880 140 1024 92C1108 64 1166 72 1240 108" fill="none" stroke="url(#line)" stroke-width="1.5"/>
+    <path d="M640 330C820 306 910 170 1040 122C1116 94 1170 100 1240 130" fill="none" stroke="url(#line)" stroke-width="1.5"/>
+  </g>
+  <rect x=".5" y=".5" width="1199" height="279" rx="27.5" fill="none" stroke="#313937"/>
+  <g transform="translate(96 76) scale(2)">
+    <rect width="64" height="64" rx="15" fill="#252b2a"/>
+    <rect x=".5" y=".5" width="63" height="63" rx="14.5" fill="none" stroke="#3a4240"/>
+    <g transform="translate(4 3.5) scale(.875)"><path d="M32 7 60 57H46L32 31 18 57H4Z" fill="#eeede8"/><path d="m27 42-6 10h22l-6-10Z" fill="#9aaa9f"/></g>
+  </g>
+  <text x="258" y="171" fill="#eeede8" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif" font-size="96" font-weight="600" letter-spacing="-3">Aegis</text>
+</svg>

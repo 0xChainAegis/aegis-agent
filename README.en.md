@@ -1,12 +1,13 @@
 <p align="center">
-  <img src="docs/images/aegis-hero.png" alt="Original Aegis brand artwork: a warm-white studio background, graphite wordmark, and a sculptural ceramic A app icon. Concept artwork; actual application screenshots appear below." width="100%">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/aegis-hero-dark.svg">
+    <img src="docs/images/aegis-hero-light.svg" width="100%" alt="Aegis: the A mark and wordmark">
+  </picture>
 </p>
 
-<h1 align="center">Fuel your agent.<br>Keep control.</h1>
-
 <p align="center">
-  AegisAgent · Gas-reserve top-ups for agent operating wallets.<br>
-  <strong>On-chain USD budgets. Explicit confirmation. Verifiable outcomes.</strong>
+  <strong>Gas-reserve top-ups for agent operating wallets, with every payment under control.</strong><br>
+  On-chain USD limits · Explicit confirmation · Verifiable outcomes
 </p>
 
 <p align="center">
@@ -14,49 +15,50 @@
 </p>
 
 <p align="center">
-  <a href="#where-chainlink-and-ai-fit"><img src="https://img.shields.io/badge/Chainlink-Data%20Feeds-375BD2?style=flat-square&amp;logo=chainlink&amp;logoColor=white" alt="Chainlink Data Feeds integration"></a>
-  <img src="https://img.shields.io/badge/Demo-Local%20chain%2031337-59615F?style=flat-square&amp;labelColor=252B2A" alt="Demo on local chain 31337">
+  <a href="#where-chainlink-and-ai-fit"><img src="https://img.shields.io/badge/Chainlink-Data%20Feeds-59615F?style=flat-square&amp;labelColor=252B2A" alt="Chainlink Data Feeds"></a>
+  <img src="https://img.shields.io/badge/TypeScript-Node%2024-59615F?style=flat-square&amp;labelColor=252B2A" alt="TypeScript and Node 24">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-59615F?style=flat-square&amp;labelColor=252B2A" alt="MIT license"></a>
 </p>
 
 <p align="center">
   <a href="#problem-and-solution">About</a> ·
-  <a href="#product-screenshots">Demo</a> ·
-  <a href="#user-flow">User flow</a> ·
+  <a href="#product-screenshots">Screenshots</a> ·
+  <a href="#user-flow">Flow</a> ·
   <a href="#where-chainlink-and-ai-fit">Chainlink</a> ·
-  <a href="#quickstart">Run locally</a> ·
-  <a href="#validation">Validation &amp; deployment</a> ·
-  <a href="#team">Team</a>
+  <a href="#quickstart">Run</a> ·
+  <a href="#validation">Validation</a> ·
+  <a href="#team-and-documentation">Team</a>
 </p>
 
 <p align="center">
-  <strong>Built at the ETH Shenzhen 2026 Hackathon.</strong>
+  Built at the ETH Shenzhen 2026 Hackathon.
 </p>
 
 <details>
-  <summary>ETH Shenzhen 2026 · Hackathon poster</summary>
+  <summary>Event reference: ETH Shenzhen 2026 poster</summary>
   <p align="center">
-    <img src="docs/images/eth-shenzhen-2026-poster.png" width="760" alt="ETH Shenzhen 2026 Hackathon event poster with the event title, organizers and sponsors.">
+    <img src="docs/images/eth-shenzhen-2026-poster.png" width="420" alt="ETH Shenzhen 2026 Hackathon event poster.">
   </p>
 </details>
 
-- **Verified:** A single-treasury, single-operating-wallet native ETH top-up flow on local chain 31337 with a Mock ETH/USD Feed.
-- **Intent input:** Rules by default, with configurable Anthropic or OpenAI-compatible draft parsing. Missing or ambiguous fields require clarification; offline stub tests pass.
-- **Testnet:** Sepolia deployment and post-deployment validation scripts are merged. Contract bytecode, feed bindings and roles of the v1 test deployment have been checked through read-only calls. Browser top-ups, Owner approval and real-model API integration on main still await acceptance checks.
-
-<a name="problem-and-solution"></a>
-
-## <img src="docs/images/section-problem.svg" width="28" height="28" alt="Project overview icon" align="absmiddle"> Problem and solution
+## <img src="docs/images/section-problem.svg" width="24" height="24" alt="" align="absmiddle"> Problem and solution
 
 **Problem.** An agent's operating wallet needs native ETH to pay transaction fees. When it runs dry the agent stops, and letting the agent refill itself would hand fund authority to automation.
 
-**Solution.** Aegis reads the real ETH balance of one designated operating wallet, suggests a top-up from the user's own threshold and target, and has the treasury contract execute the transfer within on-chain USD limits, only after explicit user confirmation.
+**Solution.** One funding-pool smart contract pays native ETH to one configured receiving operating wallet to replenish its gas reserve. The user sets a threshold and target in the browser; Aegis suggests target minus actual balance, rechecks when preparing, and after explicit user confirmation the contract executes within its whitelist, permissions and USD limits.
 
-**Address roles.** `walletAddress` is the funding-pool contract; `recipientAddress` is the receiving operating wallet whose balance appears on the overview. `ownerAddress` administers the pool and approves pending payments, while `agentAddress` submits payment requests within its authorized rules. Pool and operating-wallet balances are read separately. Receiving ETH grants no pool administration rights.
+**Four distinct roles.**
 
-<a name="product-screenshots"></a>
+| Role | Field | Responsibility |
+|---|---|---|
+| Owner (funding administrator) | `ownerAddress` | Administers the pool and approves pending payments |
+| Executor | `agentAddress` | Submits payment requests within authorized rules |
+| Pool contract | `walletAddress` | Holds and pays the top-up funds |
+| Receiving operating wallet | `recipientAddress` | Receives ETH and is shown on the overview; receiving grants no administrative rights |
 
-## <img src="docs/images/section-screens.svg" width="28" height="28" alt="Product demo icon" align="absmiddle"> Product screenshots
+Pool and operating-wallet balances are read separately. The LLM only drafts: it never signs and cannot bypass approvals.
+
+## <img src="docs/images/section-screens.svg" width="24" height="24" alt="" align="absmiddle"> Product screenshots
 
 Captured from the running application on local chain **31337**, using a **Mock ETH/USD Feed**. The demonstration thresholds are set relative to the actual prefunded wallet balance; the displayed balance is not fabricated.
 
@@ -80,7 +82,7 @@ After the confirmed local-chain transfer and a page refresh, the reserve is heal
 
 ### 4. Light, dark, and mobile
 
-The top-right appearance button switches between light and dark. The choice is saved in the current browser. Switching appearance does not submit a payment or clear reserve settings. This is the actual dark workspace; its pictured draft has not been paid.
+The top-right appearance button switches between light and dark. The choice is saved in the current browser. Switching appearance does not submit a payment or clear reserve settings. This is the actual dark workspace; the top-up suggestion has not been submitted.
 
 ![Actual dark wallet workspace on the local chain and Mock Feed, with the same amounts and explicit confirmation boundary](docs/images/reserve-dark.png)
 
@@ -91,9 +93,7 @@ Actual light and dark interfaces at 390px. The operating wallet, reserve editor,
   <img src="docs/images/reserve-mobile-dark.png" width="300" alt="Actual dark mobile interface for the same wallet and settings.">
 </p>
 
-<a name="user-flow"></a>
-
-## <img src="docs/images/section-flow.svg" width="28" height="28" alt="User journey icon" align="absmiddle"> User flow
+## <img src="docs/images/section-flow.svg" width="24" height="24" alt="" align="absmiddle"> User flow
 
 1. Sign in as Owner with the local test wallet (or a browser wallet); login does not authorize a payment.
 2. On Overview, read operating-wallet balance B. Set the threshold to B + 0.0005 ETH and the target to B + 0.001 ETH.
@@ -103,27 +103,23 @@ Actual light and dark interfaces at 390px. The operating wallet, reserve editor,
 
 Budget accumulates across executed payments; pending requests reserve neither funds nor budget. Start a fresh local chain and database to repeat the full scenario.
 
-<a name="features"></a>
-
-## <img src="docs/images/section-features.svg" width="28" height="28" alt="Product capabilities icon" align="absmiddle"> Features
+## <img src="docs/images/section-features.svg" width="24" height="24" alt="" align="absmiddle"> Features
 
 - Read the operating wallet's actual ETH balance, bound to the returned wallet address and observation block.
 - Set a browser-local reserve threshold and target; calculate the exact target-minus-balance top-up. The settings are not on-chain policy and not an automatic scheduler.
 - Re-read configuration, balance and pending tasks before preparing; a changed amount must be reviewed again.
 - Preview the recipient, ETH amount, USD estimate, user-confirmed USD cap on the transferred principal and approval requirement.
 - After explicit confirmation, follow the original task through execution, Owner approval, cancellation or reconciliation.
-
 - Light/dark appearance with a browser-local preference; the same workflow on desktop and mobile.
 
-The treasury balance, the executor's transaction-gas balance and the recipient's operating reserve are separate.
+The pool balance, the executor's transaction-gas balance and the recipient's operating reserve are separate.
 
-<a name="where-chainlink-and-ai-fit"></a>
-
-## <img src="docs/images/section-chainlink.svg" width="28" height="28" alt="Oracle and execution boundaries icon" align="absmiddle"> Where Chainlink and AI fit
+## <img src="docs/images/section-chainlink.svg" width="24" height="24" alt="" align="absmiddle"> Where Chainlink and AI fit
 
 **Chainlink ETH/USD Data Feed** prices the transferred principal and takes part in the contract's final authorization decision, including approval-time revalidation:
 
 - [AegisPriceOracle.sol](contracts/contracts/AegisPriceOracle.sol) validates feed rounds, answers, timestamps and decimals, and rounds USD6 valuations upward.
+- [AegisPolicyEngine.sol](contracts/contracts/AegisPolicyEngine.sol) applies permissions, the recipient allowlist, approval thresholds and the shared daily USD budget.
 - [AegisWallet.sol](contracts/contracts/AegisWallet.sol) enforces quote freshness, user-confirmed USD maximums, per-payment and shared daily limits, recipient permissions, nonce, deadline and policy version.
 - [chain.ts](backend/src/chain.ts) reads snapshots and quotes, simulates execution, and validates transaction and event binding.
 - [MockV3Aggregator.sol](contracts/contracts/mocks/MockV3Aggregator.sol) supplies the local demo and fault-test data.
@@ -132,24 +128,18 @@ ETH/USD values the transferred principal; it is not a gas-price oracle. The send
 
 **AI.** Rules are the default. `AEGIS_LLM_MODE=live` enables Anthropic or OpenAI-compatible draft parsing; `stub` is an offline test mode and does not demonstrate a real model. Model responses undergo schema and parameter checks: stale values cannot replace the user's new address or amount, and ambiguous fields require clarification. Every draft still needs preview and explicit confirmation, subject to on-chain limits, fresh prices and replay protection. See [integration configuration](docs/INTEGRATION.md).
 
-**Status.** Local-chain and Mock Feed flows, offline model adapters and provider-error handling are verified. The v1 Sepolia test deployment has passed read-only contract-binding and feed checks; real-model API integration on main, browser testnet payments and approvals still await end-to-end acceptance.
-
-<a name="architecture-and-stack"></a>
-
-## <img src="docs/images/section-architecture.svg" width="28" height="28" alt="System architecture icon" align="absmiddle"> Architecture and stack
+## <img src="docs/images/section-architecture.svg" width="24" height="24" alt="" align="absmiddle"> Architecture and stack
 
 ```text
-Browser UI ─ local API + SQLite ─ treasury contract ─ ETH/USD feed
- (Vite/TS)   (Node 24, viem, Zod)   (Solidity)         (Mock locally)
+Browser UI ─ local API + SQLite ─ funding pool ─ ETH/USD feed
+ (Vite/TS)   (Node 24, viem, Zod)  (Solidity)    (Mock locally)
 ```
 
-- One treasury, one allowed operating wallet, one Owner and one restricted executor; Owner login and approvals use wallet signatures.
-- Local chain 31337 is used for repeatable tests. Ethereum Sepolia is the public test network; the v1 test deployment has passed read-only checks, while the complete application payment flow still awaits acceptance.
+- One funding pool, one allowed receiving operating wallet, one Owner and one restricted executor; Owner login and approvals use wallet signatures.
+- Local chain 31337 is used for repeatable tests. Ethereum Sepolia is the public test network; see Validation below for acceptance status.
 - See [architecture](docs/ARCHITECTURE.md), [API and local integration](docs/INTEGRATION.md) and [security boundaries](docs/SECURITY.md).
 
-<a name="quickstart"></a>
-
-## <img src="docs/images/section-start.svg" width="28" height="28" alt="Local quickstart icon" align="absmiddle"> Quickstart
+## <img src="docs/images/section-start.svg" width="24" height="24" alt="" align="absmiddle"> Quickstart
 
 Requires Node.js 24+ and npm. Run commands from the repository root.
 
@@ -177,22 +167,18 @@ npm run dev
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The API listens on port 3001 and the local RPC on 8545; chain ID is 31337. Select the explicit local test-wallet entry to sign in with the public development Owner. These development accounts and ETH have no real-world value and must not be used for public funds.
 
-The deployment funds the treasury with 1 ETH and configures a $5 threshold for execution without separate Owner approval, a $10 hard per-payment cap and a $15 shared UTC daily budget. The local Mock Feed initially returns $3,000 per ETH.
+The deployment funds the pool with 1 ETH and configures a $5 threshold for execution without separate Owner approval, a $10 hard per-payment cap and a $15 shared UTC daily budget. The local Mock Feed initially returns $3,000 per ETH.
 
 Layout: `frontend/` (Vite + TypeScript UI), `backend/` (Node.js, viem, Zod, SQLite), `contracts/` (Solidity, Hardhat, deployment, contract tests), `packages/shared/` (API types and ABI), `agent/skills/` (intent parsing prompt; other Python prototypes are outside the current runtime).
 
-<a name="validation"></a>
-
-## <img src="docs/images/section-verify.svg" width="28" height="28" alt="Validation and evidence icon" align="absmiddle"> Validation
+## <img src="docs/images/section-verify.svg" width="24" height="24" alt="" align="absmiddle"> Validation
 
 ```bash
 npm run check
 npm run test:e2e
 ```
 
-Verified locally on October 20, 2026 with Node 24.19.0: type checks and production builds; **27 contract tests**, **37 backend test counts** including nested tests; **9 browser cases** across independent wallet (2) and reserve (7) stacks. Another 36 browser checks cover light/dark appearance, 1440/390/320px layouts, reachable previews and switching appearance without submitting payments.
-
-An extension-authorization/login race was also fixed that day, with **7 wallet-connection regression tests** passing: initial authorization, account or network changes during login, an account change during the final chain check, extension disconnection, an invalid provider interface, and isolation of local test sessions from extension events. These tests sign local login messages without submitting payments.
+Verified on the combined mainline on October 20, 2026 with Node 24: type checks and production builds, **34 contract tests**, **45 backend test counts** including nested tests, and **16 browser cases** (9 wallet/connection and 7 reserve cases). Another **7 offline model-launcher tests** pass. Browser cases cover real local payments, Owner approval and cancellation, account changes during login, disconnection, and recovery after refresh.
 
 Contract tests cover authorization, oracle boundaries, budgets, approvals, replay and direct-call rejection. Backend tests cover HTTP boundaries, persistent recovery, event binding and operating-wallet address binding with explicit chain fixtures. Browser tests use real local contracts and balances with a Mock Feed, including confirmation, approval/cancellation, changed suggestions, missing data, missing or mismatched operating-wallet identity, offline failure and refresh without duplicate payment.
 
@@ -200,26 +186,20 @@ The browser entry starts a fresh chain and database for each group. Stop manuall
 
 ### Deployment and execution evidence
 
-Published payment-execution evidence currently comes from the local chain. The v1 Sepolia deployment configuration has passed read-only checks; browser payment records will be published after end-to-end acceptance. Running `npm run deploy:local` writes the actual addresses to the local `contracts/deployments/localhost.json` file. Each executed task exposes its transaction receipt, matching contract event, recipient, amount and request hash in the verification view.
+The local payment flow is verified. Sepolia deployment and read-only binding checks exist; browser-payment acceptance with the latest policy-engine deployment remains pending. The [intent evaluation report](eval/REPORT.md) preserves historical model results and limitations; its scores do not describe the current version.
 
-Public-network contract addresses and transaction links will be published after a real deployment. A read-only Feed connectivity check does not establish that Aegis was deployed or made a payment.
+The demo covers one funding pool, one receiving operating wallet and native ETH. Scheduled automatic payments, multi-wallet management, subscriptions and CCIP execution are outside the delivered scope.
 
-<a name="team"></a>
+All published payment-execution evidence comes from the local chain; there is no accepted record of a Sepolia browser payment yet. Running `npm run deploy:local` writes the actual addresses to the local `contracts/deployments/localhost.json` file. Each executed task exposes its transaction receipt, matching contract event, recipient, amount and request hash in the verification view.
 
-## <img src="docs/images/section-team.svg" width="28" height="28" alt="The builders icon" align="absmiddle"> Team
+Public-network contract addresses and transaction links will be published after an independently verified deployment and an accepted browser payment. A read-only Feed connectivity check does not establish that Aegis was deployed or made a payment.
 
-<table align="center">
-  <tr>
-    <td align="center" width="220"><a href="https://github.com/mia03ther"><img src="https://github.com/mia03ther.png?size=120" width="72" height="72" alt="GitHub avatar of mia03ther"><br><b>MIA_Ether</b></a><br>Product · Frontend · Integration</td>
-    <td align="center" width="220"><a href="https://github.com/gitgdut"><img src="https://github.com/gitgdut.png?size=120" width="72" height="72" alt="GitHub avatar of gitgdut"><br><b>purple sun</b></a><br>Backend · Contracts</td>
-  </tr>
-  <tr>
-    <td align="center" width="220"><a href="https://github.com/qiwei999"><img src="https://github.com/qiwei999.png?size=120" width="72" height="72" alt="GitHub avatar of qiwei999"><br><b>qiwei999</b></a><br>AI intent parsing · Boundary validation</td>
-    <td align="center" width="220"><a href="https://github.com/mantianxingdou10086"><img src="https://github.com/mantianxingdou10086.png?size=120" width="72" height="72" alt="GitHub avatar of mantianxingdou10086"><br><b>mantianxingdou10086</b></a><br>Agent engineering · Intent evaluation</td>
-  </tr>
-</table>
+## <img src="docs/images/section-team.svg" width="24" height="24" alt="" align="absmiddle"> Team and documentation
 
-### Documentation
+<a href="https://github.com/mia03ther"><img src="https://github.com/mia03ther.png?size=80" width="28" height="28" alt="GitHub avatar of mia03ther" align="absmiddle"> <b>MIA_Ether</b></a> — Product · Frontend · Integration<br>
+<a href="https://github.com/gitgdut"><img src="https://github.com/gitgdut.png?size=80" width="28" height="28" alt="GitHub avatar of gitgdut" align="absmiddle"> <b>purple sun</b></a> — Backend · Contracts<br>
+<a href="https://github.com/qiwei999"><img src="https://github.com/qiwei999.png?size=80" width="28" height="28" alt="GitHub avatar of qiwei999" align="absmiddle"> <b>qiwei999</b></a> — AI intent parsing · Boundary validation<br>
+<a href="https://github.com/mantianxingdou10086"><img src="https://github.com/mantianxingdou10086.png?size=80" width="28" height="28" alt="GitHub avatar of mantianxingdou10086" align="absmiddle"> <b>mantianxingdou10086</b></a> — Agent engineering · Intent evaluation
 
 | Document | Contents |
 |---|---|
@@ -229,13 +209,11 @@ Public-network contract addresses and transaction links will be published after 
 | [Contract rules](contracts/README.md) | On-chain authorization rules and local deployment |
 | [Interface design system](frontend/DESIGN.md) | Layout, themes, components and accessibility |
 
-[Contributors](https://github.com/0xChainAegis/aegis-agent/graphs/contributors)
+[Contributors](https://github.com/0xChainAegis/aegis-agent/graphs/contributors) · MIT — see [LICENSE](LICENSE).
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/aegis-footer-dark.svg">
-    <img src="docs/images/aegis-footer-light.svg" width="100%" alt="Aegis · Agent wallet control. An iridescent glass-gradient brand banner.">
+    <img src="docs/images/aegis-footer-light.svg" width="100%" alt="Aegis footer mark">
   </picture>
 </p>
-
-MIT — see [LICENSE](LICENSE).
