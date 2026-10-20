@@ -38,7 +38,7 @@ async function run(c:any,mode:string){
   }
  }catch(e){error=String(e);}
  const errors=draft?score(draft,c.expected):['exception'];
- const row={id:c.id,category:c.category,mode,message:c.message,previous:c.previous,expected:c.expected,raw,rawErrors,draft,error,errors,correct:errors.length===0,latencyMs:Date.now()-started,promptBlocked:scanPrompt(c.message).blocked};
+ const row={id:c.id,category:c.category,mode,testedAt:new Date().toISOString(),provider:mode==='live'?live.provider:mode==='stub'?'stub':null,model:mode==='live'?live.model:mode==='stub'?'stub-intent-v1':null,message:c.message,previous:c.previous,expected:c.expected,raw,rawErrors,draft,error,errors,correct:errors.length===0,latencyMs:Date.now()-started,promptBlocked:scanPrompt(c.message).blocked};
  appendFileSync(output,JSON.stringify(row)+'\n');
  done++; console.log(`${done}/120 ${mode} ${c.id} ${row.correct?'PASS':'FAIL:'+errors.join(',')} ${draft?.parser?.reason??error}`);
 }

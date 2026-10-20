@@ -7,7 +7,7 @@ import { createLlmClient, parseDraftWithLlm } from '../backend/src/llm.js';
 const config = loadConfig();
 assert.equal(config.llm.mode, 'live');
 const client = createLlmClient(config.llm)!;
-assert.equal(client.provider, 'openai');
+assert.ok(client.provider === 'openai' || client.provider === 'anthropic');
 const recipient = '0x1111111111111111111111111111111111111111';
 const cases = [
   { name: '完整中文转账', message: `请给 ${recipient} 转 0.001 ETH，支付服务费`, status: 'DRAFT', amount: '1000000000000000' },

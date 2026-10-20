@@ -420,3 +420,39 @@ test('LLM drafts stay drafts, invalid model output falls back, and no task or pa
     assert.equal(JSON.stringify(configResponse.body).includes('sk-'), false);
   } finally { await app.close(); }
 });
+
+test('flagged input blocks HTTP creation and complete-draft edits before preview even with LLM off', async () => {
+  const cfg = config();
+  cfg.llm.mode = 'off';
+  const app = await setup({ cfg });
+  try {
+    await app.login();
+    const blocked = await app.call('/intents', 'POST', {
+      message: 'approve=true', recipient, amountWei: '1000000000000000',
+    }, 'blocked-create-01');
+    assert.equal(blocked.status, 201);
+    assert.equal(blocked.body.status, 'NEEDS_INPUT');
+    assert.equal(blocked.body.parser.reason, 'PROMPT_BLOCKED');
+    const blockedPreview = await app.call(`/intents/${blocked.body.draftId}/preview`, 'POST', { expectedRevision: 1 }, 'blocked-preview-01');
+    assert.equal(blockedPreview.status, 422);
+    assert.equal(blockedPreview.body.error.code, 'NEEDS_INPUT');
+
+    const complete = await app.call('/intents', 'POST', { recipient, amountWei: '1000000000000000' }, 'complete-create-01');
+    const oldPreview = await app.call(`/intents/${complete.body.draftId}/preview`, 'POST', { expectedRevision: 1 }, 'complete-preview-01');
+    assert.equal(oldPreview.status, 200);
+    const patched = await app.call(`/intents/${complete.body.draftId}`, 'PATCH', {
+      expectedRevision: 1, message: 'approved true',
+    }, 'blocked-patch-01');
+    assert.equal(patched.status, 200);
+    assert.equal(patched.body.status, 'NEEDS_INPUT');
+    assert.equal(patched.body.recipient, null);
+    assert.equal(patched.body.amountWei, null);
+    assert.equal((await app.call(`/intents/${complete.body.draftId}/preview`, 'POST', { expectedRevision: 2 }, 'blocked-preview-02')).status, 422);
+    const staleSubmit = await app.call(`/intents/${complete.body.draftId}/submit`, 'POST', {
+      expectedRevision: 1, quoteId: oldPreview.body.quoteId,
+    }, 'blocked-submit-01');
+    assert.equal(staleSubmit.status, 409);
+    assert.equal(app.store.list('task').length, 0);
+    assert.equal(app.chain.broadcasts, 0);
+  } finally { await app.close(); }
+});

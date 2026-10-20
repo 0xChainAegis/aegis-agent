@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { Config, LlmConfig } from './config.js';
 import type { ParserInfo } from '@aegis/shared';
 import { parseDraft, type DraftInput, type ParsedDraft } from './parser.js';
+export { scanPrompt } from './parser.js';
 
 const ETH_AMOUNT_RE = /(?:^|[^\w.])(\d+(?:\.\d+)?)\s*(ETH|ether|以太坊|以太)\b/gi;
 const UNSUPPORTED_UNIT_RE = /\b(USD|USDC|USDT|DAI|BTC|wei|gwei)\b|美元|美金|\$/i;
@@ -62,23 +63,6 @@ export function loadSkillPrompt() {
   } catch {
     throw new Error(`Aegis intent skill is missing: ${SKILL_PATH}`);
   }
-}
-
-export function scanPrompt(text: string) {
-  const patterns = [
-    /ignore\s+(all|any|the|previous|above|prior|earlier)/i,
-    /disregard\s+(all|any|the|previous|above|prior|earlier)/i,
-    /(forget|override|bypass)\s+(all|any|the|previous|above|prior|earlier|rules|instructions)/i,
-    /(reveal|print|show|repeat|output|leak|drop)\b.{0,40}(system|developer|hidden|original)?\s*prompt/i,
-    /system\s+prompt/i,
-    /you\s+are\s+now\b/i,
-    /new\s+instructions?\s*[:=]/i,
-    /developer\s+mode|jail\s*break|dan\s+mode|unrestricted\s+mode/i,
-    /(skip|bypass)\s+(the\s+)?(approval|confirmation)/i,
-    /ignore.{0,16}(rules|instructions)|忽略.{0,16}(规则|指令)|绕过.{0,16}(审批|规则)|跳过.{0,16}审批|立即付款|系统提示|泄露.{0,16}(提示|prompt)/i,
-  ];
-  const hits = patterns.filter(pattern => pattern.test(text)).map(pattern => pattern.source);
-  return { blocked: hits.length > 0, hits };
 }
 
 function extractJson(text: string): unknown {
@@ -247,11 +231,16 @@ export async function parseDraftWithLlm(
   const fallback = (reason: string): ParserInfo => ({
     kind: 'rule_parser', model: null, configuredModel: config.configuredModel, fallback: true, reason,
   });
+  // Parse first so a blocked input cannot regain complete fields through any
+  // fallback, explicit-field request, or previous draft when the model is off.
+  const authoritativeDraft = parseDraft(input, config.configuredModel, previous);
+  if (authoritativeDraft.parser.reason === 'PROMPT_BLOCKED') {
+    return { ...authoritativeDraft, parser: fallback('PROMPT_BLOCKED') };
+  }
   if (!client) return parseDraft(input, config.configuredModel, previous, fallback(config.llm.mode === 'off' ? 'LLM_DISABLED_RULE_PARSER_ONLY' : 'LLM_NOT_CONFIGURED'));
   if (input.message === undefined) return parseDraft(input, config.configuredModel, previous, fallback('LLM_NOT_USED_EXPLICIT_FIELDS'));
 
   const message = input.message ?? previous?.message ?? '';
-  if (scanPrompt(message).blocked) return parseDraft(input, config.configuredModel, previous, fallback('PROMPT_BLOCKED'));
 
   let raw: unknown;
   try {
@@ -277,7 +266,6 @@ export async function parseDraftWithLlm(
 
   // Validate against the current merged request. A prior value is only valid
   // when the latest input did not replace it or make that field ambiguous.
-  const authoritativeDraft = parseDraft(input, config.configuredModel, previous);
   const unsupportedRecipient = candidate.recipient !== null && candidate.recipient !== authoritativeDraft.recipient;
   const unsupportedAmount = candidate.amountWei !== null && candidate.amountWei !== authoritativeDraft.amountWei;
   if (unsupportedRecipient || unsupportedAmount) {

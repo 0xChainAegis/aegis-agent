@@ -20,6 +20,26 @@ const ETH_AMOUNT_RE = /(?:^|[^\w.])(\d+(?:\.\d+)?)\s*(ETH|ether|以太坊|以太
 const UNSUPPORTED_UNIT_RE = /\b(USD|USDC|USDT|DAI|BTC|wei|gwei)\b|美元|美金|\$/i;
 const NEGATIVE_ETH_RE = /-\s*\d+(?:\.\d+)?\s*(ETH|ether|以太坊|以太)/i;
 
+// A narrow input heuristic, shared by rule and LLM entry points. This does not
+// replace the explicit confirmation and on-chain authorization checks.
+export function scanPrompt(text: string) {
+  const patterns = [
+    /ignore\s+(all|any|the|previous|above|prior|earlier)/i,
+    /disregard\s+(all|any|the|previous|above|prior|earlier)/i,
+    /(forget|override|bypass)\s+(all|any|the|previous|above|prior|earlier|rules|instructions)/i,
+    /(reveal|print|show|repeat|output|leak|drop)\b.{0,40}(system|developer|hidden|original)?\s*prompt/i,
+    /system\s+prompt/i,
+    /you\s+are\s+now\b/i,
+    /new\s+instructions?\s*[:=]/i,
+    /developer\s+mode|jail\s*break|dan\s+mode|unrestricted\s+mode/i,
+    /(skip|bypass)\s+(the\s+)?(approval|confirmation)/i,
+    /\b(?:approve|approved)\b["']?\s*(?:(?:[:=]|\bto\b)\s*|\s+)["']?true\b/i,
+    /ignore.{0,16}(rules|instructions)|忽略.{0,16}(规则|指令)|绕过.{0,16}(审批|规则)|跳过.{0,16}审批|立即付款|系统提示|泄露.{0,16}(提示|prompt)/i,
+  ];
+  const hits = patterns.filter(pattern => pattern.test(text)).map(pattern => pattern.source);
+  return { blocked: hits.length > 0, hits };
+}
+
 function messageFields(message: string) {
   const addresses = [...new Set(message.match(/0x[a-fA-F0-9]{40}\b/g) ?? [])];
   const values = [...message.matchAll(ETH_AMOUNT_RE)];
@@ -50,7 +70,17 @@ function questionFor(
 
 export function parseDraft(input: DraftInput, configuredModel: string | null, previous?: Intent, parserOverride?: ParserInfo): ParsedDraft {
   const message = input.message ?? previous?.message ?? '';
+  const purpose = input.purpose ?? previous?.purpose ?? message;
   const parser: ParserInfo = parserOverride ?? { kind: 'rule_parser', model: null, configuredModel, fallback: !!configuredModel, reason: configuredModel ? 'LLM_NOT_ENABLED_RULE_PARSER_ONLY' : 'RULE_PARSER_ONLY' };
+  if (scanPrompt(message).blocked || scanPrompt(purpose).blocked) {
+    return {
+      message, recipient: null, to: null, amountWei: null,
+      purpose: purpose.slice(0, 500),
+      missingFields: ['prompt'], status: 'NEEDS_INPUT',
+      question: '请求包含修改规则或审批状态的指令；请重新提供收款地址与 ETH 金额。',
+      parser: { ...parser, kind: 'rule_parser', model: null, reason: 'PROMPT_BLOCKED' },
+    };
+  }
   let recipient: Address | null = (previous?.recipient as Address | null) ?? null;
   let amountWei: string | null = previous?.amountWei ?? null;
   let flags = { unsupportedUnit: false, amountConflict: false, recipientConflict: false, negative: false, tooPrecise: false };
@@ -96,7 +126,7 @@ export function parseDraft(input: DraftInput, configuredModel: string | null, pr
   if (!recipient) missingFields.push('recipient');
   if (!amountWei) missingFields.push(flags.unsupportedUnit ? 'unit' : 'amountWei');
   return {
-    message, recipient, to: recipient, amountWei, purpose: (input.purpose ?? previous?.purpose ?? message).slice(0, 500),
+    message, recipient, to: recipient, amountWei, purpose: purpose.slice(0, 500),
     missingFields, status: missingFields.length ? 'NEEDS_INPUT' as const : 'DRAFT' as const,
     question: missingFields.length ? questionFor(missingFields, flags) : null,
     parser,
