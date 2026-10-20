@@ -19,6 +19,9 @@ are not verified. Local tests do not establish safety for real funds.
   change future policy; attestations are not an immutable defense against them.
 - Native ETH payment and approval entry points use reentrancy protection.
   Legacy ERC20 and subscription payment exits are disabled.
+- The optional LLM is a draft-only parser. It cannot approve, sign, choose a
+  policy, create an executor nonce, submit a task or move funds; strict input
+  and output schemas reject extra authorization fields.
 
 ## Integrity and recovery
 
@@ -42,8 +45,14 @@ a fresh matching database rather than reusing old transaction evidence.
 
 The reserve threshold and target are browser-local suggestions. Rechecking is
 not an atomic guarantee of target balance or deduplication across browsers.
-The rule parser is not an LLM or a prompt-injection defense. Current records do
-not prove model reasoning, strategy quality or successful future Agent tasks.
+The default rule parser is deterministic. The optional LLM path is guarded by
+prompt-injection screening, a fixed skill, strict JSON validation and an
+explicit rule-parser fallback; it still does not prove model reasoning,
+strategy quality or future Agent behavior. `stub` mode is not live-model
+evidence, and live provider calls require an externally configured key that is
+never committed or exposed by the API. Current records do not prove that model
+reasoning was honest; only the contract event and Chainlink-backed policy can
+establish payment outcomes.
 
 RPC or Feed failure remains visible and never silently enables simulated success.
 The local test wallet uses public development accounts only on loopback chain

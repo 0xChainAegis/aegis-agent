@@ -70,7 +70,14 @@ export function createApiServer(service: AegisService) {
           addresses: { wallet: config.walletAddress, acl: config.aclAddress, attestation: config.attestationAddress, oracle: config.oracleAddress, feed: config.feedAddress, owner: config.ownerAddress, agent: config.agentAddress, recipient: config.recipientAddress },
           abi: { wallet: walletAbi, oracle: oracleAbi }, walletAbi, oracleAbi,
           readiness: await service.chain.readiness(), explorerBaseUrl: config.mode === 'testnet' ? 'https://sepolia.etherscan.io' : null,
-          planner: { kind: 'rule_parser', model: null, configuredModel: config.configuredModel, llmEnabled: false },
+          planner: {
+            kind: config.llm.mode === 'off' ? 'rule_parser' : 'llm',
+            mode: config.llm.mode,
+            provider: config.llm.provider,
+            model: config.llm.model,
+            configuredModel: config.configuredModel,
+            llmEnabled: config.llm.mode !== 'off',
+          },
           capabilities: { nativeEth: true, ownerApproval: 'owner_approve_and_execute', usdDecimals: 6, monitoring: false, x402: false },
           auth: { kind: 'personal_sign_challenge', domain: config.authDomain, chainId: config.chainId },
           docs: Object.keys(docs).map(slug => ({ slug, title: docs[slug].title, url: `/api/v1/docs/${slug}` })),
@@ -112,12 +119,12 @@ export function createApiServer(service: AegisService) {
         const raw = await readJson(request);
         const key = request.headers['idempotency-key'];
         const result = await service.idempotent(owner, `${request.method}:${path}`, Array.isArray(key) ? key[0] : key, raw, async () => {
-          if (request.method === 'POST' && path === '/api/v1/intents') return { status: 201, body: service.createIntent(owner, draftSchema.parse(raw)) };
+          if (request.method === 'POST' && path === '/api/v1/intents') return { status: 201, body: await service.createIntent(owner, draftSchema.parse(raw)) };
           if (intentMatch) {
             const [, id, action] = intentMatch;
             if (request.method === 'PATCH' && !action) {
               const { expectedRevision, ...input } = patchSchema.parse(raw);
-              return { status: 200, body: service.patchIntent(owner, id, expectedRevision, input) };
+              return { status: 200, body: await service.patchIntent(owner, id, expectedRevision, input) };
             }
             if (request.method === 'POST' && action === 'preview') {
               const body = previewSchema.parse(raw);

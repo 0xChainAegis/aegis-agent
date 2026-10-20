@@ -6,13 +6,23 @@ import type { RuntimeMode } from '@aegis/shared';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 export const LOCAL_AGENT_KEY: Hex = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d';
+export type LlmMode = 'off' | 'stub' | 'live';
+export type LlmProvider = 'stub' | 'anthropic' | 'openai';
+export interface LlmConfig {
+  mode: LlmMode;
+  provider: LlmProvider;
+  model: string | null;
+  apiKey: string | null;
+  baseUrl: string;
+  timeoutMs: number;
+}
 export interface Config {
   mode: RuntimeMode; chainId: number; rpcUrl: string; port: number; host: string; dbPath: string;
   walletAddress: Address; aclAddress: Address; attestationAddress: Address; oracleAddress: Address;
   feedAddress: Address; ownerAddress: Address; agentAddress: Address; recipientAddress: Address;
   abiVersion: string; deploymentReady: boolean; agentKey?: Hex; origins: string[];
   authDomain: string; sessionSeconds: number; quoteSeconds: number; requestSeconds: number;
-  maxAgeSeconds: number; configuredModel: string | null;
+  maxAgeSeconds: number; configuredModel: string | null; llm: LlmConfig;
 }
 export function loadConfig(env = process.env): Config {
   const deploymentPath = env.AEGIS_DEPLOYMENT_FILE ?? resolve(root, 'contracts/deployments/localhost.json');
@@ -30,6 +40,19 @@ export function loadConfig(env = process.env): Config {
   if (mode === 'local_chain' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) throw new Error('Local default key may only be used with loopback RPC');
   const agentKey = env.AEGIS_AGENT_PRIVATE_KEY || (mode === 'local_chain' ? LOCAL_AGENT_KEY : undefined);
   if (agentKey && !/^0x[0-9a-fA-F]{64}$/.test(agentKey)) throw new Error('AEGIS_AGENT_PRIVATE_KEY must be a 32-byte hexadecimal key');
+  const llmMode = env.AEGIS_LLM_MODE ?? 'off';
+  if (!['off', 'stub', 'live'].includes(llmMode)) throw new Error('AEGIS_LLM_MODE must be off, stub, or live');
+  const configuredProvider = env.AEGIS_LLM_PROVIDER ?? 'anthropic';
+  if (!['anthropic', 'openai'].includes(configuredProvider)) throw new Error('AEGIS_LLM_PROVIDER must be anthropic or openai');
+  const provider: LlmProvider = llmMode === 'stub' ? 'stub' : configuredProvider as LlmProvider;
+  const firstNonEmpty = (...values: Array<string | undefined>) => values.find(value => !!value?.trim()) ?? null;
+  const llmApiKey = firstNonEmpty(env.AEGIS_LLM_API_KEY, provider === 'anthropic' ? env.ANTHROPIC_API_KEY : env.OPENAI_API_KEY);
+  const llmModel = firstNonEmpty(env.AEGIS_LLM_MODEL, llmMode === 'stub' ? 'stub-intent-v1' : undefined);
+  const llmTimeoutMs = Number(env.AEGIS_LLM_TIMEOUT_MS ?? 2000);
+  if (!Number.isSafeInteger(llmTimeoutMs) || llmTimeoutMs < 1 || llmTimeoutMs > 30_000) throw new Error('AEGIS_LLM_TIMEOUT_MS must be an integer from 1 to 30000');
+  if (llmMode === 'live' && (!llmModel || !llmApiKey)) throw new Error('AEGIS_LLM_MODE=live requires AEGIS_LLM_MODEL and an API key');
+  const llmBaseUrl = env.AEGIS_LLM_BASE_URL ?? (provider === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1');
+  const llm: LlmConfig = { mode: llmMode as LlmMode, provider, model: llmModel, apiKey: llmApiKey, baseUrl: llmBaseUrl, timeoutMs: llmTimeoutMs };
   return {
     mode: mode as RuntimeMode, chainId, rpcUrl, port: Number(env.AEGIS_PORT ?? 3001), host: '127.0.0.1',
     dbPath: env.AEGIS_DB_PATH ?? resolve(root, 'backend/data/aegis.sqlite'),
@@ -40,6 +63,6 @@ export function loadConfig(env = process.env): Config {
     agentKey: agentKey as Hex | undefined,
     origins: ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:4173', 'http://127.0.0.1:4173'],
     authDomain: 'localhost', sessionSeconds: 3600, quoteSeconds: 60, requestSeconds: 600,
-    maxAgeSeconds: 3600, configuredModel: env.OPENAI_MODEL ?? null,
+    maxAgeSeconds: 3600, configuredModel: llmModel ?? env.OPENAI_MODEL ?? null, llm,
   };
 }

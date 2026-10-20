@@ -32,8 +32,8 @@
 Built during ETH Shenzhen 2026 Hackathon.
 
 - **Verified:** A single-treasury, single-operating-wallet native ETH top-up flow on local chain 31337 with a Mock ETH/USD Feed.
-- **Intent input:** A deterministic rule parser creates drafts and asks for missing or ambiguous details.
-- **Pending:** In-application verification with a live Chainlink Feed, Sepolia deployment and payment, and a live LLM.
+- **Intent input:** Rules by default, with configurable Anthropic or OpenAI-compatible draft parsing. Missing or ambiguous fields require clarification; offline stub tests pass.
+- **Pending:** In-application live Chainlink Feed verification, Sepolia deployment and payment, and real model API integration checks.
 
 <a name="problem-and-solution"></a>
 
@@ -119,9 +119,9 @@ The treasury balance, the executor's transaction-gas balance and the recipient's
 
 ETH/USD values the transferred principal; it is not a gas-price oracle. The sender pays transaction gas separately.
 
-**AI.** No live model participates today: natural-language input only produces a draft through the rule parser, and missing or ambiguous content (for example a USD amount) asks the user to clarify. Every draft needs a preview and user confirmation; parsing cannot bypass confirmation, on-chain limits, fresh prices or replay protection.
+**AI.** Rules are the default. `AEGIS_LLM_MODE=live` enables Anthropic or OpenAI-compatible draft parsing; `stub` is an offline test mode and does not demonstrate a real model. Model responses undergo schema and parameter checks: stale values cannot replace the user's new address or amount, and ambiguous fields require clarification. Every draft still needs preview and explicit confirmation, subject to on-chain limits, fresh prices and replay protection. See [integration configuration](docs/INTEGRATION.md).
 
-**Status.** The application is verified on a local chain with a Mock Feed. In-application live Feed verification, Sepolia deployment and payment, and a live LLM remain pending.
+**Status.** Local-chain and Mock Feed flows, offline model adapters and provider-error handling are verified. Real model API checks, in-application live Feed verification, and Sepolia deployment and payment remain pending.
 
 <a name="architecture-and-stack"></a>
 
@@ -168,7 +168,7 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The API listens on port 300
 
 The deployment funds the treasury with 1 ETH and configures a $5 threshold for execution without separate Owner approval, a $10 hard per-payment cap and a $15 shared UTC daily budget. The local Mock Feed initially returns $3,000 per ETH.
 
-Layout: `frontend/` (Vite + TypeScript UI), `backend/` (Node.js, viem, Zod, SQLite), `contracts/` (Solidity, Hardhat, deployment, contract tests), `packages/shared/` (API types and ABI), `agent/` (early Python prototype, outside the current runtime).
+Layout: `frontend/` (Vite + TypeScript UI), `backend/` (Node.js, viem, Zod, SQLite), `contracts/` (Solidity, Hardhat, deployment, contract tests), `packages/shared/` (API types and ABI), `agent/skills/` (intent parsing prompt; other Python prototypes are outside the current runtime).
 
 <a name="validation"></a>
 
@@ -179,7 +179,7 @@ npm run check
 npm run test:e2e
 ```
 
-Verified locally on October 20, 2026 with Node 24.19.0: type checks and production builds; **27 contract tests**, **28 backend test counts** including nested tests; **9 browser cases** across independent wallet (2) and reserve (7) stacks. Another 36 browser checks cover light/dark appearance, 1440/390/320px layouts, reachable previews and switching appearance without submitting payments.
+Verified locally on October 20, 2026 with Node 24.19.0: type checks and production builds; **27 contract tests**, **37 backend test counts** including nested tests; **9 browser cases** across independent wallet (2) and reserve (7) stacks. Another 36 browser checks cover light/dark appearance, 1440/390/320px layouts, reachable previews and switching appearance without submitting payments.
 
 Contract tests cover authorization, oracle boundaries, budgets, approvals, replay and direct-call rejection. Backend tests cover HTTP boundaries, persistent recovery, event binding and operating-wallet address binding with explicit chain fixtures. Browser tests use real local contracts and balances with a Mock Feed, including confirmation, approval/cancellation, changed suggestions, missing data, missing or mismatched operating-wallet identity, offline failure and refresh without duplicate payment.
 

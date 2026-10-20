@@ -4,9 +4,11 @@ Node 24+, TypeScript, viem, Zod and built-in SQLite. Start from the repository r
 
 The server reads `contracts/deployments/localhost.json`. Override its path with `AEGIS_DEPLOYMENT_FILE`, plus optional `AEGIS_MODE=local_chain|testnet|mock`, `AEGIS_RPC_URL`, `AEGIS_CHAIN_ID`, `AEGIS_DB_PATH`, `AEGIS_PORT`. `AEGIS_AGENT_PRIVATE_KEY` is an executor key, never an owner key. Only local chain 31337 on loopback RPC defaults to the public Hardhat account 1 key. Sepolia requires an explicitly configured agent key and matching deployment; missing RPC/Feed/key fails closed. The service never switches into mock on an error. Mock mode has no chain execution.
 
+Optional LLM draft parsing uses `AEGIS_LLM_MODE=off|stub|live` (default `off`), `AEGIS_LLM_PROVIDER=anthropic|openai`, `AEGIS_LLM_MODEL`, `AEGIS_LLM_BASE_URL`, `AEGIS_LLM_TIMEOUT_MS` and a process-environment API key. Keys are never committed or returned by `/api/v1/config`; `stub` is not live-model evidence.
+
 ## Contract and API boundary
 
-Amounts are decimal integer strings: ETH in wei, USD in USD6. Current parsing is explicitly `rule_parser`; no LLM network call or API key is needed. Only native ETH is supported. USD/other-token text asks for clarification, and never becomes an ETH amount. A complete draft still needs preview and explicit confirmation.
+Amounts are decimal integer strings: ETH in wei, USD in USD6. Parsing defaults to the deterministic `rule_parser`; an optional `AEGIS_LLM_MODE=stub|live` path can produce a draft with a strict JSON schema, but never authorizes or executes it. Only native ETH is supported. USD/other-token text asks for clarification, and never becomes an ETH amount. A complete draft still needs preview and explicit confirmation.
 
 Public reads: `GET /health`, `GET /api/v1/config`, `GET /api/v1/docs/:slug`. Login: `POST /api/v1/auth/challenge {address,chainId}`, sign the returned message with the configured owner wallet, then `POST /api/v1/auth/verify {challengeId,address,signature}`. Every challenge binds domain, address, chain, random nonce and expiration, and is consumed once. Use the returned token in `Authorization: Bearer ...`.
 
