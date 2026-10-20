@@ -29,7 +29,16 @@
   <a href="#团队">团队</a>
 </p>
 
-本项目诞生于 ETH Shenzhen 2026 黑客松。
+<p align="center">
+  <strong>本项目诞生于 ETH Shenzhen 2026 黑客松。</strong>
+</p>
+
+<details>
+  <summary>ETH Shenzhen 2026 · 参赛活动海报</summary>
+  <p align="center">
+    <img src="docs/images/eth-shenzhen-2026-poster.png" width="760" alt="ETH Shenzhen 2026 Hackathon 活动海报，展示活动名称与主办、赞助信息。">
+  </p>
+</details>
 
 - **已验证：** 本地开发链（31337）与 Mock ETH/USD Feed，单资金库、单运行钱包的原生 ETH 补给流程。
 - **意图输入：** 默认规则解析；可配置 Anthropic 或 OpenAI-compatible 模型生成草稿，缺失或有歧义的内容会要求补充。离线 stub 已验证。

@@ -29,7 +29,16 @@
   <a href="#team">Team</a>
 </p>
 
-Built during ETH Shenzhen 2026 Hackathon.
+<p align="center">
+  <strong>Built at the ETH Shenzhen 2026 Hackathon.</strong>
+</p>
+
+<details>
+  <summary>ETH Shenzhen 2026 · Hackathon poster</summary>
+  <p align="center">
+    <img src="docs/images/eth-shenzhen-2026-poster.png" width="760" alt="ETH Shenzhen 2026 Hackathon event poster with the event title, organizers and sponsors.">
+  </p>
+</details>
 
 - **Verified:** A single-treasury, single-operating-wallet native ETH top-up flow on local chain 31337 with a Mock ETH/USD Feed.
 - **Intent input:** Rules by default, with configurable Anthropic or OpenAI-compatible draft parsing. Missing or ambiguous fields require clarification; offline stub tests pass.
