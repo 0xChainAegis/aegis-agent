@@ -147,6 +147,8 @@ ETH/USD 用于计算转账本金的美元价值，并非 Gas 价格预言机；�
 npm ci --ignore-scripts
 ```
 
+> 合约工作区的依赖包含通过 Git SSH 拉取的包，部分 npm 版本（如 npm 12）会以 `EALLOWGIT` 拦截安装。遇到该错误需改用 HTTPS 或官方 tarball 解析这些依赖，并自行核对安装结果；这不是应用代码问题。
+
 终端 1：
 
 ```bash
@@ -208,6 +210,8 @@ npm run test:e2e
 | [安全边界](docs/SECURITY.md) | 授权、完整性与已知限制 |
 | [合约规则](contracts/README.md) | 链上授权规则与本地部署 |
 | [界面设计系统](frontend/DESIGN.md) | 布局、明暗主题、组件与可访问性 |
+| [真实 LLM 联调](docs/LLM-LIVE-LOCAL.md) | live 模式的环境变量、启动脚本与本地联调限制 |
+| [意图评测报告](eval/REPORT.md) | 40 条样本、三种解析器的结果与失败归因 |
 
 [贡献者](https://github.com/0xChainAegis/aegis-agent/graphs/contributors) · MIT 许可证，参见 [LICENSE](LICENSE)。
 
