@@ -8,7 +8,7 @@ source and is never deployed or granted access by the local deployment script.
 ## Local integration
 
 The project uses Hardhat 2 and npm-pinned solc 0.8.24. Configuration does not load
-`.env` files. Public deployment commands are disabled pending a separate review.
+`.env` files automatically.
 
 ```sh
 npm install
@@ -80,3 +80,29 @@ they can change future policy. This design constrains the agent, not the owner.
 production oracle or recipient implementations. Tests exercise real local ETH
 balance changes and receipts, stale/invalid feed data, approval rechecks, shared
 budgets across concurrent agents, expiry, replay, rejection rollback and reentry.
+
+## Sepolia deployment
+
+The Sepolia script is deliberately fail-closed. It requires an HTTPS RPC, a
+non-development private key, three distinct owner/agent/recipient identities,
+explicit USD6 policy limits, initial vault funding, and an explicitly supplied
+ETH/USD Feed address. Before deploying, it verifies the Feed bytecode and current
+round freshness. After deployment, it verifies contract bytecode, Wallet bindings,
+roles, locked Feed configuration, allowlist, tier, and vault balance.
+
+Copy `.env.example` to the ignored `contracts/.env`, fill every value, and verify
+`ETH_USD_FEED_ADDRESS` against Chainlink's official deployment list. Then run:
+
+```sh
+cd contracts
+set -a
+source .env
+set +a
+npm run validate:sepolia
+npm run deploy:sepolia
+```
+
+This is the only command in this section that broadcasts transactions and spends
+Sepolia ETH. A successful run writes the public, non-secret addresses and its
+verification summary to `deployments/sepolia.json`; that runtime file is ignored
+by Git. Never place an owner key in the backend executor-key setting.

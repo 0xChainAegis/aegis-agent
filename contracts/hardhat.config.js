@@ -14,7 +14,17 @@ subtask(TASK_COMPILE_SOLIDITY_GET_SOLC_BUILD).setAction(async ({ solcVersion }, 
   return runSuper();
 });
 
-const PRIVATE_KEY = process.env.PRIVATE_KEY || "0x0000000000000000000000000000000000000000000000000000000000000001";
+function configuredAccounts() {
+  if (!process.env.PRIVATE_KEY) return [];
+  const privateKey = process.env.PRIVATE_KEY.startsWith("0x")
+    ? process.env.PRIVATE_KEY
+    : `0x${process.env.PRIVATE_KEY}`;
+  if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) {
+    throw new Error("PRIVATE_KEY must be a 32-byte hex value");
+  }
+  return [privateKey];
+}
+
 const RPC_URL = process.env.RPC_URL || "https://ethereum-sepolia.publicnode.com";
 
 module.exports = {
@@ -29,12 +39,12 @@ module.exports = {
     localhost: { url: "http://127.0.0.1:8545", chainId: 31337 },
     sepolia: {
       url: RPC_URL,
-      accounts: [PRIVATE_KEY],
+      accounts: configuredAccounts(),
       chainId: 11155111,
     },
     scrollSepolia: {
       url: process.env.SCROLL_RPC_URL || "https://sepolia-rpc.scroll.io",
-      accounts: [PRIVATE_KEY],
+      accounts: configuredAccounts(),
       chainId: 534351,
     },
   },
