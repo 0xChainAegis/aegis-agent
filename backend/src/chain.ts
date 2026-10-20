@@ -25,10 +25,18 @@ const walletBindingAbi = parseAbi([
   'function acl() view returns (address)',
   'function attestations() view returns (address)',
   'function oracle() view returns (address)',
+  'function policyEngine() view returns (address)',
 ]);
 const oracleBindingAbi = parseAbi([
   'function feeds(address token) view returns (address)',
   'function configurationLocked() view returns (bool)',
+]);
+const policyEngineAbi = parseAbi([
+  'function owner() view returns (address)',
+  'function acl() view returns (address)',
+  'function oracle() view returns (address)',
+  'function authorizedConsumers(address consumer) view returns (bool)',
+  'function policyManagers(address manager) view returns (bool)',
 ]);
 export interface Budget {
   autoThresholdUsd6: string; hardPerTxUsd6: string; dailyLimitUsd6: string;
@@ -85,7 +93,7 @@ export function chainError(error: unknown): ApiError {
     [/version|policy changed/i, 'POLICY_CHANGED', 409],
     [/deadline|expired/i, 'QUOTE_EXPIRED', 409],
     [/max.*cost|slippage|quote|price moved/i, 'REQUOTE_REQUIRED', 409],
-    [/nonce/i, 'NONCE_CONFLICT', 409],
+    [/REQUEST_ALREADY_CONSUMED|replay|nonce/i, 'NONCE_CONFLICT', 409],
     [/insufficient|balance/i, 'INSUFFICIENT_FUNDS', 422],
     [/agent|role|unauthoriz/i, 'EXECUTOR_UNAUTHORIZED', 403],
     [/price|round|feed|oracle/i, 'FEED_UNAVAILABLE', 503],
@@ -112,7 +120,7 @@ export class ViemGateway implements Gateway {
   async readiness() {
     try {
       await this.requireChain();
-      const addresses = [this.config.walletAddress, this.config.aclAddress, this.config.attestationAddress, this.config.oracleAddress, this.config.feedAddress];
+      const addresses = [this.config.walletAddress, this.config.aclAddress, this.config.attestationAddress, this.config.oracleAddress, this.config.policyEngineAddress, this.config.feedAddress];
       const code = await Promise.all(addresses.map(address => this.publicClient.getBytecode({ address })));
       if (code.some(value => !value || value === '0x')) throw new ApiError(503, 'CONTRACT_MISSING', '部署地址没有合约 bytecode');
       if (!this.account) throw new ApiError(503, 'EXECUTOR_KEY_MISSING', '执行账户未配置；测试网不会使用本地公开私钥');
@@ -168,17 +176,26 @@ export class ViemGateway implements Gateway {
     } catch (error) { throw chainError(error); }
   }
   private async checkDeploymentBindings(blockNumber: bigint) {
-    const [owner, acl, attestations, oracle, feed, locked] = await Promise.all([
+    const [owner, acl, attestations, oracle, policyEngine, policyOwner, policyAcl, policyOracle, consumerAuthorized, managerAuthorized, feed, locked] = await Promise.all([
       this.publicClient.readContract({ address: this.config.walletAddress, abi: walletBindingAbi, functionName: 'owner', blockNumber }),
       this.publicClient.readContract({ address: this.config.walletAddress, abi: walletBindingAbi, functionName: 'acl', blockNumber }),
       this.publicClient.readContract({ address: this.config.walletAddress, abi: walletBindingAbi, functionName: 'attestations', blockNumber }),
       this.publicClient.readContract({ address: this.config.walletAddress, abi: walletBindingAbi, functionName: 'oracle', blockNumber }),
+      this.publicClient.readContract({ address: this.config.walletAddress, abi: walletBindingAbi, functionName: 'policyEngine', blockNumber }),
+      this.publicClient.readContract({ address: this.config.policyEngineAddress, abi: policyEngineAbi, functionName: 'owner', blockNumber }),
+      this.publicClient.readContract({ address: this.config.policyEngineAddress, abi: policyEngineAbi, functionName: 'acl', blockNumber }),
+      this.publicClient.readContract({ address: this.config.policyEngineAddress, abi: policyEngineAbi, functionName: 'oracle', blockNumber }),
+      this.publicClient.readContract({ address: this.config.policyEngineAddress, abi: policyEngineAbi, functionName: 'authorizedConsumers', args: [this.config.walletAddress], blockNumber }),
+      this.publicClient.readContract({ address: this.config.policyEngineAddress, abi: policyEngineAbi, functionName: 'policyManagers', args: [this.config.walletAddress], blockNumber }),
       this.publicClient.readContract({ address: this.config.oracleAddress, abi: oracleBindingAbi, functionName: 'feeds', args: [zeroAddress], blockNumber }),
       this.publicClient.readContract({ address: this.config.oracleAddress, abi: oracleBindingAbi, functionName: 'configurationLocked', blockNumber }),
     ]);
     if (!equal(owner, this.config.ownerAddress)) throw new ApiError(503, 'OWNER_MISMATCH', '部署配置的 owner 与 Wallet 不一致');
-    if (!equal(acl, this.config.aclAddress) || !equal(attestations, this.config.attestationAddress)) {
-      throw new ApiError(503, 'DEPLOYMENT_BINDING_MISMATCH', 'Wallet 绑定的 ACL/Attestation 与部署配置不一致');
+    if (!equal(acl, this.config.aclAddress) || !equal(attestations, this.config.attestationAddress) || !equal(policyEngine, this.config.policyEngineAddress)) {
+      throw new ApiError(503, 'DEPLOYMENT_BINDING_MISMATCH', 'Wallet 绑定的 ACL/Attestation/PolicyEngine 与部署配置不一致');
+    }
+    if (!equal(policyOwner, this.config.ownerAddress) || !equal(policyAcl, this.config.aclAddress) || !equal(policyOracle, this.config.oracleAddress) || !consumerAuthorized || !managerAuthorized) {
+      throw new ApiError(503, 'POLICY_ENGINE_MISMATCH', 'PolicyEngine 绑定或 Wallet 授权与部署配置不一致');
     }
     if (!equal(oracle, this.config.oracleAddress) || !equal(feed, this.config.feedAddress) || !locked) {
       throw new ApiError(503, 'ORACLE_CONFIGURATION_CHANGED', 'Oracle/Feed 未锁定或与部署配置不一致');

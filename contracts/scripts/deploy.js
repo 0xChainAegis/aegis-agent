@@ -55,14 +55,17 @@ async function main() {
   const acl = await deploy("AegisAccessControl", [config.ownerAddress, config.agentAddress], config.confirmations);
   const attestations = await deploy("AegisAttestation", [config.ownerAddress, config.agentAddress], config.confirmations);
   const oracle = await deploy("AegisPriceOracle", [config.ownerAddress], config.confirmations);
+  const policy = await deploy("AegisPolicyEngine", [config.ownerAddress, await acl.getAddress()], config.confirmations);
   const wallet = await deploy(
     "AegisWallet",
-    [config.ownerAddress, await acl.getAddress(), await attestations.getAddress()],
+    [config.ownerAddress, await acl.getAddress(), await attestations.getAddress(), await policy.getAddress()],
     config.confirmations,
   );
 
   await waitFor(oracle.setFeed(ethers.ZeroAddress, config.feedAddress, 18), config.confirmations);
   await waitFor(oracle.lockConfiguration(), config.confirmations);
+  await waitFor(policy.setConsumer(await wallet.getAddress(), true), config.confirmations);
+  await waitFor(policy.setPolicyManager(await wallet.getAddress(), true), config.confirmations);
 
   const attesterRole = await attestations.ATTESTER_ROLE();
   const approverRole = await attestations.APPROVER_ROLE();
@@ -83,6 +86,7 @@ async function main() {
     aclAddress: await acl.getAddress(),
     attestationAddress: await attestations.getAddress(),
     oracleAddress: await oracle.getAddress(),
+    policyEngineAddress: await policy.getAddress(),
     feedAddress: config.feedAddress,
     ownerAddress: config.ownerAddress,
     agentAddress: config.agentAddress,
@@ -90,7 +94,7 @@ async function main() {
   };
 
   const codeChecks = await Promise.all(
-    [addresses.walletAddress, addresses.aclAddress, addresses.attestationAddress, addresses.oracleAddress]
+    [addresses.walletAddress, addresses.aclAddress, addresses.attestationAddress, addresses.oracleAddress, addresses.policyEngineAddress]
       .map((address) => ethers.provider.getCode(address)),
   );
   if (codeChecks.some((code) => code === "0x")) throw new Error("A deployed contract has no bytecode");
@@ -99,7 +103,13 @@ async function main() {
     (await wallet.owner()) === addresses.ownerAddress &&
     (await wallet.acl()) === addresses.aclAddress &&
     (await wallet.attestations()) === addresses.attestationAddress &&
+    (await wallet.policyEngine()) === addresses.policyEngineAddress &&
     (await wallet.oracle()) === addresses.oracleAddress &&
+    (await policy.owner()) === addresses.ownerAddress &&
+    (await policy.acl()) === addresses.aclAddress &&
+    (await policy.oracle()) === addresses.oracleAddress &&
+    (await policy.authorizedConsumers(addresses.walletAddress)) &&
+    (await policy.policyManagers(addresses.walletAddress)) &&
     (await oracle.feeds(ethers.ZeroAddress)) === addresses.feedAddress &&
     (await oracle.configurationLocked()) &&
     (await acl.hasRole(agentRole, addresses.agentAddress)) &&
@@ -111,7 +121,7 @@ async function main() {
   if (!bindingsValid) throw new Error("Post-deployment verification failed");
 
   const deployment = {
-    chainId: Number(chain.chainId), network: network.name, ...addresses, abiVersion: "aegis.native.v1",
+    chainId: Number(chain.chainId), network: network.name, ...addresses, abiVersion: "aegis.native-policy.v2",
     deployedAt: new Date().toISOString(),
     verification: {
       contractCodePresent: true, bindingsVerified: true, feedConfigurationLocked: true,

@@ -15,9 +15,12 @@ export AEGIS_AGENT_PRIVATE_KEY="0x_your_agent_key"
 npm run start --workspace backend
 ```
 
-`GET /health` returns 200 only after checking all five bytecode addresses, Wallet
-owner/ACL/Attestation/Oracle bindings, the locked native ETH Feed, executor and
-Wallet roles, Feed freshness, and both Wallet and executor test-ETH balances.
+`GET /health` returns 200 only after checking all six bytecode addresses: Wallet,
+ACL, Attestation, Oracle, PolicyEngine and Feed. It also verifies Wallet and
+PolicyEngine bindings, Wallet consumer/manager authorization, the locked native
+ETH Feed, executor and Wallet roles, Feed freshness, and both Wallet and executor
+test-ETH balances. Testnet deployment files must include `policyEngineAddress`;
+old v1 deployment files fail closed instead of silently bypassing the engine.
 
 Optional LLM draft parsing uses `AEGIS_LLM_MODE=off|stub|live` (default `off`), `AEGIS_LLM_PROVIDER=anthropic|openai`, `AEGIS_LLM_MODEL`, `AEGIS_LLM_BASE_URL`, `AEGIS_LLM_TIMEOUT_MS` and a process-environment API key. Keys are never committed or returned by `/api/v1/config`; `stub` is not live-model evidence.
 

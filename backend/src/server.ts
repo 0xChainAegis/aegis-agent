@@ -66,8 +66,8 @@ export function createApiServer(service: AegisService) {
         send(200, {
           chainId: config.chainId, rpcUrl: publicRpc(config.rpcUrl), abiVersion: config.abiVersion,
           walletAddress: config.walletAddress, aclAddress: config.aclAddress, attestationAddress: config.attestationAddress,
-          oracleAddress: config.oracleAddress, feedAddress: config.feedAddress, ownerAddress: config.ownerAddress, agentAddress: config.agentAddress, recipientAddress: config.recipientAddress,
-          addresses: { wallet: config.walletAddress, acl: config.aclAddress, attestation: config.attestationAddress, oracle: config.oracleAddress, feed: config.feedAddress, owner: config.ownerAddress, agent: config.agentAddress, recipient: config.recipientAddress },
+          oracleAddress: config.oracleAddress, policyEngineAddress: config.policyEngineAddress, feedAddress: config.feedAddress, ownerAddress: config.ownerAddress, agentAddress: config.agentAddress, recipientAddress: config.recipientAddress,
+          addresses: { wallet: config.walletAddress, acl: config.aclAddress, attestation: config.attestationAddress, oracle: config.oracleAddress, policyEngine: config.policyEngineAddress, feed: config.feedAddress, owner: config.ownerAddress, agent: config.agentAddress, recipient: config.recipientAddress },
           abi: { wallet: walletAbi, oracle: oracleAbi }, walletAbi, oracleAbi,
           readiness: await service.chain.readiness(), explorerBaseUrl: config.mode === 'testnet' ? 'https://sepolia.etherscan.io' : null,
           planner: {

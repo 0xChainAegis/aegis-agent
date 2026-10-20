@@ -12,11 +12,11 @@ Node.js 24+，仓库根目录执行 `npm ci --ignore-scripts`；无锁文件时�
 
 前端 `http://localhost:5173`；API `http://127.0.0.1:3001`；RPC `http://127.0.0.1:8545`；Chain ID `31337`。后端绑定 loopback，CORS 仅允许代码配置的 localhost 前端来源。
 
-默认 Owner 为公开 Hardhat 账户 0，Agent 为账户 1，允许收款人为账户 2。1 ETH 在 Wallet 合约金库里，Agent 自己的余额用于交易 Gas。地址以部署 JSON 或 `GET /api/v1/config` 为准，不在文档或 UI 中粘贴私钥。
+默认 Owner 为公开 Hardhat 账户 0，Agent 为账户 1，允许收款人为账户 2。1 ETH 在 Wallet 合约金库里，Agent 自己的余额用于交易 Gas。PolicyEngine 统一判断 ALLOW、REQUIRE_APPROVAL 或 REJECT，并由所有已授权执行器共享 UTC 日预算；当前只授权 Wallet。地址以部署 JSON 或 `GET /api/v1/config` 为准，不在文档或 UI 中粘贴私钥。
 
 Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算 $15。`0.001 ETH` 约 $3 自动执行，`0.002 ETH` 约 $6 等待 Owner，`0.004 ETH` 约 $12 硬阻断。日预算按实际执行累计；pending 不预留预算，审批可能因其他付款先占用预算而失败。
 
-后端不自动读取 `.env`。可使用进程环境变量 `AEGIS_MODE`、`AEGIS_DEPLOYMENT_FILE`、`AEGIS_RPC_URL`、`AEGIS_CHAIN_ID`、`AEGIS_DB_PATH`、`AEGIS_PORT`、`AEGIS_AGENT_PRIVATE_KEY`。只有本地 31337 + loopback RPC 可默认使用公开账户 1；测试网没有显式 Agent 密钥会阻断执行。后台不持有 Owner 私钥。旧公网部署脚本已禁用，需要单独人工审阅与验证。
+后端不自动读取 `.env`。可使用进程环境变量 `AEGIS_MODE`、`AEGIS_DEPLOYMENT_FILE`、`AEGIS_RPC_URL`、`AEGIS_CHAIN_ID`、`AEGIS_DB_PATH`、`AEGIS_PORT`、`AEGIS_AGENT_PRIVATE_KEY`。只有本地 31337 + loopback RPC 可默认使用公开账户 1；测试网没有显式 Agent 密钥会阻断执行。后台不持有 Owner 私钥。测试网部署文件必须包含 `policyEngineAddress`；旧 v1 文件不会被兼容性猜测，需显式重新部署 v2。
 
 可选的意图解析模式由 `AEGIS_LLM_MODE=off|stub|live` 控制，默认 `off`。live 模式需要 `AEGIS_LLM_PROVIDER=anthropic|openai`、`AEGIS_LLM_MODEL` 和进程环境中的 API key；key 不写入仓库、不返回 API。`stub` 只用于离线演示和可重复测试，不代表真实模型效果。
 
@@ -51,7 +51,7 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 公共读取：
 
 - `GET /health` 或 `/api/v1/health` 返回 readiness；未就绪 HTTP 503，不模拟成功。
-- `GET /api/v1/config` 返回链、部署地址、`abiVersion,abi.wallet,abi.oracle`、readiness、实际 parser 与静态文档链接。`planner` 包含 `mode/provider/model/llmEnabled`，但不返回 API key、完整提示词或凭据。含凭据的 RPC 不直接暴露。
+- `GET /api/v1/config` 返回链、部署地址（含 `policyEngineAddress`）、`abiVersion,abi.wallet,abi.oracle`、readiness、实际 parser 与静态文档链接。`planner` 包含 `mode/provider/model/llmEnabled`，但不返回 API key、完整提示词或凭据。含凭据的 RPC 不直接暴露。
 - `GET /api/v1/docs/:slug` 返回固定 allowlist 的 Markdown 和链接，没有 RAG。
 
 以下接口需要 Bearer 会话；业务写接口还需 `Idempotency-Key`：
@@ -103,11 +103,11 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 
 ## 验证与当前证据
 
-回执 status=1 只证明交易成功执行。还需核对 Wallet 事件的同一请求：NativeTransferExecuted 才是已执行；NativeTransferQueued 是待审批；NativeTransferCancelled 是已取消。缺预期事件或参数不符，不得显示付款成功。
+回执 status=1 只证明交易成功执行。还需核对 Wallet 事件的同一请求：NativeTransferExecuted 才是已执行；NativeTransferQueued 是待审批；NativeTransferCancelled 是已取消。PolicyEngine 的 BudgetConsumed 记录同一 requestHash 的动作类型、策略决定和累计预算，但不能单独替代付款事件。缺预期事件或参数不符，不得显示付款成功。
 
 请求 hash 使用与合约一致的编码，绑定 domain、chainId、Wallet、Agent、收款人、amountWei、maxUsdCost6、nonce、deadline、policyVersion。它不是自然语言、模型推理与执行后完整记录的证明。结果证据来自回执/事件；一次 mined 确认不代表最终不可逆。
 
-2026 年 10 月 20 日本地验证通过类型检查、生产构建、27 项合约测试、36 项后端测试计数（含嵌套测试）和 9 条浏览器用例（钱包组 2 条、储备组 7 条）。后端链侧使用显式假适配器；浏览器分成两组，各自从零启动真实本地 RPC、部署、SQLite、API 和界面，核对接收余额增量及对应事件。覆盖付款、Owner 审批、取消、硬预算拒绝、准备金建议重查、刷新、缺失/离线数据，以及 LLM 草稿严格 schema、注入回退、模型不得补全字段和无任务创建。当前使用 Mock Feed；公开测试网和真实 Feed 尚未验证。
+2026 年 10 月 20 日本地验证通过类型检查、生产构建、34 项合约测试、41 项后端测试计数（含嵌套测试）和 16 条浏览器用例（钱包/Provider 组 9 条、储备组 7 条）。后端链侧使用显式假适配器；浏览器分成两组，各自从零启动真实本地 RPC、部署、SQLite、API 和界面，核对接收余额增量及对应事件。覆盖统一策略决策、跨消费者共享预算、消费回滚与防重放，以及付款、Owner 审批、取消、硬预算拒绝、准备金建议重查、刷新、缺失/离线数据、LLM 草稿严格 schema、注入回退、模型不得补全字段和无任务创建。当前使用 Mock Feed；PolicyEngine v2 的公开测试网和真实 Feed 尚未验证。
 
 ## 重置本地链
 

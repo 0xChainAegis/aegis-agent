@@ -13,7 +13,7 @@ const UNSAFE_PUBLIC_KEYS = new Set([
 ]);
 const deploymentAddressKeys = [
   'walletAddress', 'aclAddress', 'attestationAddress', 'oracleAddress',
-  'feedAddress', 'ownerAddress', 'agentAddress', 'recipientAddress',
+  'policyEngineAddress', 'feedAddress', 'ownerAddress', 'agentAddress', 'recipientAddress',
 ] as const;
 export type LlmMode = 'off' | 'stub' | 'live';
 export type LlmProvider = 'stub' | 'anthropic' | 'openai';
@@ -28,7 +28,7 @@ export interface LlmConfig {
 export interface Config {
   mode: RuntimeMode; chainId: number; rpcUrl: string; port: number; host: string; dbPath: string;
   walletAddress: Address; aclAddress: Address; attestationAddress: Address; oracleAddress: Address;
-  feedAddress: Address; ownerAddress: Address; agentAddress: Address; recipientAddress: Address;
+  policyEngineAddress: Address; feedAddress: Address; ownerAddress: Address; agentAddress: Address; recipientAddress: Address;
   abiVersion: string; deploymentReady: boolean; agentKey?: Hex; origins: string[];
   authDomain: string; sessionSeconds: number; quoteSeconds: number; requestSeconds: number;
   maxAgeSeconds: number; configuredModel: string | null; llm: LlmConfig;
@@ -79,7 +79,7 @@ export function loadConfig(env = process.env): Config {
     mode: mode as RuntimeMode, chainId, rpcUrl, port: Number(env.AEGIS_PORT ?? 3001), host: '127.0.0.1',
     dbPath: env.AEGIS_DB_PATH ?? resolve(root, 'backend/data/aegis.sqlite'),
     walletAddress: address('walletAddress'), aclAddress: address('aclAddress'), attestationAddress: address('attestationAddress'),
-    oracleAddress: address('oracleAddress'), feedAddress: address('feedAddress'), ownerAddress: address('ownerAddress'),
+    oracleAddress: address('oracleAddress'), policyEngineAddress: address('policyEngineAddress'), feedAddress: address('feedAddress'), ownerAddress: address('ownerAddress'),
     agentAddress: address('agentAddress'), recipientAddress: address('recipientAddress'),
     abiVersion: deployment.abiVersion ?? 'aegis.v1', deploymentReady,
     agentKey: agentKey as Hex | undefined,

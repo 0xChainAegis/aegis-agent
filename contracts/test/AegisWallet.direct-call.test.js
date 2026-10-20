@@ -13,19 +13,23 @@ describe("AegisWallet direct-call boundaries", function () {
     const att = await ethers.deployContract("AegisAttestation", [owner.address, agent.address]);
     const feed = await ethers.deployContract("MockV3Aggregator", [8, PRICE]);
     const oracle = await ethers.deployContract("AegisPriceOracle", [owner.address]);
+    const policy = await ethers.deployContract("AegisPolicyEngine", [owner.address, await acl.getAddress()]);
     const wallet = await ethers.deployContract("AegisWallet", [
       owner.address,
       await acl.getAddress(),
       await att.getAddress(),
+      await policy.getAddress(),
     ]);
     await oracle.setFeed(ethers.ZeroAddress, await feed.getAddress(), 18);
     await oracle.lockConfiguration();
+    await policy.setConsumer(await wallet.getAddress(), true);
+    await policy.setPolicyManager(await wallet.getAddress(), true);
     await att.grantRole(await att.ATTESTER_ROLE(), await wallet.getAddress());
     await att.grantRole(await att.APPROVER_ROLE(), await wallet.getAddress());
     await wallet.configurePolicy(await oracle.getAddress(), 5n * USD, 10n * USD, 15n * USD, 3600);
     await wallet.setRecipientAllowed(recipient.address, true);
     await owner.sendTransaction({ to: await wallet.getAddress(), value: ethers.parseEther(vaultEth) });
-    return { owner, agent, recipient, other, acl, att, feed, oracle, wallet };
+    return { owner, agent, recipient, other, acl, att, feed, oracle, policy, wallet };
   }
 
   async function deadline() {

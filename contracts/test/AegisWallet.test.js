@@ -7,7 +7,7 @@ const ETH6 = ethers.parseEther("0.002");
 const ETH9 = ethers.parseEther("0.003");
 
 describe("AegisWallet native USD authorization", function () {
-  let owner, agent, recipient, other, acl, att, feed, oracle, wallet;
+  let owner, agent, recipient, other, acl, att, feed, oracle, policy, wallet;
 
   beforeEach(async function () {
     [owner, agent, recipient, other] = await ethers.getSigners();
@@ -15,9 +15,12 @@ describe("AegisWallet native USD authorization", function () {
     att = await ethers.deployContract("AegisAttestation", [owner.address, agent.address]);
     feed = await ethers.deployContract("MockV3Aggregator", [8, ethers.parseUnits("3000", 8)]);
     oracle = await ethers.deployContract("AegisPriceOracle", [owner.address]);
-    wallet = await ethers.deployContract("AegisWallet", [owner.address, await acl.getAddress(), await att.getAddress()]);
+    policy = await ethers.deployContract("AegisPolicyEngine", [owner.address, await acl.getAddress()]);
+    wallet = await ethers.deployContract("AegisWallet", [owner.address, await acl.getAddress(), await att.getAddress(), await policy.getAddress()]);
     await oracle.setFeed(ethers.ZeroAddress, await feed.getAddress(), 18);
     await oracle.lockConfiguration();
+    await policy.setConsumer(await wallet.getAddress(), true);
+    await policy.setPolicyManager(await wallet.getAddress(), true);
     await att.grantRole(await att.ATTESTER_ROLE(), await wallet.getAddress());
     await att.grantRole(await att.APPROVER_ROLE(), await wallet.getAddress());
     await wallet.configurePolicy(await oracle.getAddress(), 5n * USD, 10n * USD, 15n * USD, 3600);
@@ -270,7 +273,7 @@ describe("AegisWallet native USD authorization", function () {
       changed[index] = index < 2 ? other.address : BigInt(values[index]) + 1n;
       expect(await wallet.hashRequest(...changed)).not.to.equal(hash);
     }
-    const secondWallet = await ethers.deployContract("AegisWallet", [owner.address, await acl.getAddress(), await att.getAddress()]);
+    const secondWallet = await ethers.deployContract("AegisWallet", [owner.address, await acl.getAddress(), await att.getAddress(), await policy.getAddress()]);
     expect(await secondWallet.hashRequest(...values)).not.to.equal(hash);
   });
 });
