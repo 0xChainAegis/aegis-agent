@@ -635,9 +635,9 @@ app.addEventListener('click', event => {
   }
 });
 
-function invalidateWallet() { setToken(''); disconnectProvider(); sessionStorage.removeItem('aegis.address'); sessionStorage.removeItem('aegis.wallet-kind'); state.walletKind = ''; state.address = ''; state.wallet = null; state.tasks = []; state.ownerReview = null; state.drawer = ''; notify('钱包账户或网络已变更，请重新连接并签名登录。', true); }
+function invalidateWallet() { if (!connected() || state.walletKind !== 'browser') return; setToken(''); disconnectProvider(); sessionStorage.removeItem('aegis.address'); sessionStorage.removeItem('aegis.wallet-kind'); state.walletKind = ''; state.address = ''; state.wallet = null; state.tasks = []; state.ownerReview = null; state.drawer = ''; notify('钱包账户或网络已变更，请重新连接并签名登录。', true); }
 let observedProvider: unknown;
-function registerWalletListeners() { if (window.ethereum && window.ethereum !== observedProvider) { window.ethereum.on?.('accountsChanged', invalidateWallet); window.ethereum.on?.('chainChanged', invalidateWallet); observedProvider = window.ethereum; } }
+function registerWalletListeners() { if (window.ethereum && window.ethereum !== observedProvider) { window.ethereum.on?.('accountsChanged', invalidateWallet); window.ethereum.on?.('chainChanged', invalidateWallet); window.ethereum.on?.('disconnect', invalidateWallet); observedProvider = window.ethereum; } }
 registerWalletListeners();
 render();
 void refresh(true);

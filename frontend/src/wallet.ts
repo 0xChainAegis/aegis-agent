@@ -57,19 +57,45 @@ export function disconnectProvider() { provider = undefined; }
 
 export async function connectWallet(expectedChainId: number, localConfig?: Data) {
   if (!localConfig && !window.ethereum) throw new Error('未发现浏览器钱包。请安装或启用 MetaMask，或在本地环境选择本地测试钱包。');
-  provider = localConfig ? localProvider(localConfig) : window.ethereum!;
-  const accounts = await provider.request({ method: 'eth_requestAccounts' }) as string[];
+  const selectedProvider = localConfig ? localProvider(localConfig) : window.ethereum;
+  if (!selectedProvider || typeof selectedProvider.request !== 'function') throw new Error('浏览器钱包接口尚未就绪。请启用钱包插件并刷新页面后重试。');
+  const accounts = await selectedProvider.request({ method: 'eth_requestAccounts' }) as string[];
   if (!accounts?.[0] || !isAddress(accounts[0])) throw new Error('钱包没有提供有效账户。');
-  const chainId = Number(await provider.request({ method: 'eth_chainId' }));
+  const chainId = Number(await selectedProvider.request({ method: 'eth_chainId' }));
   if (expectedChainId && chainId !== expectedChainId) {
     throw new Error(`网络不匹配：请在钱包中切换到 ${expectedChainId === 31337 ? 'Local 本地开发链' : `链 ${expectedChainId}`} 后重新连接。`);
   }
   const address = accounts[0];
-  const challenge = await api('/auth/challenge', 'POST', { address, chainId });
-  const signature = await provider.request({ method: 'personal_sign', params: [stringToHex(String(challenge.message)), address] });
-  const session = await api('/auth/verify', 'POST', { address, challengeId: challenge.challengeId, signature });
-  if (typeof session.token === 'string') setToken(session.token);
-  return { address, chainId };
+  let identityChanged = false;
+  const accountsChanged = (value: unknown) => { if (!Array.isArray(value) || String(value[0]).toLowerCase() !== address.toLowerCase()) identityChanged = true; };
+  const chainChanged = (value: unknown) => { if (Number(value) !== chainId) identityChanged = true; };
+  const disconnected = () => { identityChanged = true; };
+  // Track changes across async reads, including a change during the final chain check.
+  const assertWalletUnchanged = async () => {
+    const currentAccounts = await selectedProvider.request({ method: 'eth_accounts' }) as string[];
+    const currentChainId = Number(await selectedProvider.request({ method: 'eth_chainId' }));
+    if (identityChanged || currentAccounts?.[0]?.toLowerCase() !== address.toLowerCase() || currentChainId !== chainId) {
+      throw new Error('钱包账户或网络已变更，请重新连接并签名登录。');
+    }
+  };
+  try {
+    selectedProvider.on?.('accountsChanged', accountsChanged);
+    selectedProvider.on?.('chainChanged', chainChanged);
+    selectedProvider.on?.('disconnect', disconnected);
+    const challenge = await api('/auth/challenge', 'POST', { address, chainId });
+    const signature = await selectedProvider.request({ method: 'personal_sign', params: [stringToHex(String(challenge.message)), address] });
+    await assertWalletUnchanged();
+    const session = await api('/auth/verify', 'POST', { address, challengeId: challenge.challengeId, signature });
+    await assertWalletUnchanged();
+    if (typeof session.token !== 'string' || !session.token) throw new Error('登录服务未返回有效会话，请重新连接。');
+    provider = selectedProvider;
+    setToken(session.token);
+    return { address, chainId };
+  } finally {
+    selectedProvider.removeListener?.('accountsChanged', accountsChanged);
+    selectedProvider.removeListener?.('chainChanged', chainChanged);
+    selectedProvider.removeListener?.('disconnect', disconnected);
+  }
 }
 
 export async function sendOwnerTransaction(tx: Record<string, unknown>, currentAddress: string, localConfig?: Data) {

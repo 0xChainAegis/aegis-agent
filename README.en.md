@@ -181,6 +181,8 @@ npm run test:e2e
 
 Verified locally on October 20, 2026 with Node 24.19.0: type checks and production builds; **27 contract tests**, **37 backend test counts** including nested tests; **9 browser cases** across independent wallet (2) and reserve (7) stacks. Another 36 browser checks cover light/dark appearance, 1440/390/320px layouts, reachable previews and switching appearance without submitting payments.
 
+An extension-authorization/login race was also fixed that day, with **7 wallet-connection regression tests** passing: initial authorization, account or network changes during login, an account change during the final chain check, extension disconnection, an invalid provider interface, and isolation of local test sessions from extension events. These tests sign local login messages without submitting payments.
+
 Contract tests cover authorization, oracle boundaries, budgets, approvals, replay and direct-call rejection. Backend tests cover HTTP boundaries, persistent recovery, event binding and operating-wallet address binding with explicit chain fixtures. Browser tests use real local contracts and balances with a Mock Feed, including confirmation, approval/cancellation, changed suggestions, missing data, missing or mismatched operating-wallet identity, offline failure and refresh without duplicate payment.
 
 The browser entry starts a fresh chain and database for each group. Stop manually running services on ports 5173, 3001 and 8545 first. Windows can use installed Chrome; other environments may need `npx playwright install chromium`.
