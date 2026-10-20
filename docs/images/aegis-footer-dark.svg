@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="280" viewBox="0 0 1400 280" role="img" aria-labelledby="title desc">
+  <title id="title">Aegis — Agent wallet control.</title>
+  <desc id="desc">A panoramic Aegis signature with its original A mark, a midnight gradient and flowing iridescent glass ribbons.</desc>
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1400" y2="280" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111a21"/><stop offset=".48" stop-color="#12222c"/><stop offset="1" stop-color="#192b43"/>
+    </linearGradient>
+    <radialGradient id="wash" cx=".79" cy=".32" r=".67">
+      <stop stop-color="#356d74" stop-opacity=".5"/><stop offset=".48" stop-color="#334e7e" stop-opacity=".32"/><stop offset="1" stop-color="#172330" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="prism" x1="810" y1="285" x2="1310" y2="-35" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#415b88"/><stop offset=".32" stop-color="#72b8b3"/><stop offset=".58" stop-color="#a1c4e3"/><stop offset=".8" stop-color="#9288c6"/><stop offset="1" stop-color="#bb9cae"/>
+    </linearGradient>
+    <linearGradient id="silk" x1="976" y1="320" x2="1430" y2="-10" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7181c7" stop-opacity=".18"/><stop offset=".43" stop-color="#c7e0e5" stop-opacity=".66"/><stop offset=".75" stop-color="#5792bd" stop-opacity=".7"/><stop offset="1" stop-color="#4c6299" stop-opacity=".22"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="820" y1="280" x2="1360" y2="-50" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#c5e0ff" stop-opacity="0"/><stop offset=".47" stop-color="#e2fffa" stop-opacity=".77"/><stop offset="1" stop-color="#d9d0ff" stop-opacity=".1"/>
+    </linearGradient>
+    <linearGradient id="fade" x1="625" y1="0" x2="900" y2="0" gradientUnits="userSpaceOnUse"><stop stop-color="black"/><stop offset="1" stop-color="white"/></linearGradient>
+    <mask id="art"><rect width="1400" height="280" fill="url(#fade)"/></mask>
+    <clipPath id="frame"><rect width="1400" height="280" rx="25"/></clipPath>
+    <filter id="bloom" x="-30%" y="-60%" width="160%" height="220%"><feGaussianBlur stdDeviation="27"/></filter>
+  </defs>
+  <g clip-path="url(#frame)">
+    <rect width="1400" height="280" fill="url(#paper)"/>
+    <rect width="1400" height="280" fill="url(#wash)"/>
+    <g mask="url(#art)">
+      <path d="M756 356C1014 293 1008 74 1198-10C1302-56 1398-30 1492 45" fill="none" stroke="#6a9cdd" stroke-width="104" opacity=".23" filter="url(#bloom)"/>
+      <path d="M790 346C1035 272 1017 73 1211-7C1321-53 1415-20 1500 48" fill="none" stroke="url(#prism)" stroke-width="91" opacity=".85"/>
+      <path d="M790 301C1009 233 1000 46 1196-48" fill="none" stroke="url(#edge)" stroke-width="2.5"/>
+      <path d="M985 366C1020 178 1185 148 1324 70C1402 27 1430-29 1437-76" fill="none" stroke="url(#silk)" stroke-width="73"/>
+      <path d="M949 357C983 181 1167 116 1306 38C1385-7 1400-45 1401-76" fill="none" stroke="url(#edge)" stroke-width="2"/>
+      <path d="M1087 342C1164 249 1316 224 1462 240" fill="none" stroke="#b4cee5" stroke-width="1" opacity=".23"/>
+    </g>
+    <path d="M52 279H1348" stroke="#b3c8df" stroke-opacity=".1"/>
+    <g transform="translate(74 74) scale(2.05)">
+      <rect width="64" height="64" rx="15" fill="#24343f" fill-opacity=".9"/>
+      <rect x=".5" y=".5" width="63" height="63" rx="14.5" fill="none" stroke="#b9d0d8" stroke-opacity=".24"/>
+      <g transform="translate(4 3.5) scale(.875)"><path d="M32 7 60 57H46L32 31 18 57H4Z" fill="#eef5f3"/><path d="m27 42-6 10h22l-6-10Z" fill="#99b6ab"/></g>
+    </g>
+    <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif">
+      <text x="244" y="150" fill="#f1f6f8" font-size="116" font-weight="600" letter-spacing="-5">Aegis</text>
+      <text x="250" y="218" fill="#b8cbd5" font-size="29" letter-spacing=".25">Agent wallet control.</text>
+    </g>
+  </g>
+  <rect x=".5" y=".5" width="1399" height="279" rx="24.5" fill="none" stroke="#9db8d0" stroke-opacity=".22"/>
+</svg>

@@ -232,7 +232,10 @@ Public-network contract addresses and transaction links will be published after 
 [Contributors](https://github.com/0xChainAegis/aegis-agent/graphs/contributors)
 
 <p align="center">
-  <img src="docs/images/aegis-logo.svg" width="200" alt="Aegis · Agent wallet control.">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/aegis-footer-dark.svg">
+    <img src="docs/images/aegis-footer-light.svg" width="100%" alt="Aegis · Agent wallet control. An iridescent glass-gradient brand banner.">
+  </picture>
 </p>
 
 MIT — see [LICENSE](LICENSE).

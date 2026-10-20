@@ -232,7 +232,10 @@ npm run test:e2e
 [贡献者](https://github.com/0xChainAegis/aegis-agent/graphs/contributors)
 
 <p align="center">
-  <img src="docs/images/aegis-logo.svg" width="200" alt="Aegis · Agent wallet control.">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/aegis-footer-dark.svg">
+    <img src="docs/images/aegis-footer-light.svg" width="100%" alt="Aegis · Agent wallet control. 虹彩玻璃渐变品牌横幅。">
+  </picture>
 </p>
 
 MIT 许可证 — 参见 [LICENSE](LICENSE)。
