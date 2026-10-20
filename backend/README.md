@@ -2,7 +2,22 @@
 
 Node 24+, TypeScript, viem, Zod and built-in SQLite. Start from the repository root after the local deployment: `npm run start --workspace backend`. The default bind is `127.0.0.1:3001`; no `.env` files are read automatically.
 
-The server reads `contracts/deployments/localhost.json`. Override its path with `AEGIS_DEPLOYMENT_FILE`, plus optional `AEGIS_MODE=local_chain|testnet|mock`, `AEGIS_RPC_URL`, `AEGIS_CHAIN_ID`, `AEGIS_DB_PATH`, `AEGIS_PORT`. `AEGIS_AGENT_PRIVATE_KEY` is an executor key, never an owner key. Only local chain 31337 on loopback RPC defaults to the public Hardhat account 1 key. Sepolia requires an explicitly configured agent key and matching deployment; missing RPC/Feed/key fails closed. The service never switches into mock on an error. Mock mode has no chain execution.
+The server reads `contracts/deployments/localhost.json`. Override its path with `AEGIS_DEPLOYMENT_FILE`, plus optional `AEGIS_MODE=local_chain|testnet|mock`, `AEGIS_RPC_URL`, `AEGIS_CHAIN_ID`, `AEGIS_DB_PATH`, `AEGIS_PORT`. `AEGIS_AGENT_PRIVATE_KEY` is an executor key, never an owner key. Only local chain 31337 on loopback RPC defaults to the public Hardhat account 1 key. Sepolia requires an explicit deployment file, HTTPS RPC and non-development agent key; missing contract/identity addresses fail during configuration. The service never switches into mock on an error. Mock mode has no chain execution.
+
+For Sepolia, start from the repository root after `contracts/deployments/sepolia.json` has been created:
+
+```sh
+export AEGIS_MODE=testnet
+export AEGIS_CHAIN_ID=11155111
+export AEGIS_DEPLOYMENT_FILE="$PWD/contracts/deployments/sepolia.json"
+export AEGIS_RPC_URL="https://your-sepolia-rpc"
+export AEGIS_AGENT_PRIVATE_KEY="0x_your_agent_key"
+npm run start --workspace backend
+```
+
+`GET /health` returns 200 only after checking all five bytecode addresses, Wallet
+owner/ACL/Attestation/Oracle bindings, the locked native ETH Feed, executor and
+Wallet roles, Feed freshness, and both Wallet and executor test-ETH balances.
 
 Optional LLM draft parsing uses `AEGIS_LLM_MODE=off|stub|live` (default `off`), `AEGIS_LLM_PROVIDER=anthropic|openai`, `AEGIS_LLM_MODEL`, `AEGIS_LLM_BASE_URL`, `AEGIS_LLM_TIMEOUT_MS` and a process-environment API key. Keys are never committed or returned by `/api/v1/config`; `stub` is not live-model evidence.
 

@@ -10,7 +10,26 @@ import { ApiError, errorMessage } from './errors.js';
 
 export const walletAbi = parseAbi(walletAbiSignatures);
 export const oracleAbi = parseAbi(oracleAbiSignatures);
-const aclAbi = parseAbi(['function AGENT_ROLE() view returns (bytes32)', 'function hasRole(bytes32 role,address account) view returns (bool)']);
+const aclAbi = parseAbi([
+  'function AGENT_ROLE() view returns (bytes32)',
+  'function tierOf(address account) view returns (uint8)',
+  'function hasRole(bytes32 role,address account) view returns (bool)',
+]);
+const attestationAbi = parseAbi([
+  'function ATTESTER_ROLE() view returns (bytes32)',
+  'function APPROVER_ROLE() view returns (bytes32)',
+  'function hasRole(bytes32 role,address account) view returns (bool)',
+]);
+const walletBindingAbi = parseAbi([
+  'function owner() view returns (address)',
+  'function acl() view returns (address)',
+  'function attestations() view returns (address)',
+  'function oracle() view returns (address)',
+]);
+const oracleBindingAbi = parseAbi([
+  'function feeds(address token) view returns (address)',
+  'function configurationLocked() view returns (bool)',
+]);
 export interface Budget {
   autoThresholdUsd6: string; hardPerTxUsd6: string; dailyLimitUsd6: string;
   spentTodayUsd6: string; remainingUsd6: string; window: 'UTC_CALENDAR_DAY';
@@ -93,24 +112,34 @@ export class ViemGateway implements Gateway {
   async readiness() {
     try {
       await this.requireChain();
-      const addresses = [this.config.walletAddress, this.config.aclAddress, this.config.oracleAddress, this.config.feedAddress];
+      const addresses = [this.config.walletAddress, this.config.aclAddress, this.config.attestationAddress, this.config.oracleAddress, this.config.feedAddress];
       const code = await Promise.all(addresses.map(address => this.publicClient.getBytecode({ address })));
       if (code.some(value => !value || value === '0x')) throw new ApiError(503, 'CONTRACT_MISSING', '部署地址没有合约 bytecode');
-      const owner = await this.publicClient.readContract({ address: this.config.walletAddress, abi: walletAbi, functionName: 'owner' });
-      if (!equal(owner, this.config.ownerAddress)) throw new ApiError(503, 'OWNER_MISMATCH', '部署配置的 owner 与合约不一致');
-      const role = await this.publicClient.readContract({ address: this.config.aclAddress, abi: aclAbi, functionName: 'AGENT_ROLE' });
-      const authorized = await this.publicClient.readContract({ address: this.config.aclAddress, abi: aclAbi, functionName: 'hasRole', args: [role, this.config.agentAddress] });
-      if (!authorized) throw new ApiError(503, 'EXECUTOR_UNAUTHORIZED', '执行账户没有 AGENT_ROLE');
       if (!this.account) throw new ApiError(503, 'EXECUTOR_KEY_MISSING', '执行账户未配置；测试网不会使用本地公开私钥');
       if (!equal(this.account.address, this.config.agentAddress)) throw new ApiError(503, 'EXECUTOR_MISMATCH', '执行密钥与部署 agent 地址不一致');
       const snapshot = await this.snapshot();
-      await this.checkOracle();
-      const quote = await this.publicClient.readContract({ address: this.config.oracleAddress, abi: oracleAbi, functionName: 'latestEthQuote', args: [1n] });
-      const maxAge = await this.publicClient.readContract({ address: this.config.walletAddress, abi: walletAbi, functionName: 'maxPriceAge' });
+      const observedBlock = BigInt(snapshot.observedBlockNumber);
+      await this.checkDeploymentBindings(observedBlock);
+      const [agentRole, attesterRole, approverRole] = await Promise.all([
+        this.publicClient.readContract({ address: this.config.aclAddress, abi: aclAbi, functionName: 'AGENT_ROLE', blockNumber: observedBlock }),
+        this.publicClient.readContract({ address: this.config.attestationAddress, abi: attestationAbi, functionName: 'ATTESTER_ROLE', blockNumber: observedBlock }),
+        this.publicClient.readContract({ address: this.config.attestationAddress, abi: attestationAbi, functionName: 'APPROVER_ROLE', blockNumber: observedBlock }),
+      ]);
+      const [authorized, agentTier, walletCanAttest, walletCanApprove] = await Promise.all([
+        this.publicClient.readContract({ address: this.config.aclAddress, abi: aclAbi, functionName: 'hasRole', args: [agentRole, this.config.agentAddress], blockNumber: observedBlock }),
+        this.publicClient.readContract({ address: this.config.aclAddress, abi: aclAbi, functionName: 'tierOf', args: [this.config.agentAddress], blockNumber: observedBlock }),
+        this.publicClient.readContract({ address: this.config.attestationAddress, abi: attestationAbi, functionName: 'hasRole', args: [attesterRole, this.config.walletAddress], blockNumber: observedBlock }),
+        this.publicClient.readContract({ address: this.config.attestationAddress, abi: attestationAbi, functionName: 'hasRole', args: [approverRole, this.config.walletAddress], blockNumber: observedBlock }),
+      ]);
+      if (!authorized) throw new ApiError(503, 'EXECUTOR_UNAUTHORIZED', '执行账户没有 AGENT_ROLE');
+      if (agentTier < 2) throw new ApiError(503, 'AGENT_FROZEN', '执行账户处于 Frozen 或 ReadOnly tier');
+      if (!walletCanAttest || !walletCanApprove) throw new ApiError(503, 'WALLET_ROLE_MISSING', 'Wallet 缺少写入或审批 attestation 所需角色');
+      const quote = await this.publicClient.readContract({ address: this.config.oracleAddress, abi: oracleAbi, functionName: 'latestEthQuote', args: [1n], blockNumber: observedBlock });
+      const maxAge = await this.publicClient.readContract({ address: this.config.walletAddress, abi: walletAbi, functionName: 'maxPriceAge', blockNumber: observedBlock });
       const timestamp = BigInt(snapshot.observedBlockTimestamp!);
       if (!quote[3] || quote[3] > timestamp || timestamp - quote[3] > maxAge) throw new ApiError(503, 'FEED_STALE', 'Feed 超过合约 freshness 限制');
       const funded = BigInt(snapshot.walletBalanceWei) > 0n && BigInt(snapshot.agentBalanceWei) > 0n;
-      return { ready: funded, ...(!funded ? { code: 'FUNDING_REQUIRED', message: '资金池或执行账户需要测试 ETH' } : {}), rpcChainId: this.config.chainId, contractsDeployed: true, executorAuthorized: true, executorConfigured: true, feedFresh: true, walletFunded: BigInt(snapshot.walletBalanceWei) > 0n, executorFunded: BigInt(snapshot.agentBalanceWei) > 0n };
+      return { ready: funded, ...(!funded ? { code: 'FUNDING_REQUIRED', message: '资金池或执行账户需要测试 ETH' } : {}), rpcChainId: this.config.chainId, contractsDeployed: true, deploymentBindingsVerified: true, executorAuthorized: true, executorConfigured: true, agentTier: Number(agentTier), feedFresh: true, walletFunded: BigInt(snapshot.walletBalanceWei) > 0n, executorFunded: BigInt(snapshot.agentBalanceWei) > 0n };
     } catch (error) { const result = chainError(error); return { ready: false, code: result.code, message: result.message }; }
   }
   async snapshot(): Promise<Snapshot> {
@@ -138,15 +167,27 @@ export class ViemGateway implements Gateway {
       };
     } catch (error) { throw chainError(error); }
   }
-  private async checkOracle() {
-    const actualOracle = await this.publicClient.readContract({ address: this.config.walletAddress, abi: walletAbi, functionName: 'oracle' });
-    const actualFeed = await this.publicClient.readContract({ address: this.config.oracleAddress, abi: oracleAbi, functionName: 'feeds', args: [zeroAddress] });
-    if (!equal(actualOracle, this.config.oracleAddress) || !equal(actualFeed, this.config.feedAddress)) throw new ApiError(503, 'ORACLE_CONFIGURATION_CHANGED', '合约 Oracle/Feed 与部署配置不一致，请重新核对配置');
+  private async checkDeploymentBindings(blockNumber: bigint) {
+    const [owner, acl, attestations, oracle, feed, locked] = await Promise.all([
+      this.publicClient.readContract({ address: this.config.walletAddress, abi: walletBindingAbi, functionName: 'owner', blockNumber }),
+      this.publicClient.readContract({ address: this.config.walletAddress, abi: walletBindingAbi, functionName: 'acl', blockNumber }),
+      this.publicClient.readContract({ address: this.config.walletAddress, abi: walletBindingAbi, functionName: 'attestations', blockNumber }),
+      this.publicClient.readContract({ address: this.config.walletAddress, abi: walletBindingAbi, functionName: 'oracle', blockNumber }),
+      this.publicClient.readContract({ address: this.config.oracleAddress, abi: oracleBindingAbi, functionName: 'feeds', args: [zeroAddress], blockNumber }),
+      this.publicClient.readContract({ address: this.config.oracleAddress, abi: oracleBindingAbi, functionName: 'configurationLocked', blockNumber }),
+    ]);
+    if (!equal(owner, this.config.ownerAddress)) throw new ApiError(503, 'OWNER_MISMATCH', '部署配置的 owner 与 Wallet 不一致');
+    if (!equal(acl, this.config.aclAddress) || !equal(attestations, this.config.attestationAddress)) {
+      throw new ApiError(503, 'DEPLOYMENT_BINDING_MISMATCH', 'Wallet 绑定的 ACL/Attestation 与部署配置不一致');
+    }
+    if (!equal(oracle, this.config.oracleAddress) || !equal(feed, this.config.feedAddress) || !locked) {
+      throw new ApiError(503, 'ORACLE_CONFIGURATION_CHANGED', 'Oracle/Feed 未锁定或与部署配置不一致');
+    }
   }
   async preview(recipient: Address, amountWei: string, requestedMax?: string): Promise<Omit<Quote, 'quoteId' | 'draftId' | 'draftVersion'>> {
     try {
       const state = await this.snapshot();
-      await this.checkOracle();
+      await this.checkDeploymentBindings(BigInt(state.observedBlockNumber));
       const quote = await this.publicClient.readContract({ address: this.config.oracleAddress, abi: oracleAbi, functionName: 'latestEthQuote', args: [BigInt(amountWei)], blockNumber: BigInt(state.observedBlockNumber) });
       const [cost, round, answer, updatedAt, decimals] = quote;
       const now = Math.floor(Date.now() / 1000);
@@ -164,7 +205,7 @@ export class ViemGateway implements Gateway {
       if (cost > maxCost) reasons.push('REQUOTE_REQUIRED');
       let requiresApproval = cost > BigInt(state.budget.autoThresholdUsd6);
       if (!reasons.length) {
-        const check = await this.publicClient.readContract({ address: this.config.walletAddress, abi: walletAbi, functionName: 'previewNativeTransfer', args: [this.config.agentAddress, recipient, BigInt(amountWei), maxCost, BigInt(deadline), BigInt(state.policyVersion)] });
+        const check = await this.publicClient.readContract({ address: this.config.walletAddress, abi: walletAbi, functionName: 'previewNativeTransfer', args: [this.config.agentAddress, recipient, BigInt(amountWei), maxCost, BigInt(deadline), BigInt(state.policyVersion)], blockNumber: BigInt(state.observedBlockNumber) });
         requiresApproval = check[1];
       }
       return {
