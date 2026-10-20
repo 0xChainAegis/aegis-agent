@@ -62,6 +62,6 @@ python scripts/start-live-web.py
 
 PR #7 的原始联调与 40 条评测结果属于 2026-10-20 的历史模型、提示词及解析校验快照；此次修复没有重新请求模型，也没有重算或修改该快照的得分。
 
-历史报告见 [eval/REPORT.md](../eval/REPORT.md)，原始证据保存在 [eval/results/2026-10-20](../eval/results/2026-10-20/)。其中包括 `live-intent-smoke.json`、`web-live-evidence.json`、`intent-eval-results.jsonl` 和 `intent-eval-attributions.json`。后续运行产生的结果写入忽略的 `test-results/`，不覆盖已提交证据。
+历史报告见 [eval/REPORT.md](../eval/REPORT.md)。原始逐条记录由作者本地保留，公开仓库仅保留固定样本和脱敏汇总。后续运行产生的结果写入忽略的 `test-results/`，不覆盖已提交的历史报告。
 
 历史上已验证三类真实模型草稿、网页展示及本地链部署；没有通过网页确认付款，也没有验证公网 Chainlink/Sepolia。修复后的离线回归结果不能替代新的真实模型或付款验证。

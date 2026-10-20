@@ -4,6 +4,12 @@ import {parseDraft} from '../backend/src/parser.js';
 import {createLlmClient,StubIntentClient,parseDraftWithLlm,scanPrompt} from '../backend/src/llm.js';
 const cases=JSON.parse(readFileSync('eval/intent-cases.json','utf8'));
 const cfg=loadConfig();
+// Fail before truncating results or constructing a client: stub/off must not
+// be labelled as a live-model evaluation.
+if(cfg.llm.mode!=='live'){
+ console.error(`Evaluation requires AEGIS_LLM_MODE=live; received ${cfg.llm.mode}. No output was overwritten.`);
+ process.exit(2);
+}
 const live=createLlmClient(cfg.llm)!;
 const output='test-results/intent-eval-results.jsonl';
 mkdirSync('test-results',{recursive:true});

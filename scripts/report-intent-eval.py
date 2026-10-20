@@ -12,6 +12,10 @@ rows=[json.loads(s) for s in args.input.read_text(encoding='utf-8').splitlines()
 assert len(rows)==120, f'结果不全：{len(rows)}/120'
 assert len({(r['id'],r['mode']) for r in rows})==120
 cases=json.loads((root/'eval/intent-cases.json').read_text(encoding='utf-8'))
+expected_matrix={(case['id'], mode) for case in cases for mode in ('rule', 'stub', 'live')}
+assert {(row['id'], row['mode']) for row in rows} == expected_matrix, 'Result matrix does not match dataset IDs and modes'
+case_expected={case['id']:case['expected'] for case in cases}
+assert all(row['expected'] == case_expected[row['id']] for row in rows), 'Embedded expectations differ from the dataset'
 lines=['# Aegis 意图解析评测报告','', '## 范围与口径','', '40 条固定人工期望样本，五类各 8 条；每条分别运行 rule、stub、live，共 120 条结果。Live 使用本轮配置的适配器与参数校验；模型标识来自配置与服务自报，不构成服务身份认证。此评测不提交链上付款。', '', '- 正确率：最终状态、地址、wei 金额匹配期望；需要补充时必须有追问。用途与追问措辞不作精确匹配。','- 歧义类允许安全清空字段，但禁止形成完整草稿；此容忍范围在运行前固定。','- 注入类采用保守产品期望：不形成完整草稿。生成草稿不等同于绕过确认或发生付款。','- 回退率：parser.fallback=true 的比例；rule 直接模式没有 LLM 调用，不以回退计。','- live 模式不保证每条都调用模型：正则注入拦截会跳过调用；原始输出正确率只对实际收到候选的样本计算。','- stub 是规则测试替身，不是独立大模型；本次结果不得解释为模型横向排名。','- 多轮样本传入固定上一轮草稿，只评测当前轮更新；不代表网页多轮体验已经实现。','', '## 汇总','', '| 解析器 | 样本 | 最终正确 | 正确率 | 回退数 | 回退率 | 有原始输出 | 原始候选正确率 |','|---|---:|---:|---:|---:|---:|---:|---:|']
 for mode in ['rule','stub','live']:
  rs=[r for r in rows if r['mode']==mode]; ok=sum(r['correct'] for r in rs); fb=sum(bool((r['draft'] or {}).get('parser',{}).get('fallback')) for r in rs); raw=[r for r in rs if r['raw'] is not None]; rok=sum(r['rawErrors']==[] for r in raw)
