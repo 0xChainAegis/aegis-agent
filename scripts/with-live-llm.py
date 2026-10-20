@@ -27,7 +27,7 @@ def live_environment(source=None):
     if not valid_url or base.username or base.password or base.query or base.fragment:
         raise ValueError('AEGIS_LLM_BASE_URL must be an HTTP(S) API base URL without credentials, query, or fragment')
     try:
-        timeout = int(env.get('AEGIS_LLM_TIMEOUT_MS', '30000'))
+        timeout = int(env.get('AEGIS_LLM_TIMEOUT_MS', '10000'))
     except ValueError:
         timeout = 0
     if not 1 <= timeout <= 30000:

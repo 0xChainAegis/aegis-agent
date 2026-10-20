@@ -7,6 +7,15 @@ import { loadConfig, LOCAL_AGENT_KEY } from '../src/config.js';
 
 const safeKey = `0x${'11'.repeat(32)}`;
 
+test('model timeout defaults to ten seconds and validates explicit overrides', () => {
+  assert.equal(loadConfig({ AEGIS_MODE: 'mock' }).llm.timeoutMs, 10_000);
+  assert.equal(loadConfig({ AEGIS_MODE: 'mock', AEGIS_LLM_TIMEOUT_MS: '' }).llm.timeoutMs, 10_000);
+  assert.equal(loadConfig({ AEGIS_MODE: 'mock', AEGIS_LLM_TIMEOUT_MS: '30000' }).llm.timeoutMs, 30_000);
+  for (const timeout of ['0', '-1', '30001', 'NaN']) {
+    assert.throws(() => loadConfig({ AEGIS_MODE: 'mock', AEGIS_LLM_TIMEOUT_MS: timeout }), /AEGIS_LLM_TIMEOUT_MS/);
+  }
+});
+
 function withDeployment(run: (path: string) => void) {
   const directory = mkdtempSync(join(tmpdir(), 'aegis-config-'));
   const path = join(directory, 'sepolia.json');

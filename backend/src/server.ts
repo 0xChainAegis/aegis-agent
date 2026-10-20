@@ -77,6 +77,7 @@ export function createApiServer(service: AegisService) {
             model: config.llm.model,
             configuredModel: config.configuredModel,
             llmEnabled: config.llm.mode !== 'off',
+            timeoutMs: config.llm.timeoutMs,
           },
           capabilities: { nativeEth: true, ownerApproval: 'owner_approve_and_execute', usdDecimals: 6, monitoring: false, x402: false },
           auth: { kind: 'personal_sign_challenge', domain: config.authDomain, chainId: config.chainId },

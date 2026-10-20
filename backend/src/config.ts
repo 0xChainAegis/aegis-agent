@@ -70,7 +70,7 @@ export function loadConfig(env = process.env): Config {
   const firstNonEmpty = (...values: Array<string | undefined>) => values.find(value => !!value?.trim()) ?? null;
   const llmApiKey = firstNonEmpty(env.AEGIS_LLM_API_KEY, provider === 'anthropic' ? env.ANTHROPIC_API_KEY : env.OPENAI_API_KEY);
   const llmModel = firstNonEmpty(env.AEGIS_LLM_MODEL, llmMode === 'stub' ? 'stub-intent-v1' : undefined);
-  const llmTimeoutMs = Number(env.AEGIS_LLM_TIMEOUT_MS ?? 2000);
+  const llmTimeoutMs = Number(env.AEGIS_LLM_TIMEOUT_MS || 10_000);
   if (!Number.isSafeInteger(llmTimeoutMs) || llmTimeoutMs < 1 || llmTimeoutMs > 30_000) throw new Error('AEGIS_LLM_TIMEOUT_MS must be an integer from 1 to 30000');
   if (llmMode === 'live' && (!llmModel || !llmApiKey)) throw new Error('AEGIS_LLM_MODE=live requires AEGIS_LLM_MODEL and an API key');
   const llmBaseUrl = env.AEGIS_LLM_BASE_URL ?? (provider === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1');

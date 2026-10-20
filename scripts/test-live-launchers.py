@@ -37,7 +37,7 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(env[key], source[key])
         self.assertEqual(env['AEGIS_MODE'], 'mock')
         self.assertEqual(env['AEGIS_LLM_MODE'], 'live')
-        self.assertEqual(env['AEGIS_LLM_TIMEOUT_MS'], '30000')
+        self.assertEqual(env['AEGIS_LLM_TIMEOUT_MS'], '10000')
         self.assertNotIn('AEGIS_MODE', source)
         with self.assertRaisesRegex(ValueError, 'AEGIS_LLM_BASE_URL'):
             live['live_environment']({**source, 'AEGIS_LLM_BASE_URL': 'https://user:password@example.invalid'})

@@ -10,7 +10,7 @@
 - `AEGIS_LLM_MODEL`：所选服务实际支持的模型 ID。
 - `AEGIS_LLM_BASE_URL`：所选服务的 HTTP(S) API 基础地址；OpenAI-compatible 使用包含服务所需版本路径的地址，Anthropic 使用追加 `/v1/messages` 前的基础地址。
 - `AEGIS_LLM_API_KEY`：服务密钥，仅放入后端环境，不写入文档或仓库。
-- 可选 `AEGIS_LLM_TIMEOUT_MS`：1–30000，启动脚本默认 30000。
+- 可选 `AEGIS_LLM_TIMEOUT_MS`：1–30000，后端和启动脚本均默认 10000。网页从公开配置读取等待预算，仅延长意图解析请求的等待时间，付款请求不随之延长。
 
 脚本要求显式提供服务、模型、基础地址和密钥，不替用户选择供应商。它会设置 `AEGIS_LLM_MODE=live`。先执行离线配置检查：
 

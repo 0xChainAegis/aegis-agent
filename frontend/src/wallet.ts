@@ -55,17 +55,55 @@ function localProvider(config: Data): WalletProvider {
 
 export function disconnectProvider() { provider = undefined; }
 
-export async function connectWallet(expectedChainId: number, localConfig?: Data) {
+function networkName(chainId: number) { return chainId === 31337 ? 'Local 本地开发链（31337）' : chainId === 11155111 ? 'Sepolia（11155111）' : `链 ${chainId}`; }
+function networkHelp(current: number, required: number, reason: string) {
+  const next = required === 31337 ? '请在钱包中批准切换，或使用页面的“本地测试钱包”。若要使用 Sepolia，需先将后端配置为 Sepolia。' : '请在钱包中配置并切换到 Sepolia；后端也必须配置为 Sepolia 后才能使用该网络。';
+  return new Error(`${reason}连接时钱包位于 ${networkName(current)}，页面需要 ${networkName(required)}。${next}`);
+}
+
+async function switchBrowserNetwork(selectedProvider: WalletProvider, current: number, required: number, publicConfig?: Data) {
+  if (![31337, 11155111].includes(required)) throw networkHelp(current, required, '当前页面不支持自动切换此网络。');
+  const chainId = `0x${required.toString(16)}`;
+  try {
+    try {
+      await selectedProvider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId }] });
+    } catch (error) {
+      const code = Number((error as { code?: unknown })?.code);
+      if (code !== 4902 || required !== 31337 || !localWalletAvailable(publicConfig ?? null)) throw error;
+      const rpc = new URL(String(publicConfig!.rpcUrl));
+      if (rpc.search || rpc.hash) throw new Error('Local RPC must not contain a query or fragment');
+      await selectedProvider.request({ method: 'wallet_addEthereumChain', params: [{
+        chainId, chainName: 'Aegis Local (31337)',
+        nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: [rpc.href],
+      }] });
+      await selectedProvider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId }] });
+    }
+  } catch (error) {
+    const rejected = Number((error as { code?: unknown })?.code) === 4001;
+    throw networkHelp(current, required, rejected ? '你取消了钱包网络切换。' : '钱包未能完成网络切换。');
+  }
+  const actual = Number(await selectedProvider.request({ method: 'eth_chainId' }));
+  if (actual !== required) throw networkHelp(actual, required, '钱包仍未切换到页面需要的网络。');
+  return actual;
+}
+
+export async function connectWallet(expectedChainId: number, localConfig?: Data, publicConfig?: Data) {
   if (!localConfig && !window.ethereum) throw new Error('未发现浏览器钱包。请安装或启用 MetaMask，或在本地环境选择本地测试钱包。');
   const selectedProvider = localConfig ? localProvider(localConfig) : window.ethereum;
   if (!selectedProvider || typeof selectedProvider.request !== 'function') throw new Error('浏览器钱包接口尚未就绪。请启用钱包插件并刷新页面后重试。');
-  const accounts = await selectedProvider.request({ method: 'eth_requestAccounts' }) as string[];
+  let accounts = await selectedProvider.request({ method: 'eth_requestAccounts' }) as string[];
   if (!accounts?.[0] || !isAddress(accounts[0])) throw new Error('钱包没有提供有效账户。');
-  const chainId = Number(await selectedProvider.request({ method: 'eth_chainId' }));
+  let chainId = Number(await selectedProvider.request({ method: 'eth_chainId' }));
   if (expectedChainId && chainId !== expectedChainId) {
-    throw new Error(`网络不匹配：请在钱包中切换到 ${expectedChainId === 31337 ? 'Local 本地开发链' : `链 ${expectedChainId}`} 后重新连接。`);
+    if (localConfig) throw networkHelp(chainId, expectedChainId, '本地节点的网络不匹配。');
+    chainId = await switchBrowserNetwork(selectedProvider, chainId, expectedChainId, publicConfig);
+    // A wallet may choose a different account when changing networks.
+    accounts = await selectedProvider.request({ method: 'eth_accounts' }) as string[];
+    if (!accounts?.[0] || !isAddress(accounts[0])) throw new Error('切换网络后钱包没有提供有效账户，请在钱包中选择 Owner 账户后重新连接。');
   }
   const address = accounts[0];
+  const owner = publicConfig?.ownerAddress ?? localConfig?.ownerAddress;
+  if (owner && String(owner).toLowerCase() !== address.toLowerCase()) throw new Error(`此资金池只允许 Owner ${String(owner)} 登录；当前钱包为 ${address}。请切换到该 Owner 账户后重新连接。${expectedChainId === 31337 ? '本地演示也可使用页面的“本地测试钱包”。' : ''}`);
   let identityChanged = false;
   const accountsChanged = (value: unknown) => { if (!Array.isArray(value) || String(value[0]).toLowerCase() !== address.toLowerCase()) identityChanged = true; };
   const chainChanged = (value: unknown) => { if (Number(value) !== chainId) identityChanged = true; };
@@ -82,7 +120,9 @@ export async function connectWallet(expectedChainId: number, localConfig?: Data)
     selectedProvider.on?.('accountsChanged', accountsChanged);
     selectedProvider.on?.('chainChanged', chainChanged);
     selectedProvider.on?.('disconnect', disconnected);
+    await assertWalletUnchanged();
     const challenge = await api('/auth/challenge', 'POST', { address, chainId });
+    if (identityChanged) throw new Error('钱包账户或网络已变更，请重新连接并签名登录。');
     const signature = await selectedProvider.request({ method: 'personal_sign', params: [stringToHex(String(challenge.message)), address] });
     await assertWalletUnchanged();
     const session = await api('/auth/verify', 'POST', { address, challengeId: challenge.challengeId, signature });
