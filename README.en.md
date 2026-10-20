@@ -43,6 +43,8 @@ Built during ETH Shenzhen 2026 Hackathon.
 
 **Solution.** Aegis reads the real ETH balance of one designated operating wallet, suggests a top-up from the user's own threshold and target, and has the treasury contract execute the transfer within on-chain USD limits, only after explicit user confirmation.
 
+**Address roles.** `walletAddress` is the funding-pool contract; `recipientAddress` is the receiving operating wallet whose balance appears on the overview. `ownerAddress` administers the pool and approves pending payments, while `agentAddress` submits payment requests within its authorized rules. Pool and operating-wallet balances are read separately. Receiving ETH grants no pool administration rights.
+
 <a name="product-screenshots"></a>
 
 ## <img src="docs/images/section-screens.svg" width="28" height="28" alt="Product demo icon" align="absmiddle"> Product screenshots

@@ -43,6 +43,8 @@
 
 **方案。** Aegis 读取一个指定运行钱包的真实 ETH 余额，按用户设置的下限与目标值建议补充金额，并由资金库合约在链上美元限额内、经用户明确确认后执行转账。
 
+**地址职责。** `walletAddress` 是补给资金池合约，`recipientAddress` 是首页展示余额的收款运行钱包；`ownerAddress` 管理资金池并审批，`agentAddress` 在授权规则内提交付款请求。资金池与运行钱包的余额分别读取；收款不会授予资金池管理权限。
+
 <a name="产品截图"></a>
 
 ## <img src="docs/images/section-screens.svg" width="28" height="28" alt="Product demo icon" align="absmiddle"> 产品截图
