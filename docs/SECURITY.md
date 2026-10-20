@@ -1,8 +1,9 @@
 # Security Boundaries
 
-The current validation covers local-chain behavior with a Mock Feed. This project
-has not undergone an independent security audit; Sepolia and mainnet execution
-are not verified. Local tests do not establish safety for real funds.
+The PolicyEngine v2 validation covers local-chain behavior with a Mock Feed. This
+project has not undergone an independent security audit; the existing v1 Sepolia
+deployment does not validate v2, and v2 Sepolia/mainnet execution is not verified.
+Local tests do not establish safety for real funds.
 
 ## Authority and authorization
 
@@ -10,13 +11,19 @@ are not verified. Local tests do not establish safety for real funds.
   challenge bound to address, domain and chain. Login does not approve a payment.
 - The backend holds the executor identity, never the Owner key. Queued approval
   and cancellation require an actual Owner-signed contract transaction.
-- The contract checks role/tier, recipient allowlist, nonce, deadline, policy
-  version, USD maximum, hard per-payment cap and shared UTC-day budget.
-  Approval cannot bypass these checks; pending requests reserve no budget.
+- The Wallet owns payment nonces and pending approvals. The shared PolicyEngine
+  checks action kind, role/tier, recipient allowlist, deadline, policy version,
+  USD maximum, hard per-payment cap and shared UTC-day budget. Approval cannot
+  bypass these checks; pending requests reserve no budget.
+- Only explicitly registered contract consumers can atomically consume policy
+  budget. The Wallet is the initial consumer; registering another executor is a
+  trusted Owner operation. Request hashes are consumed globally across consumers,
+  and future action domains must remain collision-resistant and action-specific.
 - ETH/USD data must be positive, complete and fresh with expected decimals.
   The adapter's Feed configuration is locked. USD6 valuation rounds upward.
-- The Owner and ACL administrator remain trusted policy administrators. They can
-  change future policy; attestations are not an immutable defense against them.
+- The PolicyEngine Owner and ACL administrator remain trusted policy
+  administrators. They can change future policy and authorized consumers;
+  attestations are not an immutable defense against them.
 - Native ETH payment and approval entry points use reentrancy protection.
   Legacy ERC20 and subscription payment exits are disabled.
 - The optional LLM is a draft-only parser. It cannot approve, sign, choose a
@@ -57,5 +64,6 @@ establish payment outcomes.
 RPC or Feed failure remains visible and never silently enables simulated success.
 The local test wallet uses public development accounts only on loopback chain
 31337. Never fund those accounts on public networks. Keep executor keys, session
-tokens, raw transactions and SQLite files private. Public deployment commands
-remain disabled pending separate configuration and validation.
+tokens, raw transactions and SQLite files private. The public deployment command
+is fail-closed and requires explicit reviewed Sepolia configuration; running it
+broadcasts transactions and does not constitute an audit.

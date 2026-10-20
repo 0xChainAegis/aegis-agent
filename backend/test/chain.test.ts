@@ -25,6 +25,7 @@ const acl = '0x3000000000000000000000000000000000000003' as Address;
 const attestation = '0x4000000000000000000000000000000000000004' as Address;
 const oracle = '0x5000000000000000000000000000000000000005' as Address;
 const feed = '0x6000000000000000000000000000000000000006' as Address;
+const policyEngine = '0x7000000000000000000000000000000000000007' as Address;
 const requestHash = keccak256(toHex('gateway-bound-request'));
 const transactionHash = keccak256(toHex('gateway-transaction'));
 const blockHash = keccak256(toHex('gateway-block'));
@@ -33,11 +34,11 @@ function gatewayConfig(): Config {
   return {
     ...loadConfig({}), deploymentReady: true, walletAddress: wallet,
     ownerAddress: owner, agentAddress: agent.address, recipientAddress: recipient,
-    aclAddress: acl, attestationAddress: attestation, oracleAddress: oracle, feedAddress: feed,
+    aclAddress: acl, attestationAddress: attestation, oracleAddress: oracle, policyEngineAddress: policyEngine, feedAddress: feed,
   };
 }
 
-function readinessHarness(options: { attestation?: Address; locked?: boolean } = {}) {
+function readinessHarness(options: { attestation?: Address; locked?: boolean; policyEngine?: Address; policyOwner?: Address; policyAuthorized?: boolean } = {}) {
   const gateway = new ViemGateway(gatewayConfig());
   const client = gateway.publicClient as any;
   const bytecodeReads: Address[] = [];
@@ -47,10 +48,12 @@ function readinessHarness(options: { attestation?: Address; locked?: boolean } =
   client.getBalance = async ({ address }: { address: Address }) => address === recipient ? 0n : 1n;
   client.readContract = async ({ address, functionName }: { address: Address; functionName: string }) => {
     switch (functionName) {
-      case 'owner': return owner;
+      case 'owner': return address === policyEngine ? options.policyOwner ?? owner : owner;
       case 'acl': return acl;
       case 'attestations': return options.attestation ?? attestation;
       case 'oracle': return oracle;
+      case 'policyEngine': return options.policyEngine ?? policyEngine;
+      case 'authorizedConsumers': case 'policyManagers': return options.policyAuthorized ?? true;
       case 'feeds': return feed;
       case 'configurationLocked': return options.locked ?? true;
       case 'AGENT_ROLE': case 'ATTESTER_ROLE': case 'APPROVER_ROLE': return requestHash;
@@ -85,6 +88,18 @@ test('ViemGateway readiness fails closed for changed bindings or unlocked feed',
   const unlocked = await readinessHarness({ locked: false }).gateway.readiness();
   assert.equal(unlocked.ready, false);
   assert.equal(unlocked.code, 'ORACLE_CONFIGURATION_CHANGED');
+
+  const wrongPolicy = await readinessHarness({ policyEngine: otherContract }).gateway.readiness();
+  assert.equal(wrongPolicy.ready, false);
+  assert.equal(wrongPolicy.code, 'DEPLOYMENT_BINDING_MISMATCH');
+
+  const unauthorizedPolicy = await readinessHarness({ policyAuthorized: false }).gateway.readiness();
+  assert.equal(unauthorizedPolicy.ready, false);
+  assert.equal(unauthorizedPolicy.code, 'POLICY_ENGINE_MISMATCH');
+
+  const wrongPolicyOwner = await readinessHarness({ policyOwner: otherContract }).gateway.readiness();
+  assert.equal(wrongPolicyOwner.ready, false);
+  assert.equal(wrongPolicyOwner.code, 'POLICY_ENGINE_MISMATCH');
 });
 
 test('ViemGateway snapshot binds distinct balances and contract reads to one observed block', async () => {

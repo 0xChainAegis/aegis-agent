@@ -27,6 +27,7 @@ export const walletAbiSignatures = [
   'function owner() view returns (address)',
   'function depositETH() payable',
   'function oracle() view returns (address)',
+  'function policyEngine() view returns (address)',
   'function configurePolicy(address oracle,uint256 autoUsd6,uint256 perTxUsd6,uint256 dailyUsd6,uint256 maxAge)',
   'function setRecipientAllowed(address recipient,bool allowed)',
   'function policyVersion() view returns (uint64)',

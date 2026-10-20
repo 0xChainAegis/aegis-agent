@@ -1,7 +1,10 @@
 require("@nomicfoundation/hardhat-ethers");
 require("@nomicfoundation/hardhat-chai-matchers");
 const { subtask } = require("hardhat/config");
-const { TASK_COMPILE_SOLIDITY_GET_SOLC_BUILD } = require("hardhat/builtin-tasks/task-names");
+const {
+  TASK_COMPILE_SOLIDITY_GET_SOLC_BUILD,
+  TASK_COMPILE_SOLIDITY_RUN_SOLCJS,
+} = require("hardhat/builtin-tasks/task-names");
 
 // Use the pinned npm compiler. Local tests/deployments never need a download or .env.
 subtask(TASK_COMPILE_SOLIDITY_GET_SOLC_BUILD).setAction(async ({ solcVersion }, hre, runSuper) => {
@@ -12,6 +15,13 @@ subtask(TASK_COMPILE_SOLIDITY_GET_SOLC_BUILD).setAction(async ({ solcVersion }, 
     longVersion: require("solc").version(),
   };
   return runSuper();
+});
+
+// Hardhat 2's child-process solc runner can return truncated JSON on Node 24.
+// Compile with the same pinned solc-js module in-process to keep builds stable.
+subtask(TASK_COMPILE_SOLIDITY_RUN_SOLCJS).setAction(async ({ input, solcJsPath }) => {
+  const solc = require("solc/wrapper")(require(solcJsPath));
+  return JSON.parse(solc.compile(JSON.stringify(input)));
 });
 
 function configuredAccounts() {

@@ -14,10 +14,14 @@ async function main() {
   const feed = await ethers.deployContract("MockV3Aggregator", [8, ethers.parseUnits("3000", 8)]);
   const oracle = await ethers.deployContract("AegisPriceOracle", [owner.address]);
   await Promise.all([acl.waitForDeployment(), att.waitForDeployment(), feed.waitForDeployment(), oracle.waitForDeployment()]);
-  const wallet = await ethers.deployContract("AegisWallet", [owner.address, await acl.getAddress(), await att.getAddress()]);
+  const policy = await ethers.deployContract("AegisPolicyEngine", [owner.address, await acl.getAddress()]);
+  await policy.waitForDeployment();
+  const wallet = await ethers.deployContract("AegisWallet", [owner.address, await acl.getAddress(), await att.getAddress(), await policy.getAddress()]);
   await wallet.waitForDeployment();
   await (await oracle.setFeed(ethers.ZeroAddress, await feed.getAddress(), 18)).wait();
   await (await oracle.lockConfiguration()).wait();
+  await (await policy.setConsumer(await wallet.getAddress(), true)).wait();
+  await (await policy.setPolicyManager(await wallet.getAddress(), true)).wait();
   await (await att.grantRole(await att.ATTESTER_ROLE(), await wallet.getAddress())).wait();
   await (await att.grantRole(await att.APPROVER_ROLE(), await wallet.getAddress())).wait();
   await (await acl.setTier(agent.address, 2, 0)).wait();
@@ -31,11 +35,12 @@ async function main() {
     aclAddress: await acl.getAddress(),
     attestationAddress: await att.getAddress(),
     oracleAddress: await oracle.getAddress(),
+    policyEngineAddress: await policy.getAddress(),
     feedAddress: await feed.getAddress(),
     ownerAddress: owner.address,
     agentAddress: agent.address,
     recipientAddress: recipient.address,
-    abiVersion: "aegis.native.v1",
+    abiVersion: "aegis.native-policy.v2",
   };
   const directory = path.join(__dirname, "..", "deployments");
   fs.mkdirSync(directory, { recursive: true });
