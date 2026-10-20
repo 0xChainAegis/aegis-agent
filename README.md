@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/aegis-hero-dark.svg">
-    <img src="docs/images/aegis-hero-light.svg" width="100%" alt="Aegis：A 字标与文字标识">
-  </picture>
+  <img src="frontend/public/aegis-hero.png" width="100%" alt="Aegis：白色陶瓷质感的 A 图标与文字标识，副标题为 Agent wallet control。">
 </p>
 
 <p align="center">
@@ -15,48 +12,15 @@
 </p>
 
 <p align="center">
-  <a href="#chainlink-与-ai-的位置"><img src="https://img.shields.io/badge/Chainlink-Data%20Feeds-59615F?style=flat-square&amp;labelColor=252B2A" alt="Chainlink Data Feeds"></a>
-  <img src="https://img.shields.io/badge/TypeScript-Node%2024-59615F?style=flat-square&amp;labelColor=252B2A" alt="TypeScript 与 Node 24">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-59615F?style=flat-square&amp;labelColor=252B2A" alt="MIT 许可证"></a>
-</p>
-
-<p align="center">
-  <a href="#问题与方案">简介</a> ·
   <a href="#产品截图">截图</a> ·
+  <a href="#问题与方案">简介</a> ·
   <a href="#完整用户流程">流程</a> ·
   <a href="#chainlink-与-ai-的位置">Chainlink</a> ·
   <a href="#快速开始">运行</a> ·
   <a href="#验证">验证</a> ·
+  <a href="#活动来源">活动</a> ·
   <a href="#团队与文档">团队</a>
 </p>
-
-<p align="center">
-  本项目诞生于 ETH Shenzhen 2026 黑客松。
-</p>
-
-<details>
-  <summary>活动参考：ETH Shenzhen 2026 海报</summary>
-  <p align="center">
-    <img src="docs/images/eth-shenzhen-2026-poster.png" width="420" alt="ETH Shenzhen 2026 Hackathon 活动海报。">
-  </p>
-</details>
-
-## <img src="docs/images/section-problem.svg" width="24" height="24" alt="" align="absmiddle"> 问题与方案
-
-**问题。** 智能体的运行钱包需要原生 ETH 支付交易费用。余额耗尽时智能体会停止工作；让它自行补款，又等于把资金权限交给自动化流程。
-
-**方案。** 一个资金池智能合约，向一个已配置的收款运行钱包支付原生 ETH，补充其 Gas 储备。用户在浏览器本地设置下限与目标值，Aegis 建议“目标值减当前余额”的补充金额；准备付款时重新校验，经用户明确确认后，由合约在白名单、权限与美元限额内执行。
-
-**四个独立角色。**
-
-| 角色 | 字段 | 职责 |
-|---|---|---|
-| Owner（资金管理员） | `ownerAddress` | 管理资金池、审批待处理付款 |
-| 执行账户 | `agentAddress` | 在授权规则内提交付款请求 |
-| 资金池合约 | `walletAddress` | 持有并支付补给资金 |
-| 收款运行钱包 | `recipientAddress` | 接收 ETH，余额显示在总览；收款不授予任何管理权限 |
-
-资金池与运行钱包的余额分别读取。LLM 只生成草稿，不签名，也不能绕过审批。
 
 ## <img src="docs/images/section-screens.svg" width="24" height="24" alt="" align="absmiddle"> 产品截图
 
@@ -93,6 +57,21 @@
   <img src="docs/images/reserve-mobile-dark.png" width="300" alt="同一钱包与设置的实际深色手机界面。">
 </p>
 
+## <img src="docs/images/section-problem.svg" width="24" height="24" alt="" align="absmiddle"> 问题与方案
+
+**问题。** 智能体的运行钱包需要原生 ETH 支付交易费用。余额耗尽时智能体会停止工作；让它自行补款，又等于把资金权限交给自动化流程。
+
+**方案。** 一个资金池智能合约，向一个已配置的收款运行钱包支付原生 ETH，补充其 Gas 储备。用户在浏览器本地设置下限与目标值，Aegis 建议“目标值减当前余额”的补充金额；准备付款时重新校验，经用户明确确认后，由合约在白名单、权限与美元限额内执行。超过阈值的付款需要 Owner 审批，超过硬上限的付款会被阻止。
+
+**四个独立角色。**
+
+- **Owner（资金管理员）**，`ownerAddress`：管理资金池、审批待处理付款。
+- **执行账户**，`agentAddress`：在授权规则内提交付款请求。
+- **资金池合约**，`walletAddress`：持有并支付补给资金。
+- **收款运行钱包**，`recipientAddress`：接收 ETH，余额显示在总览；收款不授予任何管理权限。
+
+资金池与运行钱包的余额分别读取。LLM 只生成草稿，不签名，也不能绕过审批。
+
 ## <img src="docs/images/section-flow.svg" width="24" height="24" alt="" align="absmiddle"> 完整用户流程
 
 1. 用本地测试钱包（或浏览器钱包）以 Owner 身份签名登录；登录不授权付款。
@@ -127,6 +106,8 @@
 ETH/USD 用于计算转账本金的美元价值，并非 Gas 价格预言机；发送方另行支付交易 Gas。
 
 **AI。** 默认使用规则解析器；`AEGIS_LLM_MODE=live` 可接入 Anthropic 或 OpenAI-compatible 模型，仅生成草稿。`stub` 是离线测试模式，不代表真实模型效果。模型输出须通过结构和参数校验，旧值不能覆盖用户的新地址或新金额；缺失或有歧义的内容会要求补充。任何草稿都必须预览并经用户确认，解析结果不能绕过链上限额、实时价格或重放保护。配置方式见 [联调文档](docs/INTEGRATION.md)。
+
+可选的真实模型曾在历史 40 条样本集上评测，安全修复后尚未重新评测；规则与 stub 的得分不是模型准确率。详见 [意图评测报告](eval/REPORT.md)。`agent/` 下的 Python Agent 是早期原型，不在当前 TypeScript 运行链路中。
 
 ## <img src="docs/images/section-architecture.svg" width="24" height="24" alt="" align="absmiddle"> 架构与技术栈
 
@@ -169,6 +150,8 @@ npm run dev
 
 打开 [http://127.0.0.1:5173](http://127.0.0.1:5173)。API 监听 3001 端口，本地 RPC 监听 8545 端口，chain ID 为 31337。选择明确标注的本地测试钱包入口，使用公开的开发用 Owner 账户登录。这些开发账户与 ETH 没有现实价值，不得用于存放真实资金。
 
+连接浏览器钱包时，网络不一致会请求插件弹出切换确认；切换成功后仍须使用配置的 Owner 账户登录。钱包切换到 Sepolia 不会改变后端所连接的链。本地 `npm run dev` 会维护已核验 Mock Feed 的报价时间戳；测试网与自动 E2E 测试不会启用此维护器。
+
 部署脚本向资金池注入 1 ETH，并设置无需单独 Owner 审批的 5 美元阈值、10 美元单笔硬上限及 15 美元共享 UTC 每日预算。本地 Mock Feed 的初始价格为每 ETH 3,000 美元。
 
 目录：`frontend/`（Vite + TypeScript 界面）、`backend/`（Node.js、viem、Zod、SQLite）、`contracts/`（Solidity、Hardhat、部署与合约测试）、`packages/shared/`（API 类型与 ABI）、`agent/skills/`（意图解析提示词；其他 Python 原型不在当前运行链路中）。
@@ -180,7 +163,7 @@ npm run check
 npm run test:e2e
 ```
 
-2026 年 10 月 20 日在合并后的主线版本、Node 24 环境下验证通过：类型检查与生产构建、**34 项合约测试**、**45 项后端测试（含嵌套测试）**、**16 个浏览器用例**（钱包与连接组 9 个、储备组 7 个）。另有 **7 项离线模型启动器测试**。浏览器用例覆盖本地真实付款、Owner 审批与取消、登录时账户变化、断连和刷新恢复。
+当前版本在 Node 24 环境下验证通过：类型检查与生产构建、**34 项合约测试**、**47 项后端测试（含嵌套测试）**、**38 个浏览器用例**（钱包、网络与服务状态组 31 个，储备组 7 个）。另有 **9 项离线 Mock 维护器测试**及 **7 项离线模型启动器测试**。浏览器用例覆盖本地真实付款、Owner 审批与取消、网络切换、登录时账户变化、报价过期时停止付款、断连和刷新恢复。
 
 合约测试覆盖授权、预言机边界、预算、审批、重放及直接调用拒绝。后端测试通过明确的链测试夹具覆盖 HTTP 边界、持久化恢复、事件绑定与运行钱包地址绑定。浏览器测试使用真实本地合约与余额以及 Mock Feed，覆盖确认、审批与取消、建议金额变化、数据缺失、运行钱包身份缺失或不一致、离线失败，以及刷新后不重复付款。
 
@@ -188,13 +171,19 @@ npm run test:e2e
 
 ### 部署与执行证据
 
-本地付款流程已验证。Sepolia 已有部署与只读绑定校验记录，最新策略引擎版本的网页付款闭环仍待验收。真实模型评测的汇总与限制见 [意图评测报告](eval/REPORT.md)；历史分数不代表当前版本的测试结果。
+本地付款流程已验证。Sepolia v2 部署报告提供了合约地址与只读绑定校验记录，但浏览器内的真实网页付款仍待验收。真实模型评测的汇总与限制见 [意图评测报告](eval/REPORT.md)；历史分数不代表当前版本的测试结果。
 
 当前演示覆盖单资金池、单收款运行钱包与原生 ETH；定时自动付款、多钱包管理、订阅和 CCIP 跨链不在交付范围。
 
 当前公开的付款执行证据均来自本地链，Sepolia 网页付款尚无已验收的记录。执行 `npm run deploy:local` 后，实际合约地址写入本机的 `contracts/deployments/localhost.json`。每笔已执行任务可在界面的验证记录中核对交易回执、合约事件、收款地址、金额与请求哈希。
 
-公共网络部署经独立核验、网页付款验收通过后，再公开对应网络的实际合约地址和交易链接。只读 Feed 连通性检查不代表 Aegis 已部署或已付款。
+公共网络的付款交易链接将在网页付款验收通过后公开。只读 Feed 连通性检查不代表 Aegis 已部署或已付款。
+
+## <img src="docs/images/section-team.svg" width="24" height="24" alt="" align="absmiddle"> 活动来源
+
+本项目诞生于 ETH Shenzhen 2026 黑客松。
+
+<img src="docs/images/eth-shenzhen-2026-poster.png" width="100%" alt="ETH Shenzhen 2026 Hackathon 活动海报。">
 
 ## <img src="docs/images/section-team.svg" width="24" height="24" alt="" align="absmiddle"> 团队与文档
 
@@ -216,8 +205,5 @@ npm run test:e2e
 [贡献者](https://github.com/0xChainAegis/aegis-agent/graphs/contributors) · MIT 许可证，参见 [LICENSE](LICENSE)。
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/aegis-footer-dark.svg">
-    <img src="docs/images/aegis-footer-light.svg" width="100%" alt="Aegis 页脚标识">
-  </picture>
+  <img src="frontend/public/favicon.svg" width="28" height="28" alt="Aegis">
 </p>
