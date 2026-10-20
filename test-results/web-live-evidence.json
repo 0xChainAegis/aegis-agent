@@ -1,0 +1,96 @@
+[
+  {
+    "name": "missing amount",
+    "draft": {
+      "schemaVersion": "aegis.v1",
+      "mode": "local_chain",
+      "requestId": "55d7fe64-2a8b-435b-861e-fee74a1c7f6a",
+      "serverTime": "2026-10-20T08:42:22.574Z",
+      "message": "给 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC 转一点 ETH",
+      "recipient": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "to": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "amountWei": null,
+      "purpose": "转账",
+      "missingFields": [
+        "amountWei"
+      ],
+      "status": "NEEDS_INPUT",
+      "question": "请补充明确的 ETH 数额。",
+      "parser": {
+        "kind": "llm",
+        "model": "gpt-6.1-sol",
+        "configuredModel": "gpt-6.1-sol",
+        "fallback": false,
+        "reason": "LLM_OK"
+      },
+      "draftId": "c4d4c14a-20ea-4b97-9866-ed54acc1d0e6",
+      "intentId": "c4d4c14a-20ea-4b97-9866-ed54acc1d0e6",
+      "version": 1,
+      "revision": 1,
+      "createdAt": "2026-10-20T08:42:22.574Z",
+      "updatedAt": "2026-10-20T08:42:22.574Z"
+    }
+  },
+  {
+    "name": "unsupported USD",
+    "draft": {
+      "schemaVersion": "aegis.v1",
+      "mode": "local_chain",
+      "requestId": "74e7ba94-cc10-4e05-835b-d125c729c9ae",
+      "serverTime": "2026-10-20T08:42:54.403Z",
+      "message": "给 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC 转 10 USD",
+      "recipient": null,
+      "to": null,
+      "amountWei": null,
+      "purpose": "unsupported currency",
+      "missingFields": [
+        "unsupported"
+      ],
+      "status": "NEEDS_INPUT",
+      "question": "目前仅支持 native ETH，请提供 ETH 数额。",
+      "parser": {
+        "kind": "llm",
+        "model": "gpt-6.1-sol",
+        "configuredModel": "gpt-6.1-sol",
+        "fallback": false,
+        "reason": "LLM_OK"
+      },
+      "draftId": "1620368d-2fcc-49bb-acde-1e52b88c66ac",
+      "intentId": "1620368d-2fcc-49bb-acde-1e52b88c66ac",
+      "version": 1,
+      "revision": 1,
+      "createdAt": "2026-10-20T08:42:54.404Z",
+      "updatedAt": "2026-10-20T08:42:54.404Z"
+    }
+  },
+  {
+    "name": "complete ETH draft and preview",
+    "draft": {
+      "schemaVersion": "aegis.v1",
+      "mode": "local_chain",
+      "requestId": "e94d7348-e2c9-433a-8131-0e926b604dd9",
+      "serverTime": "2026-10-20T08:43:02.169Z",
+      "message": "给 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC 转 0.001 ETH，用于支付服务费",
+      "recipient": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "to": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "amountWei": "1000000000000000",
+      "purpose": "支付服务费",
+      "missingFields": [],
+      "status": "DRAFT",
+      "question": null,
+      "parser": {
+        "kind": "llm",
+        "model": "gpt-6.1-sol",
+        "configuredModel": "gpt-6.1-sol",
+        "fallback": false,
+        "reason": "LLM_OK"
+      },
+      "draftId": "4a4d129f-995f-4012-9811-cd69c06ff053",
+      "intentId": "4a4d129f-995f-4012-9811-cd69c06ff053",
+      "version": 1,
+      "revision": 1,
+      "createdAt": "2026-10-20T08:43:02.170Z",
+      "updatedAt": "2026-10-20T08:43:02.170Z"
+    }
+  }
+]
