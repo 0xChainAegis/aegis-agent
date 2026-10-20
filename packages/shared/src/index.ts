@@ -3,10 +3,46 @@ export type RuntimeMode = 'local_chain' | 'testnet' | 'mock';
 export type TaskStatus = 'DRAFT' | 'NEEDS_INPUT' | 'READY' | 'SUBMITTING' | 'BROADCAST' | 'UNKNOWN' | 'AWAITING_APPROVAL' | 'EXECUTED' | 'BLOCKED' | 'REQUOTE_REQUIRED' | 'CANCELLED' | 'EXPIRED' | 'FAILED';
 export type Hex = `0x${string}`;
 export interface ParserInfo { kind: 'rule_parser' | 'llm'; model: string | null; configuredModel: string | null; fallback: boolean; reason: string }
+export interface PlanProvenance {
+  schemaVersion: 'aegis.draft-plan.v1';
+  draftHash: Hex;
+  quoteHash: Hex;
+  planHash: Hex;
+  hashAlgorithm: 'keccak256';
+  recompute: string;
+}
+export interface DraftPlanV1 {
+  schemaVersion: 'aegis.draft-plan.v1';
+  draftId: string;
+  revision: number;
+  action: 'transfer';
+  messageHash: Hex;
+  purposeHash: Hex;
+  recipient: Hex | null;
+  amountWei: string | null;
+  parser: ParserInfo;
+  quote: {
+    quoteId: string;
+    draftVersion: number;
+    chainId: number;
+    walletAddress: Hex;
+    agentAddress: Hex;
+    recipient: Hex;
+    amountWei: string;
+    costUsd6: string;
+    maxUsdCost6: string;
+    policyVersion: string;
+    quoteExpiresAtSeconds: number;
+    requestDeadlineSeconds: number;
+    observedBlockNumber: string;
+    observedBlockHash: Hex;
+    decision: 'AUTO' | 'OWNER_APPROVAL' | 'BLOCK';
+  };
+}
 export interface Intent {
   draftId: string; intentId: string; version: number; revision: number; status: TaskStatus;
   message: string; recipient: Hex | null; to: Hex | null; amountWei: string | null; purpose: string;
-  missingFields: string[]; question: string | null; parser: ParserInfo;
+  missingFields: string[]; question: string | null; parser: ParserInfo; draftHash?: Hex;
   createdAt: string; updatedAt: string;
 }
 export interface TransactionEvidence {
@@ -20,7 +56,7 @@ export interface Task {
   requestDeadlineSeconds: number; policyVersion: string; requestNonce: string | null;
   requestHash: Hex | null; attestationId: string | null; txHash: Hex | null;
   triggerType: 'manual'; ruleId: null; reasonCodes: string[]; transactions: TransactionEvidence[];
-  availableActions: string[]; createdAt: string; updatedAt: string; parser: ParserInfo;
+  availableActions: string[]; createdAt: string; updatedAt: string; parser: ParserInfo; provenance?: PlanProvenance;
   verification: { kind: 'chain' | 'mock'; chainVerified: boolean; hashVerified: boolean };
 }
 export const walletAbiSignatures = [

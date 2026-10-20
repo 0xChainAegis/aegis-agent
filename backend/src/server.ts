@@ -14,7 +14,7 @@ const draftSchema = z.object({ message: z.string().max(4000).optional(), recipie
 const revision = z.number().int().positive();
 const patchSchema = draftSchema.extend({ expectedRevision: revision }).strict();
 const previewSchema = z.object({ expectedRevision: revision, maxUsdCost6: integer.optional() }).strict();
-const submitSchema = z.object({ expectedRevision: revision, quoteId: z.string().uuid() }).strict();
+const submitSchema = z.object({ expectedRevision: revision, quoteId: z.string().uuid(), planHash: hash }).strict();
 const docs: Record<string, { title: string; markdown: string }> = {
   overview: { title: 'Aegis 运行钱包补给', markdown: '# Aegis\n\n读取运行钱包真实 ETH 余额，按用户设置的下限与目标建议补给金额。重新读取后生成预览，用户确认才提交。准备金设置保存在浏览器，后台不会自动监控或补款。\n\n自然语言只生成草稿。付款由 agent 在合约预算与收款范围内发起；超过自动额度的请求等待 owner 链上 approveAndExecute。审批时仍检查报价与硬预算。' },
   roles: { title: '角色与签名', markdown: '# 角色与签名\n\nOwner 用钱包签一次性登录消息，并在浏览器签规则修改、充值及高风险审批交易。登录不授权付款。后台只保存受限 agent 执行密钥，绝不保存 owner 私钥。\n\n当前是单 owner 资金池；Bearer 会话过期后需重新登录。' },
@@ -70,6 +70,7 @@ export function createApiServer(service: AegisService) {
           addresses: { wallet: config.walletAddress, acl: config.aclAddress, attestation: config.attestationAddress, oracle: config.oracleAddress, policyEngine: config.policyEngineAddress, feed: config.feedAddress, owner: config.ownerAddress, agent: config.agentAddress, recipient: config.recipientAddress },
           abi: { wallet: walletAbi, oracle: oracleAbi }, walletAbi, oracleAbi,
           readiness: await service.chain.readiness(), explorerBaseUrl: config.mode === 'testnet' ? 'https://sepolia.etherscan.io' : null,
+          planProvenance: 'aegis.draft-plan.v1',
           planner: {
             kind: config.llm.mode === 'off' ? 'rule_parser' : 'llm',
             mode: config.llm.mode,
@@ -133,7 +134,7 @@ export function createApiServer(service: AegisService) {
             }
             if (request.method === 'POST' && action === 'submit') {
               const body = submitSchema.parse(raw);
-              return { status: 202, body: service.publicTask(service.submit(owner, id, body.expectedRevision, body.quoteId)) };
+              return { status: 202, body: service.publicTask(service.submit(owner, id, body.expectedRevision, body.quoteId, body.planHash)) };
             }
           }
           if (request.method === 'POST' && taskMatch?.[2] === 'observed-tx') {

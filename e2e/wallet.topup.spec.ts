@@ -30,6 +30,9 @@ test('low reserve (explicit test settings): exact suggestion previews, needs con
  await page.getByTestId('reserve-prepare').click();
  const preview=await (await previewed).json();
  expect(preview.status).toBe('READY');expect(preview.decision).toBe('AUTO');expect(preview.costUsd6).toBe('3000000');
+  expect(preview.planHash).toMatch(/^0x[0-9a-f]{64}$/);
+  expect(preview.draftHash).toMatch(/^0x[0-9a-f]{64}$/);
+  expect(preview.quoteHash).toMatch(/^0x[0-9a-f]{64}$/);
  const created=writes.filter(w=>w.method==='POST'&&w.path==='/api/v1/intents');
  expect(created).toHaveLength(1);
  expect(created[0].body).toMatchObject({amountWei:'1000000000000000',recipient:cfg.recipientAddress});

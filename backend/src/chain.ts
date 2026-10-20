@@ -59,6 +59,7 @@ export interface Quote {
   priceAnswer: string; roundId: string; updatedAtSeconds: number;
   observedBlockNumber: string; observedBlockHash: Hex; oracle: Record<string, unknown>;
   triggerType: 'manual'; ruleId: null;
+  draftHash?: Hex; quoteHash?: Hex; planHash?: Hex;
 }
 export interface Prepared {
   rawTransaction: Hex; hash: Hex; senderNonce: string; requestNonce: string; requestHash: Hex;
@@ -123,7 +124,7 @@ export class ViemGateway implements Gateway {
       await this.requireChain();
       const addresses = [this.config.walletAddress, this.config.aclAddress, this.config.attestationAddress, this.config.oracleAddress, this.config.policyEngineAddress, this.config.feedAddress];
       const code = await Promise.all(addresses.map(address => this.publicClient.getBytecode({ address })));
-      if (code.some(value => !value || value === '0x')) throw new ApiError(503, 'CONTRACT_MISSING', '部署地址没有合约 bytecode');
+      if (code.some((value: string | undefined) => !value || value === '0x')) throw new ApiError(503, 'CONTRACT_MISSING', '部署地址没有合约 bytecode');
       if (!this.account) throw new ApiError(503, 'EXECUTOR_KEY_MISSING', '执行账户未配置；测试网不会使用本地公开私钥');
       if (!equal(this.account.address, this.config.agentAddress)) throw new ApiError(503, 'EXECUTOR_MISMATCH', '执行密钥与部署 agent 地址不一致');
       const snapshot = await this.snapshot();

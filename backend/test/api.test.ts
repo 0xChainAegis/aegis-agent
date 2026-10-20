@@ -104,7 +104,7 @@ async function setup(options: { dbPath?: string; chain?: FakeChain; cfg?: Config
   async function draftAndSubmit(suffix = 'pay-0001', amountWei = '1000000000000000') {
     const draft = await call('/intents', 'POST', { recipient, amountWei }, `create-${suffix}`);
     const preview = await call(`/intents/${draft.body.draftId}/preview`, 'POST', { expectedRevision: 1 }, `preview-${suffix}`);
-    const submit = await call(`/intents/${draft.body.draftId}/submit`, 'POST', { expectedRevision: 1, quoteId: preview.body.quoteId }, `submit-${suffix}`);
+    const submit = await call(`/intents/${draft.body.draftId}/submit`, 'POST', { expectedRevision: 1, quoteId: preview.body.quoteId, planHash: preview.body.planHash }, `submit-${suffix}`);
     assert.equal(submit.status, 202);
     return { draft, preview, submit };
   }
@@ -168,7 +168,7 @@ test('idempotent writes return the same entity; different contents conflict; dup
     const conflict = await app.call('/intents', 'POST', { recipient, amountWei: '2' }, 'same-key-00001');
     assert.equal(conflict.status, 409); assert.equal(conflict.body.error.code, 'IDEMPOTENCY_CONFLICT');
     const { draft, preview, submit } = await app.draftAndSubmit();
-    const double = await app.call(`/intents/${draft.body.draftId}/submit`, 'POST', { expectedRevision: 1, quoteId: preview.body.quoteId }, 'different-submit-key');
+    const double = await app.call(`/intents/${draft.body.draftId}/submit`, 'POST', { expectedRevision: 1, quoteId: preview.body.quoteId, planHash: preview.body.planHash }, 'different-submit-key');
     assert.equal(double.body.taskId, submit.body.taskId);
     app.chain.beforeBroadcast = raw => { const saved = app.service.getTask(owner.address, submit.body.taskId); assert.equal(saved.rawTransaction, raw); assert.equal(saved.txHash, keccak256(raw)); assert.equal(saved.requestNonce, '0'); };
     await app.service.tick(); await app.service.tick();
@@ -334,9 +334,9 @@ test('an unresolved agent transaction blocks another nonce allocation and expire
     const preview = await app.call(`/intents/${draft.body.draftId}/preview`, 'POST', { expectedRevision: 1 }, 'second-preview-001');
     const expired = { ...preview.body, quoteExpiresAtSeconds: Math.floor(Date.now() / 1000) - 1 };
     app.store.put('quote', preview.body.quoteId, owner.address, expired);
-    assert.equal((await app.call(`/intents/${draft.body.draftId}/submit`, 'POST', { expectedRevision: 1, quoteId: preview.body.quoteId }, 'expired-submit-001')).status, 409);
+    assert.equal((await app.call(`/intents/${draft.body.draftId}/submit`, 'POST', { expectedRevision: 1, quoteId: preview.body.quoteId, planHash: preview.body.planHash }, 'expired-submit-001')).status, 409);
     app.store.put('quote', preview.body.quoteId, owner.address, preview.body);
-    const second = await app.call(`/intents/${draft.body.draftId}/submit`, 'POST', { expectedRevision: 1, quoteId: preview.body.quoteId }, 'second-submit-001');
+    const second = await app.call(`/intents/${draft.body.draftId}/submit`, 'POST', { expectedRevision: 1, quoteId: preview.body.quoteId, planHash: preview.body.planHash }, 'second-submit-001');
     await app.service.tick(); await app.service.tick();
     assert.equal(chain.preparations, 1); assert.equal(chain.broadcasts, 1);
     assert.equal((await app.call(`/tasks/${first.submit.body.taskId}`)).body.status, 'BROADCAST');
@@ -449,10 +449,51 @@ test('flagged input blocks HTTP creation and complete-draft edits before preview
     assert.equal(patched.body.amountWei, null);
     assert.equal((await app.call(`/intents/${complete.body.draftId}/preview`, 'POST', { expectedRevision: 2 }, 'blocked-preview-02')).status, 422);
     const staleSubmit = await app.call(`/intents/${complete.body.draftId}/submit`, 'POST', {
-      expectedRevision: 1, quoteId: oldPreview.body.quoteId,
+      expectedRevision: 1, quoteId: oldPreview.body.quoteId, planHash: oldPreview.body.planHash,
     }, 'blocked-submit-01');
     assert.equal(staleSubmit.status, 409);
     assert.equal(app.store.list('task').length, 0);
     assert.equal(app.chain.broadcasts, 0);
+  } finally { await app.close(); }
+});
+
+
+test('reviewed draft and quote planHash are required and exposed in evidence', async () => {
+  const app = await setup();
+  try {
+    await app.login();
+    const draft = await app.call('/intents', 'POST', { recipient, amountWei: '1' }, 'plan-create-001');
+    const preview = await app.call(`/intents/${draft.body.draftId}/preview`, 'POST', { expectedRevision: 1 }, 'plan-preview-001');
+
+    assert.match(draft.body.draftHash, /^0x[0-9a-f]{64}$/);
+    assert.match(preview.body.draftHash, /^0x[0-9a-f]{64}$/);
+    assert.match(preview.body.quoteHash, /^0x[0-9a-f]{64}$/);
+    assert.match(preview.body.planHash, /^0x[0-9a-f]{64}$/);
+
+    const wrong = await app.call(`/intents/${draft.body.draftId}/submit`, 'POST', {
+      expectedRevision: 1,
+      quoteId: preview.body.quoteId,
+      planHash: `0x${'0'.repeat(64)}`,
+    }, 'plan-submit-wrong');
+    assert.equal(wrong.status, 409);
+    assert.equal(wrong.body.error.code, 'PLAN_HASH_MISMATCH');
+    assert.equal(app.store.list('task').length, 0);
+    assert.equal(app.chain.preparations, 0);
+    assert.equal(app.chain.broadcasts, 0);
+
+    const submitted = await app.call(`/intents/${draft.body.draftId}/submit`, 'POST', {
+      expectedRevision: 1,
+      quoteId: preview.body.quoteId,
+      planHash: preview.body.planHash,
+    }, 'plan-submit-good');
+    assert.equal(submitted.status, 202);
+    assert.equal(submitted.body.provenance.planHash, preview.body.planHash);
+    assert.equal(submitted.body.provenance.schemaVersion, 'aegis.draft-plan.v1');
+
+    await app.service.tick(); await app.service.tick();
+    const evidence = await app.call(`/tasks/${submitted.body.taskId}/evidence`);
+    assert.equal(evidence.status, 200);
+    assert.equal(evidence.body.provenance.planHash, preview.body.planHash);
+    assert.equal(evidence.body.provenance.recompute, 'docs/DRAFT-PLAN-PROVENANCE.md');
   } finally { await app.close(); }
 });

@@ -4,6 +4,7 @@ import { type Intent, type Task } from '@aegis/shared';
 import type { Config } from './config.js';
 import { Store } from './store.js';
 import { type Gateway, type Quote, type Outcome, chainError } from './chain.js';
+import { computeDraftHash, computePlanProvenance, verifyPlanHash } from './plan.js';
 import type { DraftInput } from './parser.js';
 import { createLlmClient, parseDraftWithLlm, type LlmIntentClient } from './llm.js';
 import { ApiError, Mutex } from './errors.js';
@@ -79,6 +80,7 @@ export class AegisService {
   async createIntent(owner: Address, input: DraftInput): Promise<Intent> {
     const id = randomUUID(); const now = new Date().toISOString();
     const intent: Intent = { ...await parseDraftWithLlm(input, this.config, undefined, this.llmClient), draftId: id, intentId: id, version: 1, revision: 1, createdAt: now, updatedAt: now };
+    intent.draftHash = computeDraftHash(intent);
     this.store.put('intent', id, owner, intent);
     return intent;
   }
@@ -92,6 +94,7 @@ export class AegisService {
     if (previous.version !== expected) throw new ApiError(409, 'REVISION_CONFLICT', '草稿已更新，请读取最新版本');
     if (this.store.list<InternalTask>('task', owner).some(task => task.draftId === id)) throw new ApiError(409, 'INTENT_ALREADY_SUBMITTED', '已提交的付款内容不能编辑；请新建草稿');
     const intent: Intent = { ...previous, ...await parseDraftWithLlm(input, this.config, previous, this.llmClient), version: previous.version + 1, revision: previous.version + 1, updatedAt: new Date().toISOString() };
+    intent.draftHash = computeDraftHash(intent);
     this.store.put('intent', id, owner, intent);
     return intent;
   }
@@ -101,14 +104,17 @@ export class AegisService {
     if (!intent.recipient || !intent.amountWei || intent.missingFields.length) throw new ApiError(422, 'NEEDS_INPUT', '请先补齐地址、数额和单位', intent.missingFields);
     if (this.store.list<InternalTask>('task', owner).some(task => task.draftId === id)) throw new ApiError(409, 'INTENT_ALREADY_SUBMITTED', '该草稿已提交');
     const quote: Quote = { ...await this.chain.preview(intent.recipient, intent.amountWei, maxUsdCost6), quoteId: randomUUID(), draftId: id, draftVersion: intent.version };
-    this.store.put('quote', quote.quoteId, owner, quote);
+    const provenance = computePlanProvenance(intent, quote);
+    const quoteWithProvenance: Quote = { ...quote, draftHash: provenance.draftHash, quoteHash: provenance.quoteHash, planHash: provenance.planHash };
+    this.store.put('quote', quote.quoteId, owner, quoteWithProvenance);
     this.store.put('intent', id, owner, { ...intent, status: quote.status, updatedAt: new Date().toISOString() });
-    return quote;
+    return quoteWithProvenance;
   }
-  submit(owner: Address, id: string, expected: number, quoteId: string): InternalTask {
+  submit(owner: Address, id: string, expected: number, quoteId: string, planHash: string): InternalTask {
     const existing = this.store.list<InternalTask>('task', owner).find(task => task.draftId === id && task.quoteId === quoteId);
     if (existing) {
       if (existing.draftVersion !== expected) throw new ApiError(409, 'REVISION_CONFLICT', '提交版本与原任务不一致');
+      if (existing.provenance?.planHash.toLowerCase() !== planHash.toLowerCase()) throw new ApiError(409, 'PLAN_HASH_MISMATCH', '计划指纹与原任务不一致');
       return existing;
     }
     const intent = this.getIntent(owner, id);
@@ -117,6 +123,7 @@ export class AegisService {
     if (quote.status !== 'READY') throw new ApiError(422, 'POLICY_BLOCKED', '硬规则阻止该付款', quote.reasonCodes);
     if (quote.quoteExpiresAtSeconds <= Math.floor(Date.now() / 1000)) throw new ApiError(409, 'QUOTE_EXPIRED', '报价已过期，请重新预览并确认');
     if (quote.recipient !== intent.recipient || quote.amountWei !== intent.amountWei) throw new ApiError(409, 'INTENT_CHANGED', '报价动作与草稿不一致');
+    if (!verifyPlanHash(intent, quote, planHash)) throw new ApiError(409, 'PLAN_HASH_MISMATCH', '计划指纹与当前草稿或报价不一致');
     if (this.store.list<InternalTask>('task', owner).some(task => task.draftId === id)) throw new ApiError(409, 'INTENT_ALREADY_SUBMITTED', '同一草稿只能提交一次');
     const now = new Date().toISOString(); const taskId = randomUUID();
     const task: InternalTask = {
@@ -125,7 +132,8 @@ export class AegisService {
       recipient: quote.recipient, to: quote.recipient, amountWei: quote.amountWei, maxUsdCost6: quote.maxUsdCost6, previewCostUsd6: quote.costUsd6,
       requestDeadlineSeconds: quote.requestDeadlineSeconds, policyVersion: quote.policyVersion, requestNonce: null, requestHash: null, attestationId: null, txHash: null,
       triggerType: 'manual', ruleId: null, reasonCodes: quote.reasonCodes, transactions: [], availableActions: [],
-      createdAt: now, updatedAt: now, parser: intent.parser, verification: { kind: this.config.mode === 'mock' ? 'mock' : 'chain', chainVerified: false, hashVerified: false },
+      createdAt: now, updatedAt: now, parser: intent.parser, provenance: computePlanProvenance(intent, quote),
+      verification: { kind: this.config.mode === 'mock' ? 'mock' : 'chain', chainVerified: false, hashVerified: false },
     };
     this.store.put('task', taskId, owner, task);
     this.store.put('intent', id, owner, { ...intent, status: 'SUBMITTING', updatedAt: now });
@@ -187,7 +195,7 @@ export class AegisService {
     return {
       taskId: id, status: task.status, chainId: task.chainId, verification: task.verification,
       intent: { draftId: task.draftId, draftVersion: task.draftVersion, walletAddress: task.walletAddress, agentAddress: task.agentAddress, recipient: task.recipient, amountWei: task.amountWei, maxUsdCost6: task.maxUsdCost6, policyVersion: task.policyVersion, requestNonce: task.requestNonce, requestDeadlineSeconds: task.requestDeadlineSeconds, requestHash: task.requestHash },
-      attestationId: task.attestationId, transactions: task.transactions, outcome: task.eventData ?? null,
+      attestationId: task.attestationId, provenance: task.provenance ?? null, transactions: task.transactions, outcome: task.eventData ?? null,
       approvalMode: 'owner_approve_and_execute', finality: 'mined_is_not_irreversible', confirmationsRequired: 1,
       explorerBaseUrl: this.config.mode === 'testnet' ? 'https://sepolia.etherscan.io' : null,
       sources: { planner: task.parser.kind, quote: this.config.mode === 'mock' ? 'mock' : 'chain', transaction: this.config.mode === 'mock' ? 'none' : 'chain', evidence: task.verification.chainVerified ? 'contract_event' : 'unverified' },
