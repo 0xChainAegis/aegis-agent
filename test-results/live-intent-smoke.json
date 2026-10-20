@@ -1,0 +1,109 @@
+{
+  "testedAt": "2026-10-20T08:19:06.096Z",
+  "node": "v24.19.0",
+  "provider": "openai",
+  "model": "gpt-6.1-sol",
+  "baseUrl": "https://wow.wvv.pp.ua/v1",
+  "mode": "live",
+  "scope": "real LLM API + existing draft validation; no chain or payment submission",
+  "results": [
+    {
+      "name": "完整中文转账",
+      "message": "请给 0x1111111111111111111111111111111111111111 转 0.001 ETH，支付服务费",
+      "latencyMs": 3936,
+      "raw": {
+        "action": "transfer",
+        "recipient": "0x1111111111111111111111111111111111111111",
+        "amountEth": "0.001",
+        "purpose": "支付服务费",
+        "missingFields": [],
+        "question": null
+      },
+      "draft": {
+        "message": "请给 0x1111111111111111111111111111111111111111 转 0.001 ETH，支付服务费",
+        "recipient": "0x1111111111111111111111111111111111111111",
+        "to": "0x1111111111111111111111111111111111111111",
+        "amountWei": "1000000000000000",
+        "purpose": "支付服务费",
+        "missingFields": [],
+        "status": "DRAFT",
+        "question": null,
+        "parser": {
+          "kind": "llm",
+          "model": "gpt-6.1-sol",
+          "configuredModel": "gpt-6.1-sol",
+          "fallback": false,
+          "reason": "LLM_OK"
+        }
+      }
+    },
+    {
+      "name": "缺少金额时追问",
+      "message": "给 0x1111111111111111111111111111111111111111 转一点 ETH",
+      "latencyMs": 3810,
+      "raw": {
+        "action": "clarify",
+        "recipient": "0x1111111111111111111111111111111111111111",
+        "amountEth": null,
+        "purpose": "转账",
+        "missingFields": [
+          "amount"
+        ],
+        "question": "请补充明确的 ETH 数额。"
+      },
+      "draft": {
+        "message": "给 0x1111111111111111111111111111111111111111 转一点 ETH",
+        "recipient": "0x1111111111111111111111111111111111111111",
+        "to": "0x1111111111111111111111111111111111111111",
+        "amountWei": null,
+        "purpose": "转账",
+        "missingFields": [
+          "amountWei"
+        ],
+        "status": "NEEDS_INPUT",
+        "question": "请补充明确的 ETH 数额。",
+        "parser": {
+          "kind": "llm",
+          "model": "gpt-6.1-sol",
+          "configuredModel": "gpt-6.1-sol",
+          "fallback": false,
+          "reason": "LLM_OK"
+        }
+      }
+    },
+    {
+      "name": "拒绝不支持的美元转账",
+      "message": "给 0x1111111111111111111111111111111111111111 转 10 USD",
+      "latencyMs": 4429,
+      "raw": {
+        "action": "unsupported",
+        "recipient": null,
+        "amountEth": null,
+        "purpose": "unsupported currency",
+        "missingFields": [
+          "amount"
+        ],
+        "question": "目前仅支持 native ETH，请提供 ETH 数额。"
+      },
+      "draft": {
+        "message": "给 0x1111111111111111111111111111111111111111 转 10 USD",
+        "recipient": null,
+        "to": null,
+        "amountWei": null,
+        "purpose": "unsupported currency",
+        "missingFields": [
+          "unsupported"
+        ],
+        "status": "NEEDS_INPUT",
+        "question": "目前仅支持 native ETH，请提供 ETH 数额。",
+        "parser": {
+          "kind": "llm",
+          "model": "gpt-6.1-sol",
+          "configuredModel": "gpt-6.1-sol",
+          "fallback": false,
+          "reason": "LLM_OK"
+        }
+      }
+    }
+  ]
+}
