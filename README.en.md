@@ -147,6 +147,8 @@ Requires Node.js 24+ and npm. Run commands from the repository root.
 npm ci --ignore-scripts
 ```
 
+> If npm 12 reports `EALLOWGIT`, the lockfile contains a commit-pinned Git dependency. Verify its source and follow [npm's allow-git configuration](https://docs.npmjs.com/cli/v12/using-npm/config/#allow-git). Switching SSH to HTTPS still leaves a Git dependency; retain the repository lockfile.
+
 Terminal 1:
 
 ```bash
@@ -208,6 +210,8 @@ Public-network contract addresses and transaction links will be published after 
 | [Security boundaries](docs/SECURITY.md) | Authorization, integrity and known limits |
 | [Contract rules](contracts/README.md) | On-chain authorization rules and local deployment |
 | [Interface design system](frontend/DESIGN.md) | Layout, themes, components and accessibility |
+| [Live LLM integration](docs/LLM-LIVE-LOCAL.md) | Environment variables, launchers and local limits for live mode |
+| [Intent evaluation report](eval/REPORT.md) | 40 cases, results for three parsers and failure attribution |
 
 [Contributors](https://github.com/0xChainAegis/aegis-agent/graphs/contributors) · MIT — see [LICENSE](LICENSE).
 

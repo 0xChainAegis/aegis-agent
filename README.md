@@ -147,6 +147,8 @@ ETH/USD 用于计算转账本金的美元价值，并非 Gas 价格预言机；�
 npm ci --ignore-scripts
 ```
 
+> 如果 npm 12 报 `EALLOWGIT`：锁文件包含固定提交的 Git 依赖，请先核对依赖来源，再按 [npm 的 allow-git 配置](https://docs.npmjs.com/cli/v12/using-npm/config/#allow-git)处理安装策略。只把 SSH 改为 HTTPS 仍属于 Git 依赖；保留仓库锁文件。
+
 终端 1：
 
 ```bash
@@ -208,6 +210,8 @@ npm run test:e2e
 | [安全边界](docs/SECURITY.md) | 授权、完整性与已知限制 |
 | [合约规则](contracts/README.md) | 链上授权规则与本地部署 |
 | [界面设计系统](frontend/DESIGN.md) | 布局、明暗主题、组件与可访问性 |
+| [真实 LLM 联调](docs/LLM-LIVE-LOCAL.md) | live 模式的环境变量、启动脚本与本地联调限制 |
+| [意图评测报告](eval/REPORT.md) | 40 条样本、三种解析器的结果与失败归因 |
 
 [贡献者](https://github.com/0xChainAegis/aegis-agent/graphs/contributors) · MIT 许可证，参见 [LICENSE](LICENSE)。
 
