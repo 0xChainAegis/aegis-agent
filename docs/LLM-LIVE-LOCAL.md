@@ -14,11 +14,11 @@
 | 缺金额时追问 | 3810 ms | NEEDS_INPUT | llm / LLM_OK / fallback=false |
 | 不支持的美元转账 | 4429 ms | NEEDS_INPUT | llm / LLM_OK / fallback=false |
 
-详细模型原始 JSON、校验后草稿和时间记录在 `test-results/live-intent-smoke.json`。该目录被 gitignore 排除。
+详细模型原始 JSON、校验后草稿和时间记录在本机 `test-results/live-intent-smoke.json`。`test-results/` 被 gitignore 排除，**原始证据不随仓库分发**；仓库只保留脱敏的评测报告与失败归因。
 
 后端原有回归测试：37 passed，0 failed。后端 TypeScript 类型检查退出码 0。
 
-## 本机复现
+## 本机复现（仅项目作者本机）
 
 在项目根目录执行：
 
@@ -26,9 +26,9 @@
 py scripts/with-live-llm.py
 ```
 
-入口从当前 Hermes profile 的 `auth.json` 中读取 `custom:wow` API 密钥，只通过子进程环境传递，不在项目中存储密钥。需要这台电脑已有的 Hermes wow 凭据池和相邻 `.runtime/node24/node.exe`。这不是其他成员开箱即用的通用密钥配置工具。
+**这个入口是本机专用的，不是团队通用的密钥配置工具。** 它优先读取进程环境变量 `AEGIS_LLM_API_KEY` / `AEGIS_LLM_BASE_URL`；两者都没有时，才回退到当前 Hermes profile 的 `auth.json`（`custom:wow`）并打印实际来源。回退路径依赖这台电脑已有的 Hermes wow 凭据池和相邻 `.runtime/node24/node.exe`（可用 `AEGIS_NODE_EXE` 覆盖）。
 
-也可用自己的安全环境注入机制设置以下变量，然后使用 Node 24+ 执行 `node --import tsx scripts/live-intent-smoke.mts`：
+其他成员不要依赖该脚本，直接用自己的安全机制注入以下变量，再用 Node 24+ 执行 `node --import tsx scripts/live-intent-smoke.mts`（或 `scripts/run-intent-eval.mts`）：
 
 - `AEGIS_MODE=mock`：只验证草稿，不连接或广播链上交易；并不表示模型是 mock。
 - `AEGIS_LLM_MODE=live`
@@ -52,7 +52,7 @@ py scripts/with-live-llm.py
 
 真实 Chrome 经“使用本地测试钱包”完成 Owner 签名登录，从网页发送缺金额、USD、完整 0.001 ETH 三类请求，三个响应均为 llm / LLM_OK / fallback=false。前两项页面显示模型追问，完整请求打开确认抽屉，显示 0.001 ETH、Mock 估值 $3.00、最高本金成本 $3.03。没有点击确认提交，SQLite 只读检查确认 task=0。
 
-修复了前端没有展示 draft.question 的问题，新增实际解析来源/回退原因显示。此前浏览器等待模型追问的断言失败，修改后断言通过。证据在 test-results/web-live-evidence.json。
+修复了前端没有展示 draft.question 的问题，新增实际解析来源/回退原因显示。此前浏览器等待模型追问的断言失败，修改后断言通过。浏览器与 live 的原始证据保存在本机 `test-results/web-live-evidence.json`，同样不入库。
 
 复验：前端类型检查、生产构建通过；37 项后端测试、27 项合约测试通过；浏览器控制台 0 error。
 

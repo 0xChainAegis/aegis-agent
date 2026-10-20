@@ -4,6 +4,11 @@ import {parseDraft} from '../backend/src/parser.js';
 import {createLlmClient,StubIntentClient,parseDraftWithLlm,scanPrompt} from '../backend/src/llm.js';
 const cases=JSON.parse(readFileSync('eval/intent-cases.json','utf8'));
 const cfg=loadConfig();
+// 评审要求：清空结果文件前必须确认真的走 live，避免直接把 stub 结果标成 live。
+if(cfg.llm.mode!=='live'){
+ console.error(`拒绝运行：当前 AEGIS_LLM_MODE=${cfg.llm.mode}，评测需要 live 模式；否则结果会被误标成 live。`);
+ process.exit(2);
+}
 const live=createLlmClient(cfg.llm)!;
 const output='test-results/intent-eval-results.jsonl';
 mkdirSync('test-results',{recursive:true});
