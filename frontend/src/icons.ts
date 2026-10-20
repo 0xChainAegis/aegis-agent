@@ -21,7 +21,12 @@ const paths: Record<string, string> = {
   external: '<path d="M14 3h7v7m0-7L10 14"/><path d="M10 3H3v18h18v-7"/>',
   refresh: '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 6a8 8 0 0 1 13.6 5M4.3 13a8 8 0 0 0 13.6 5"/>',
   bolt: '<path d="m13 2-9 12h7l-1 8 10-13h-7l1-7Z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10 1.4 1.4m0-12.8L17 7M7 17l-1.4 1.4"/>',
+  moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/>',
   logout: '<path d="M9 3H4v18h5M10 12h12m-5-5 5 5-5 5"/>',
 };
+
+/** Original Aegis A mark: warm-white tile, graphite A, sage notch (matches docs/images/aegis-logo.svg). */
+export const mark = (cls = '') => `<svg class="mark ${cls}" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15" fill="#eeede8"/><rect x=".5" y=".5" width="63" height="63" rx="14.5" fill="none" stroke="#d6d4cb"/><g transform="translate(4 3.5) scale(.875)"><path d="M32 7 60 57H46L32 31 18 57H4Z" fill="#252b2a"/><path d="m27 42-6 10h22l-6-10Z" fill="#9aaa9f"/></g></svg>`;
 
 export const icon = (name: string, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.info}</svg>`;

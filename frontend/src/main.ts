@@ -1,12 +1,14 @@
 import { decodeFunctionData, formatEther, formatUnits, isAddress, parseAbi, parseEther } from 'viem';
 import { api, ApiError, hasSession, setToken, type Data } from './api';
 import { connectWallet, disconnectProvider, localWalletAvailable, sendOwnerTransaction } from './wallet';
-import { icon } from './icons';
+import { icon, mark } from './icons';
+import { currentTheme, initTheme, toggleTheme } from './theme';
 import { bindingFromConfig, loadSettings, observationFromSnapshot, parseSettings, sameBinding, saveSettings, storageKey, suggestTopUp, suggestionKey, type ReserveBinding, type ReserveObservation, type Suggestion } from './reserve';
 import './style.css';
 
 type View = 'overview' | 'operations' | 'approvals' | 'verification' | 'settings';
 type Column = 'draft' | 'ready' | 'approval' | 'done' | 'blocked';
+initTheme();
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const state = {
   view: 'overview' as View,
@@ -116,21 +118,25 @@ function render() {
   const drawerScroll = document.querySelector('.drawer-body')?.scrollTop || 0;
   const pendingCount = state.tasks.filter(t => column(t) === 'approval').length;
   const activeNav = nav.find(item => item[0] === state.view)!;
+  const themeNow = currentTheme();
+  const statusText = !state.online ? 'API 离线' : expectedChain() === 31337 ? '本地演示 · Mock Feed' : esc(mode());
   app.innerHTML = `<div class="app-shell">
-    <aside class="sidebar">
-      <button class="brand" data-nav="overview" aria-label="Aegis 总览"><span class="brand-symbol">${icon('shield')}</span><span>AEGIS<span class="brand-caption">AGENT WALLET</span></span></button>
-      <button class="workspace" data-nav="settings"><span class="workspace-avatar">A</span><span>Aegis 工作空间<small>受策略约束的钱包</small></span>${icon('down')}</button>
-      <div class="sidebar-label">工作空间</div>
-      <nav aria-label="主导航">${nav.map(([key, symbol, label, en]) => `<button data-nav="${key}" class="nav-item ${state.view === key ? 'active' : ''}" aria-current="${state.view === key ? 'page' : 'false'}">${icon(symbol)}<span>${label}<small>${en}</small></span>${key === 'approvals' && pendingCount ? `<b class="nav-count">${pendingCount}</b>` : ''}</button>`).join('')}</nav>
-      <div class="sidebar-bottom"><div class="network-note"><span class="status-dot ${state.online ? 'green' : 'red'}"></span><span>${state.online ? 'API 已连接' : 'API 离线'}<small>${esc(mode())} · ${expectedChain() === 31337 ? '仅本地开发' : '测试环境'}</small></span><button class="icon-button" data-action="refresh" aria-label="刷新服务状态">${icon('refresh')}</button></div><div class="sidebar-footnote">授权有边界，结果可核对。</div></div>
-    </aside>
+    <header class="topbar">
+      <button class="brand" data-nav="overview" aria-label="Aegis 总览"><span class="brand-symbol">${mark()}</span><span class="brand-name">Aegis</span></button>
+      <nav class="main-nav" aria-label="主导航">${nav.map(([key, symbol, label]) => `<button data-nav="${key}" class="nav-item ${state.view === key ? 'active' : ''}" aria-current="${state.view === key ? 'page' : 'false'}">${icon(symbol)}<span>${label}</span>${key === 'approvals' && pendingCount ? `<b class="nav-count">${pendingCount}</b>` : ''}</button>`).join('')}</nav>
+      <div class="topbar-status" role="status"><span class="status-dot ${state.online ? 'green' : 'red'}"></span><span>${statusText}</span></div>
+      <div class="topbar-actions">
+        <button class="icon-button" data-action="refresh" aria-label="刷新服务状态" title="刷新服务状态">${icon('refresh')}</button>
+        <button class="icon-button" id="theme-toggle" data-action="toggle-theme" data-testid="theme-toggle" aria-label="${themeNow === 'dark' ? '切换到浅色模式' : '切换到深色模式'}" title="${themeNow === 'dark' ? '切换到浅色模式' : '切换到深色模式'}">${icon(themeNow === 'dark' ? 'sun' : 'moon')}</button>
+        ${localWalletAvailable(state.config) && !connected() ? `<button class="button subtle local-wallet-button" data-action="local-wallet" data-testid="local-wallet" ${!validConfig() || state.busy ? 'disabled' : ''}>本地测试钱包</button>` : ''}<button data-action="connect" data-testid="connect-wallet" class="button ${connected() ? 'connected-button' : 'primary'}" ${state.busy === 'connect' || !state.online || !validConfig() ? 'disabled' : ''}>${icon('wallet')}<span>${state.busy === 'connect' ? '等待钱包签名…' : connected() ? short(state.address) : '连接钱包'}</span></button>
+      </div>
+    </header>
     <main class="main">
-      <header class="topbar"><div class="breadcrumb"><span class="mobile-brand">${icon('shield')}</span><span>工作空间</span>${icon('chevron')}<strong>${activeNav[2]}</strong></div><div class="topbar-actions"><span class="network-badge ${expectedChain() === 31337 ? 'local' : ''}"><span class="status-dot ${state.online ? 'green' : 'neutral'}"></span>${esc(mode())}</span>${localWalletAvailable(state.config) && !connected() ? `<button class="button subtle local-wallet-button" data-action="local-wallet" data-testid="local-wallet" ${!validConfig() || state.busy ? 'disabled' : ''}>本地测试钱包</button>` : ''}<button data-action="connect" data-testid="connect-wallet" class="button ${connected() ? 'connected-button' : 'primary'}" ${state.busy === 'connect' || !state.online || !validConfig() ? 'disabled' : ''}>${icon('wallet')}<span>${state.busy === 'connect' ? '等待钱包签名…' : connected() ? short(state.address) : '连接钱包'}</span></button></div></header>
       <div class="content ${state.view === 'settings' ? 'settings-content' : ''}">
         ${!state.online ? `<div class="service-banner" role="status">${icon('info')}<span><strong>${state.initialLoading ? '正在连接服务' : '服务离线'}</strong> · ${state.initialLoading ? '正在读取实际网络与钱包配置。' : '无法获取真实钱包状态。启动本地 API 后刷新，当前不会提交任何操作。'}</span><button class="text-button" data-action="refresh">重新连接</button></div>` : !validConfig() ? `<div class="service-banner" role="alert">${icon('info')}<span>网络或钱包合约配置不完整。已停止付款操作，请检查服务配置。</span></div>` : ''}
         ${state.view === 'settings' ? settingsView() : state.view === 'verification' ? verificationView() : operationsView()}
+        ${connected() && ['overview', 'operations'].includes(state.view) ? composer() : ''}
       </div>
-      ${['overview', 'operations'].includes(state.view) ? composer() : ''}
     </main>
     ${state.drawer ? drawer() : ''}
     ${state.ownerReview ? ownerModal() : ''}
@@ -145,30 +151,74 @@ function render() {
 
 function operationsView(): string {
   const isApproval = state.view === 'approvals';
-  const title = isApproval ? '需要你的批准' : state.view === 'overview' ? '钱包总览' : '操作工作台';
+  const isOverview = state.view === 'overview';
+  const title = isApproval ? '需要你的批准' : isOverview ? '钱包总览' : '操作工作台';
+  const description = isApproval ? '逐项核对收款地址与金额，使用 Owner 钱包签名。' : isOverview ? '' : '草稿需先预览，经你明确确认后才会提交。';
+  const heading = `<section class="page-heading"><div><h1>${title}</h1>${description ? `<p>${description}</p>` : ''}</div><button class="button subtle" data-action="refresh">${icon('refresh')}刷新状态</button></section>`;
+  if (isOverview) return connected() ? reserveCard() + summary() + recentTasks() : intro();
   let list = allTasks();
   if (isApproval) list = list.filter(t => column(t) === 'approval');
   if (state.filter === 'active') list = list.filter(t => !['done', 'blocked'].includes(column(t)));
   if (state.filter === 'completed') list = list.filter(t => column(t) === 'done');
   if (state.query) list = list.filter(t => JSON.stringify(t).toLowerCase().includes(state.query.toLowerCase()));
-  return `<section class="page-heading"><div><div class="eyebrow">${isApproval ? 'OWNER APPROVAL' : 'WALLET WORKSPACE'}</div><h1>${title}</h1><p>${isApproval ? '逐项核对收款地址与金额，使用 Owner 钱包签名。' : '提出操作，检查预算，在需要时保留你的最终决定。'}</p></div><button class="button subtle" data-action="refresh">${icon('refresh')}刷新状态</button></section>
-    ${state.view === 'overview' ? metrics() + reserveCard() : ''}
-    <section class="operations-section"><div class="section-toolbar"><div class="view-tabs" role="tablist" aria-label="操作筛选">${[['all', isApproval ? '待审批' : '全部操作'], ['active', '进行中'], ['completed', '已完成']].map(([key, label]) => `<button class="view-tab ${state.filter === key ? 'selected' : ''}" data-filter="${key}" role="tab" aria-selected="${state.filter === key}">${label}${key === 'all' ? `<span>${list.length}</span>` : ''}</button>`).join('')}</div><div class="toolbar-right"><label class="search-field">${icon('search')}<input id="task-search" type="search" aria-label="搜索操作" placeholder="搜索操作或地址" value="${esc(state.query)}" /></label><span class="toolbar-pill">${icon('layers')}看板</span></div></div>
-    ${isApproval ? `<div class="approval-grid">${list.length ? list.map(t => taskCard(t)).join('') : emptyState('approve', '暂时没有待审批操作', '超过自动额度的请求会在这里等待 Owner。')}</div>` : `<div class="board" data-testid="operations-board">${columns.map(([key, label, color]) => { const tasks = list.filter(t => column(t) === key); return `<section class="board-column ${key}" aria-label="${label}"><div class="column-heading"><span class="column-status ${color}"></span><h2>${label}</h2><span class="column-count">${tasks.length}</span>${key === 'draft' ? `<button class="icon-button" data-action="new-operation" aria-label="新建操作">${icon('plus')}</button>` : `<span class="column-more">···</span>`}</div><div class="column-cards">${tasks.length ? tasks.map(t => taskCard(t)).join('') : `<div class="column-empty">${icon(key === 'done' ? 'check' : key === 'approval' ? 'clock' : 'layers')}<span>${key === 'draft' ? '从下方开始一笔操作' : key === 'approval' ? '无需你处理' : '暂无操作'}</span></div>`}</div></section>`; }).join('')}</div>`}</section>`;
+  return `${heading}
+    <section class="operations-section"><div class="section-toolbar"><div class="view-tabs" role="tablist" aria-label="操作筛选">${[['all', isApproval ? '待审批' : '全部操作'], ['active', '进行中'], ['completed', '已完成']].map(([key, label]) => `<button class="view-tab ${state.filter === key ? 'selected' : ''}" data-filter="${key}" role="tab" aria-selected="${state.filter === key}">${label}${key === 'all' ? `<span>${list.length}</span>` : ''}</button>`).join('')}</div><div class="toolbar-right"><label class="search-field">${icon('search')}<input id="task-search" type="search" aria-label="搜索操作" placeholder="搜索操作或地址" value="${esc(state.query)}" /></label></div></div>
+    ${isApproval ? `<div class="approval-grid">${list.length ? list.map(t => taskCard(t)).join('') : emptyState('approve', '暂时没有待审批操作', '超过自动额度的请求会在这里等待 Owner。')}</div>` : `<div class="board" data-testid="operations-board">${columns.map(([key, label]) => { const tasks = list.filter(t => column(t) === key); return `<section class="board-column ${key}" aria-label="${label}"><div class="column-heading"><h2>${label}</h2><span class="column-count">${tasks.length}</span>${key === 'draft' ? `<button class="icon-button" data-action="new-operation" aria-label="新建操作">${icon('plus')}</button>` : ''}</div><div class="column-cards">${tasks.length ? tasks.map(t => taskCard(t)).join('') : `<div class="column-empty">${key === 'draft' ? '从下方开始一笔操作' : key === 'approval' ? '无需你处理' : '暂无操作'}</div>`}</div></section>`; }).join('')}</div>`}</section>`;
 }
 
-function metrics(): string {
+/** One reading per column, separated by rules. Treasury, executor gas and the operating-wallet reserve stay distinct. */
+function summary(): string {
   const budget = object(get(state.wallet, 'budget', 'policy.budget'));
   const balance = get(state.wallet, 'walletBalanceWei', 'balanceWei', 'nativeBalanceWei', 'balance.wei');
+  const executorGas = get(state.wallet, 'agentBalanceWei');
   const spent = get(budget, 'spentTodayUsd6', 'spentUsd6', 'usedUsd6', 'dailySpentUsd6') ?? get(state.wallet, 'spentUsd6');
   const limit = get(budget, 'dailyLimitUsd6', 'limitUsd6', 'dailyBudgetUsd6') ?? get(state.wallet, 'dailyLimitUsd6');
   const remaining = get(budget, 'remainingUsd6', 'remainingDailyUsd6');
   const oracle = object(get(state.wallet, 'oracle') || state.quote);
   const ratio = spent !== undefined && limit !== undefined && Number(limit) > 0 ? Math.min(100, Math.max(0, Number(spent) / Number(limit) * 100)) : 0;
-  return `<section class="metrics" aria-label="实际钱包概况"><article class="metric-card balance-card"><div class="metric-label">${icon('wallet')}钱包余额<span>ETH</span></div><div class="metric-value" data-testid="wallet-balance">${balance !== undefined ? eth(balance) : '—'}<small> ETH</small></div><div class="metric-footer"><span class="mono">${short(walletAddress(), 7)}</span><button class="icon-button small" data-copy="${esc(walletAddress())}" aria-label="复制钱包合约地址">${icon('copy')}</button><span class="live-label">${state.wallet ? '链上余额' : state.walletError ? '读取失败' : connected() ? '读取中' : '连接后读取'}</span></div></article>
-    <article class="metric-card"><div class="metric-label">${icon('activity')}今日美元预算<span>UTC</span></div><div class="metric-value">${spent !== undefined ? usd(spent) : '—'}<small> / ${limit !== undefined ? usd(limit) : '—'}</small></div><div class="budget-track"><span style="width:${ratio}%"></span></div><div class="metric-footer muted">${remaining !== undefined ? `剩余 ${usd(remaining)}` : '按执行时价格累计支出'}<span class="push-right">链上约束</span></div></article>
-    <article class="metric-card"><div class="metric-label">${icon('approve')}需要你处理</div><div class="metric-value">${state.wallet ? state.tasks.filter(t => column(t) === 'approval').length : '—'}<small> 笔待审批</small></div><div class="metric-footer muted"><span class="status-dot amber"></span>批准不会绕过硬预算</div></article>
-    <article class="metric-card"><div class="metric-label">${icon('verify')}价格状态</div><div class="metric-value metric-text">${get(oracle, 'stale') === true ? '已过期' : get(oracle, 'updatedAt', 'updatedAtSeconds') ? '已读取' : get(state.config, 'readiness.feedFresh') === true ? '预检可用' : '等待数据'}<span class="status-dot ${get(oracle, 'stale') === true ? 'red' : get(oracle, 'updatedAt', 'updatedAtSeconds') ? 'green' : 'neutral'}"></span></div><div class="metric-footer muted">${expectedChain() === 31337 ? '本地 Mock Feed · 非公网行情' : get(oracle, 'updatedAt', 'updatedAtSeconds') ? `更新于 ${dateTime(get(oracle, 'updatedAt', 'updatedAtSeconds'))}` : '执行时重查 Chainlink Feed'}</div></article></section>`;
+  const readState = state.wallet ? '链上余额' : state.walletError ? '读取失败' : connected() ? '读取中' : '连接后读取';
+  const priceText = get(oracle, 'stale') === true ? '已过期' : get(oracle, 'updatedAt', 'updatedAtSeconds') ? '已读取' : get(state.config, 'readiness.feedFresh') === true ? '预检可用' : '等待数据';
+  const priceDot = get(oracle, 'stale') === true ? 'red' : get(oracle, 'updatedAt', 'updatedAtSeconds') ? 'green' : 'neutral';
+  const priceNote = expectedChain() === 31337 ? '本地 Mock Feed · 非公网行情' : get(oracle, 'updatedAt', 'updatedAtSeconds') ? `更新于 ${dateTime(get(oracle, 'updatedAt', 'updatedAtSeconds'))}` : '执行时重查 Chainlink Feed';
+  return `<section class="summary-block" aria-label="资金概览"><h2 class="block-title">资金概览</h2><div class="summary">
+    <div class="summary-item"><span class="summary-label">资金库余额</span><strong class="summary-value" data-testid="wallet-balance">${balance !== undefined ? eth(balance) : '—'}<small> ETH</small></strong><span class="summary-note"><span class="mono">${short(walletAddress(), 7)}</span><button class="icon-button small" data-copy="${esc(walletAddress())}" aria-label="复制钱包合约地址">${icon('copy')}</button>${readState}</span></div>
+    <div class="summary-item"><span class="summary-label">执行账户 Gas 余额</span><strong class="summary-value">${executorGas !== undefined ? eth(executorGas) : '—'}<small> ETH</small></strong><span class="summary-note">只用于支付交易手续费</span></div>
+    <div class="summary-item"><span class="summary-label">今日美元预算</span><strong class="summary-value">${spent !== undefined ? usd(spent) : '—'}<small> / ${limit !== undefined ? usd(limit) : '—'}</small></strong><div class="budget-track"><span style="width:${ratio}%"></span></div><span class="summary-note">${remaining !== undefined ? `剩余 ${usd(remaining)} · 链上约束` : '按执行时价格累计支出'}</span></div>
+    <div class="summary-item"><span class="summary-label">待审批</span><strong class="summary-value">${state.wallet ? state.tasks.filter(t => column(t) === 'approval').length : '—'}<small> 笔</small></strong><span class="summary-note">批准不会绕过硬预算</span></div>
+    <div class="summary-item"><span class="summary-label">价格状态</span><strong class="summary-value summary-text"><span class="status-dot ${priceDot}"></span>${priceText}</strong><span class="summary-note">${priceNote}</span></div>
+  </div></section>`;
+}
+
+/** Real tasks only. Rows open the existing detail drawer; nothing here is derived or invented. */
+function taskRow(t: Data): string {
+  const c = column(t);
+  const tag = t._draft ? '草稿' : `AEG-${id(t).slice(-6).toUpperCase()}`;
+  return `<button class="task-row" data-open-task="${esc(id(t))}" data-task-id="${esc(id(t))}"><span class="cell time">${dateTime(get(t, 'updatedAt', 'createdAt'))}</span><span class="cell name"><span class="task-mark ${c}">${icon(c === 'done' ? 'check' : c === 'approval' ? 'clock' : c === 'blocked' ? 'info' : 'arrow')}</span><span class="name-text">${esc(taskName(t))}</span></span><span class="cell amount">${taskAmount(t) ? eth(taskAmount(t)) : '—'} <small>ETH</small></span><span class="cell state task-status ${c}"><span class="status-dot ${columns.find(col => col[0] === c)![2]}"></span>${statusLabel(t)}</span><span class="cell ref mono">${tag}</span></button>`;
+}
+function recentTasks(): string {
+  const stamp = (t: Data) => String(get(t, 'updatedAt', 'createdAt') ?? '');
+  const list = [...allTasks()].sort((a, b) => stamp(b).localeCompare(stamp(a))).slice(0, 5);
+  return `<section class="recent" aria-label="最近任务"><div class="section-head"><h2>最近任务</h2><button class="text-button" data-nav="operations">查看全部</button></div>${list.length ? `<div class="task-table"><div class="task-head" aria-hidden="true"><span>时间</span><span>任务</span><span>金额</span><span>状态</span><span>编号</span></div>${list.map(taskRow).join('')}</div>` : '<p class="recent-empty">还没有任务。准备一笔补给并确认后，会显示在这里。</p>'}</section>`;
+}
+
+/** Signed-out introduction: product facts only, no balances or activity. */
+function intro(): string {
+  const localOffered = localWalletAvailable(state.config) && !connected();
+  return `<section class="intro" aria-label="Aegis 简介">
+    <div class="intro-copy">
+      <p class="intro-word">Aegis</p>
+      <h1>为运行钱包，补足下一步。</h1>
+      <p class="intro-lead">读取一个运行钱包的真实 ETH 余额；低于你设定的下限时，建议补到目标余额。预览不会付款，需要你明确确认后，才会在链上美元限额内执行。</p>
+      <div class="intro-actions">${localOffered ? `<button class="button primary" data-action="local-wallet" ${!validConfig() || state.busy ? 'disabled' : ''}>使用本地测试钱包</button>` : ''}<button class="button ${localOffered ? '' : 'primary'}" data-action="connect" ${state.busy === 'connect' || !state.online || !validConfig() ? 'disabled' : ''}>${icon('wallet')}连接钱包</button></div>
+      <p class="intro-note">登录只验证 Owner 身份，不会授权付款。${expectedChain() === 31337 ? '当前是本地链与 Mock Feed 演示，不涉及真实资金。' : ''}</p>
+    </div>
+    <div class="intro-art"><img class="intro-art-light" src="/aegis-hero.png" alt="Aegis 应用图标：白色陶瓷质感的 A 字标志" width="2022" height="778"><span class="intro-art-dark">${mark()}</span></div>
+  </section>
+  <section class="intro-facts" aria-label="工作方式">
+    <div><h2>读取真实余额</h2><p>只读取这一个已配置运行钱包在最新区块的 ETH 余额；读取失败时显示不可用，不按 0 处理。</p></div>
+    <div><h2>美元限额内执行</h2><p>合约用 ETH/USD 报价校验转出本金，并受单笔与每日限额约束。${expectedChain() === 31337 ? '本地使用 Mock Feed。' : ''}</p></div>
+    <div><h2>明确确认</h2><p>草稿与预览不会付款；超过自动额度的请求需要 Owner 另行签名批准。</p></div>
+  </section>`;
 }
 
 // ---- Gas reserve for the single configured operating wallet (browser-local recommendation) ----
@@ -231,19 +281,23 @@ function reserveCard(): string {
       <p class="reserve-caveat">准备前会重新读取配置与余额；有变化会先请你再次核对。生成预览不会付款，仍需你确认提交。</p>`;
   }
   if (notice && m.kind !== 'low') result += `<div class="missing-note" role="status" data-testid="reserve-review-note">${icon('info')}${esc(notice)}</div>`;
-  return `<section class="reserve-card" data-testid="reserve-card" data-state="${m.kind}" aria-label="运行钱包 Gas 准备金">
-    <div class="reserve-head"><div><div class="eyebrow">运行钱包</div><h2>Gas 准备金</h2></div><span class="badge ${tone}" data-testid="reserve-status">${label}</span></div>
-    <div class="reserve-grid">
-      <div class="reserve-facts">
-        <div class="reserve-balance"><span>当前余额</span><strong data-testid="reserve-balance">${o ? esc(ethExact(o.balanceWei)) : '—'}<small> ETH</small></strong></div>
-        ${detailRow('运行钱包', recipient, true)}${detailRow('网络', m.binding ? `${mode()} · Chain ${m.binding.chainId}` : '')}${detailRow('观测', o ? `区块 #${o.blockNumber} · ${observedTime(o.observedAt)}` : '')}
-      </div>
+  const balanceText = o ? ethExact(o.balanceWei) : '—';
+  const lastTaskRow = lastTask ? `<button class="text-button reserve-last" data-open-task="${esc(id(lastTask))}" data-testid="reserve-last-task">${icon('activity')}最近补给 AEG-${esc(id(lastTask).slice(-6).toUpperCase())} · ${esc(statusLabel(lastTask))}</button>` : '';
+  return `<section class="reserve" data-testid="reserve-card" data-state="${m.kind}" aria-label="运行钱包 Gas 准备金">
+    <div class="wallet-card">
+      <div class="wallet-card-head"><div><h2>运行钱包</h2><p>用于支付交易手续费的 ETH 储备金</p></div>${recipient ? `<button class="icon-button wallet-copy" data-copy="${esc(recipient)}" aria-label="复制运行钱包地址">${icon('copy')}</button>` : ''}</div>
+      <p class="wallet-address mono break-all">${esc(recipient || '运行钱包地址尚未获取')}</p>
+      <div class="wallet-balance"><span class="wallet-label">当前余额</span><strong data-testid="reserve-balance" data-long="${balanceText.length > 14}">${esc(balanceText)}<small> ETH</small></strong></div>
+      <div class="wallet-foot"><span class="reserve-status ${tone}" data-testid="reserve-status">${label}</span><p class="reserve-meta">${m.binding ? `${esc(mode())} · Chain ${m.binding.chainId}` : '网络未知'}${o ? ` · 区块 #${esc(o.blockNumber)} · ${esc(observedTime(o.observedAt))}` : ''}</p></div>
+    </div>
+    <div class="reserve-editor">
+      <div class="editor-head"><h2>设置 ETH 储备补给</h2><p>当余额低于下限时，补充到目标金额。设置只保存在这个浏览器。</p></div>
       <div class="reserve-settings">
         <label>下限 · ETH<input id="reserve-threshold" data-testid="reserve-threshold" class="mono" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="例如 0.05" value="${esc(state.reserve.threshold)}" ${!m.binding ? 'disabled' : ''} /></label>
         <label>目标 · ETH<input id="reserve-target" data-testid="reserve-target" class="mono" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="例如 0.1" value="${esc(state.reserve.target)}" ${!m.binding ? 'disabled' : ''} /></label>
         <p class="reserve-caveat">浏览器本地保存，按网络·金库·运行钱包分开存储。不是链上策略，不会自动补给。</p>
       </div>
-      <div class="reserve-result">${result}${lastTask ? `<button class="text-button reserve-last" data-open-task="${esc(id(lastTask))}" data-testid="reserve-last-task">${icon('activity')}最近补给 AEG-${esc(id(lastTask).slice(-6).toUpperCase())} · ${esc(statusLabel(lastTask))}</button>` : ''}</div>
+      <div class="reserve-result">${result}${lastTaskRow}</div>
     </div>
     <details class="reserve-technical">
       <summary id="reserve-details-toggle">策略与观测详情 ${icon('down')}</summary>
@@ -310,15 +364,21 @@ async function prepareReserve(shownKey: string) {
 function taskCard(task: Data): string {
   const key = column(task);
   const taskId = id(task);
-  return `<button class="task-card" data-task-id="${esc(taskId)}" data-open-task="${esc(taskId)}"><div class="task-card-top"><span class="task-kind">${icon(task._draft ? 'layers' : 'arrow')} ${task._draft ? 'DRAFT' : `AEG-${taskId.slice(-6).toUpperCase()}`}</span><span class="task-menu">···</span></div><h3>${esc(taskName(task))}</h3><div class="task-amount">${taskAmount(task) ? eth(taskAmount(task)) : '待填写'} <span>${taskAmount(task) ? 'ETH' : ''}</span></div><div class="task-recipient mono">${icon('wallet')}${esc(short(taskRecipient(task), 8))}</div>${taskReason(task) ? `<p class="card-reason">${esc(taskReason(task))}</p>` : ''}<div class="task-card-bottom"><span class="task-status ${key}"><span class="status-dot ${columns.find(c => c[0] === key)![2]}"></span>${statusLabel(task)}</span><span>${dateTime(get(task, 'updatedAt', 'createdAt'))}</span></div></button>`;
+  return `<button class="task-card" data-task-id="${esc(taskId)}" data-open-task="${esc(taskId)}"><div class="task-card-top"><span class="task-kind">${task._draft ? '草稿' : `AEG-${taskId.slice(-6).toUpperCase()}`}</span></div><h3>${esc(taskName(task))}</h3><div class="task-amount">${taskAmount(task) ? eth(taskAmount(task)) : '待填写'} <span>${taskAmount(task) ? 'ETH' : ''}</span></div><div class="task-recipient mono">${esc(short(taskRecipient(task), 8))}</div>${taskReason(task) ? `<p class="card-reason">${esc(taskReason(task))}</p>` : ''}<div class="task-card-bottom"><span class="task-status ${key}"><span class="status-dot ${columns.find(c => c[0] === key)![2]}"></span>${statusLabel(task)}</span><span>${dateTime(get(task, 'updatedAt', 'createdAt'))}</span></div></button>`;
 }
 
 function composer(): string {
   const missing = get(state.draft, 'missingFields');
-  return `<section class="composer-wrap" aria-label="新建钱包操作"><div class="composer"><div class="composer-top"><span class="composer-symbol">${icon('shield')}</span><span>让 Aegis 帮你发起操作</span><div class="composer-tabs"><button class="${state.composerMode === 'natural' ? 'active' : ''}" data-composer="natural">自然语言</button><button class="${state.composerMode === 'manual' ? 'active' : ''}" data-composer="manual">填写金额与地址</button></div></div>
+  return `<section class="composer-wrap" aria-label="新建钱包操作"><div class="composer">
+    <div class="composer-head"><div class="composer-tabs" role="group" aria-label="输入方式"><button class="${state.composerMode === 'natural' ? 'active' : ''}" data-composer="natural">自然语言补给</button><button class="${state.composerMode === 'manual' ? 'active' : ''}" data-composer="manual">填写金额与地址</button></div>
+    <div class="composer-hint"><span>先预览，再确认提交；只支持原生 ETH</span>${state.composerMode === 'manual' && exampleRecipient() ? `<button class="text-button example-button" data-action="fill-example">填入测试收款地址</button>` : ''}</div></div>
+    <div class="composer-row">
     ${state.composerMode === 'natural' ? `<textarea id="intent-message" data-testid="intent-message" rows="2" placeholder="例如：向 0x… 转 0.001 ETH，用于支付服务费用" aria-label="描述你的付款意图" ${disabled() ? 'disabled' : ''}>${esc(state.message)}</textarea>` : `<div class="manual-fields"><label>收款地址<input id="recipient" data-testid="recipient-input" class="mono" autocomplete="off" spellcheck="false" placeholder="0x…" value="${esc(state.recipient)}" ${disabled() ? 'disabled' : ''} /></label><label class="amount-field">金额 · ETH<input id="amount" data-testid="amount-input" inputmode="decimal" autocomplete="off" placeholder="0.001" value="${esc(state.amount)}" ${disabled() ? 'disabled' : ''} /></label><label>用途<input id="purpose" placeholder="这笔付款用于什么？" value="${esc(state.purpose)}" ${disabled() ? 'disabled' : ''} /></label></div>`}
+    <button class="send-button" data-action="send-intent" data-testid="send-intent" ${disabled() ? 'disabled' : ''} aria-label="预览操作">${state.busy === 'intent' ? '<span class="spinner"></span>' : icon('up')}<span>${state.busy === 'intent' ? '处理中' : '预览'}</span></button>
+    </div>
     ${Array.isArray(missing) && missing.length ? `<div class="missing-note">${icon('info')}还需要补充：${missing.map(item => esc(({ recipient: '收款地址', amountWei: 'ETH 金额', amount: 'ETH 金额', purpose: '用途' } as Record<string, string>)[String(item)] || item)).join('、')}。请填写后重新预览。</div>` : ''}
-    <div class="composer-bottom"><div class="composer-hint">${icon('verify')}<span>${!connected() ? '连接钱包后开始 · 签名登录不发送交易' : '先预览，再确认提交；只支持原生 ETH'}</span></div>${state.composerMode === 'manual' && exampleRecipient() ? `<button class="text-button example-button" data-action="fill-example">填入测试收款地址</button>` : ''}<button class="send-button" data-action="send-intent" data-testid="send-intent" ${disabled() ? 'disabled' : ''} aria-label="预览操作">${state.busy === 'intent' ? '<span class="spinner"></span>' : icon('up')}<span>${state.busy === 'intent' ? '处理中' : '预览'}</span></button></div></div><div class="composer-disclaimer">${expectedChain() === 31337 ? 'Local 本地链 · Mock Feed · 仅限开发资产' : '测试环境 · 金额、地址与规则以最终预览为准'} · ${get(state.config, 'planner.llmEnabled') === false ? '自然语言使用规则解析，未调用大模型' : '意图解析结果需你确认'}</div></section>`;
+    <p class="composer-disclaimer">${expectedChain() === 31337 ? 'Local 本地链 · Mock Feed · 仅限开发资产' : '测试环境 · 金额、地址与规则以最终预览为准'} · ${get(state.config, 'planner.llmEnabled') === false ? '自然语言使用规则解析，未调用大模型' : '意图解析结果需你确认'}</p>
+  </div></section>`;
 }
 
 function exampleRecipient(): string { return value(state.config, 'recipientAddress', 'addresses.recipient', 'exampleRecipient', 'demoRecipient', 'examples.recipient', 'examples.allowedRecipient', 'demo.recipient'); }
@@ -326,11 +386,11 @@ function emptyState(symbol: string, title: string, description: string): string 
 
 function settingsView(): string {
   const labels: Record<string, [string, string]> = { account: ['wallet', '钱包与账户'], policy: ['shield', '授权与预算'], network: ['layers', '网络与合约'], developer: ['activity', '开发环境'] };
-  return `<div class="settings-layout"><aside class="settings-nav"><h1>设置</h1><p>查看当前环境和授权配置</p>${Object.entries(labels).map(([key, [symbol, text]]) => `<button class="${state.settingsTab === key ? 'active' : ''}" data-settings="${key}">${icon(symbol)}${text}${icon('chevron')}</button>`).join('')}<div class="settings-help">这里展示服务的实际配置。<br/>更改链上规则需要单独授权。</div></aside><section class="settings-panel"><div class="eyebrow">WORKSPACE SETTINGS</div><h2>${labels[state.settingsTab][1]}<span class="toolbar-pill">只读</span></h2>${settingsBody()}</section></div>`;
+  return `<div class="settings-layout"><aside class="settings-nav"><h1>设置</h1><p>查看当前环境和授权配置</p>${Object.entries(labels).map(([key, [symbol, text]]) => `<button class="${state.settingsTab === key ? 'active' : ''}" data-settings="${key}">${icon(symbol)}${text}${icon('chevron')}</button>`).join('')}<div class="settings-help">这里展示服务的实际配置。<br/>更改链上规则需要单独授权。</div></aside><section class="settings-panel"><h2>${labels[state.settingsTab][1]}<span class="toolbar-pill">只读</span></h2>${settingsBody()}</section></div>`;
 }
 function row(label: string, content: unknown, hint = '', mono = false): string { return `<div class="setting-row"><div><strong>${label}</strong>${hint ? `<p>${hint}</p>` : ''}</div><div class="setting-value ${mono ? 'mono' : ''}">${esc(content || '尚未获取')}${mono && content ? `<button class="icon-button small" data-copy="${esc(content)}" aria-label="复制${label}">${icon('copy')}</button>` : ''}</div></div>`; }
 function settingsBody(): string {
-  if (state.settingsTab === 'account') return `<div class="settings-card"><div class="account-profile"><span class="large-avatar">${icon('shield')}</span><div><h3>Aegis 钱包</h3><p>原生 ETH · 受策略约束的操作</p></div><span class="badge ${connected() ? 'green' : ''}">${connected() ? '已签名登录' : '未登录'}</span></div>${row('当前连接账户', state.address, '用于登录与 Owner 审批签名', true)}${row('钱包合约', walletAddress(), '资产保存在合约中，账户签名不会转移 Owner 密钥', true)}${row('Owner 地址', value(state.wallet, 'ownerAddress', 'owner') || value(state.config, 'ownerAddress', 'owner', 'addresses.owner'), '只有 Owner 可以批准待审批付款', true)}</div><button class="button subtle danger-text" data-action="disconnect" ${!connected() ? 'disabled' : ''}>${icon('logout')}断开本次会话</button>`;
+  if (state.settingsTab === 'account') return `<div class="settings-card"><div class="account-profile"><span class="large-avatar">${mark()}</span><div><h3>Aegis 钱包</h3><p>原生 ETH · 受策略约束的操作</p></div><span class="badge ${connected() ? 'green' : ''}">${connected() ? '已签名登录' : '未登录'}</span></div>${row('当前连接账户', state.address, '用于登录与 Owner 审批签名', true)}${row('钱包合约', walletAddress(), '资产保存在合约中，账户签名不会转移 Owner 密钥', true)}${row('Owner 地址', value(state.wallet, 'ownerAddress', 'owner') || value(state.config, 'ownerAddress', 'owner', 'addresses.owner'), '只有 Owner 可以批准待审批付款', true)}</div><button class="button subtle danger-text" data-action="disconnect" ${!connected() ? 'disabled' : ''}>${icon('logout')}断开本次会话</button>`;
   if (state.settingsTab === 'policy') { const policy = get(state.wallet, 'policy') || get(state.wallet, 'budget') || get(state.config, 'policy'); const p = object(policy); return `<div class="settings-card">${row('策略版本', value(p, 'policyVersion', 'version') || value(state.wallet, 'policyVersion'))}${row('自动执行上限', get(p, 'autoThresholdUsd6', 'autoLimitUsd6', 'autoApproveLimitUsd6') !== undefined ? usd(get(p, 'autoThresholdUsd6', 'autoLimitUsd6', 'autoApproveLimitUsd6')) : '', '超过自动上限需要 Owner 审批')}${row('单次硬上限', get(p, 'hardPerTxUsd6', 'perTxLimitUsd6', 'singleLimitUsd6') !== undefined ? usd(get(p, 'hardPerTxUsd6', 'perTxLimitUsd6', 'singleLimitUsd6')) : '', 'Owner 批准也不能绕过硬上限')}${row('每日硬预算', get(p, 'dailyLimitUsd6', 'dailyBudgetUsd6') !== undefined ? usd(get(p, 'dailyLimitUsd6', 'dailyBudgetUsd6')) : '', '执行时按真实价格累计')}${row('冻结状态', get(p, 'paused', 'frozen') === true ? '已冻结' : get(p, 'paused', 'frozen') === false ? '未冻结' : '', '执行与审批时都重新检查')}</div><p class="settings-caption">白名单、预算、策略版本和冻结状态最终由合约校验。这里不会伪造或本地覆盖链上权限。</p>`; }
   if (state.settingsTab === 'network') return `<div class="settings-card">${row('网络', mode())}${row('Chain ID', String(expectedChain() || ''))}${row('钱包合约', walletAddress(), '', true)}${row('Access Control', value(state.config, 'aclAddress', 'addresses.acl', 'contracts.acl'), '', true)}${row('存证合约', value(state.config, 'attestationAddress', 'addresses.attestation', 'contracts.attestation'), '', true)}${row('Chainlink Feed', value(state.config, 'feedAddress', 'addresses.feed', 'oracle.feedAddress'), '价格的新鲜度和精度由服务读取', true)}${row('RPC', value(state.config, 'rpcUrl', 'chain.rpcUrl'), '浏览器签名前必须与任务 Chain ID 一致')}</div>`;
   return `<div class="settings-card">${row('运行模式', mode(), expectedChain() === 31337 ? 'Local 仅为本机开发链，不能用于公网资金' : '当前不是本地链')}${row('API 状态', state.online ? '已连接 · /api/v1' : '离线')}${row('前端连接', '浏览器 EIP-1193 钱包', '连接后先签名登录；Owner 交易由浏览器钱包单独签名')}${row('验证方式', '链上回执与记录对照', '本地计算一致不等于付款成功')}</div><div class="info-panel">${icon('info')}<p>历史静态演示位于 <code>legacy-demo.html</code>，其中数据为模拟，不能用于本界面的操作或验证。</p></div>`;
@@ -338,7 +398,7 @@ function settingsBody(): string {
 
 function verificationView(): string {
   const tasks = state.tasks.filter(t => ['done', 'approval', 'blocked'].includes(column(t)));
-  return `<section class="page-heading"><div><div class="eyebrow">VERIFIABLE ACTIVITY</div><h1>验证每一笔结果</h1><p>对照任务、真实交易回执与存证记录。尚未取得的证据会明确标记。</p></div><button class="button subtle" data-action="refresh">${icon('refresh')}刷新记录</button></section><div class="verification-callout">${icon('verify')}<div><strong>证据来自服务与链上查询</strong><p>一次本地哈希重算无法单独证明付款成功。打开记录查看网络、金额、回执与验证结果。</p></div></div><div class="activity-list">${tasks.length ? tasks.map(t => `<button class="activity-row" data-open-task="${esc(id(t))}" data-task-id="${esc(id(t))}"><span class="activity-symbol ${column(t)}">${icon(column(t) === 'done' ? 'check' : column(t) === 'approval' ? 'clock' : 'info')}</span><div><strong>${esc(taskName(t))}</strong><p class="mono">${esc(id(t))}</p></div><span class="activity-amount">${eth(taskAmount(t))} ETH</span><span class="task-status ${column(t)}">${statusLabel(t)}</span>${icon('chevron')}</button>`).join('') : emptyState('verify', '还没有可验证的操作', '完成一笔真实测试交易后，在这里查看回执与存证。')}</div>`;
+  return `<section class="page-heading"><div><h1>验证每一笔结果</h1><p>对照任务、真实交易回执与存证记录。尚未取得的证据会明确标记。</p></div><button class="button subtle" data-action="refresh">${icon('refresh')}刷新记录</button></section><div class="verification-callout">${icon('verify')}<div><strong>证据来自服务与链上查询</strong><p>一次本地哈希重算无法单独证明付款成功。打开记录查看网络、金额、回执与验证结果。</p></div></div><div class="activity-list">${tasks.length ? tasks.map(t => `<button class="activity-row" data-open-task="${esc(id(t))}" data-task-id="${esc(id(t))}"><span class="activity-symbol ${column(t)}">${icon(column(t) === 'done' ? 'check' : column(t) === 'approval' ? 'clock' : 'info')}</span><div><strong>${esc(taskName(t))}</strong><p class="mono">${esc(id(t))}</p></div><span class="activity-amount">${eth(taskAmount(t))} ETH</span><span class="task-status ${column(t)}">${statusLabel(t)}</span>${icon('chevron')}</button>`).join('') : emptyState('verify', '还没有可验证的操作', '完成一笔真实测试交易后，在这里查看回执与存证。')}</div>`;
 }
 
 function drawer(): string {
@@ -350,7 +410,7 @@ function drawer(): string {
   const s = isDraft && quote ? value(quote, 'status') : status(task);
   const c = isDraft && quote ? column({ status: s }) : column(task);
   const transactions = Array.isArray(task.transactions) ? task.transactions as Data[] : [];
-  return `<div class="drawer-backdrop" data-action="close-drawer"></div><aside class="drawer" aria-label="操作详情" role="dialog" aria-modal="true"><div class="drawer-header"><span>${icon(isDraft ? 'layers' : 'activity')} ${isDraft ? '确认操作' : '操作详情'}</span><button class="icon-button" data-action="close-drawer" aria-label="关闭详情">${icon('close')}</button></div><div class="drawer-body"><div class="drawer-title"><div class="eyebrow">${isDraft ? 'REVIEW BEFORE SUBMIT' : `AEG-${esc(taskId.slice(-6).toUpperCase())}`}</div><h2>${esc(taskName(task))}</h2><span class="badge ${c}">${isDraft && !quote ? '等待预览' : statusLabel({ status: s })}</span></div><div class="transfer-hero"><span>付款金额</span><strong>${eth(taskAmount(task))}<small> ETH</small></strong>${get(quote, 'costUsd6') !== undefined ? `<span>预计 ${usd(get(quote, 'costUsd6'))} · 执行时重新计价</span>` : ''}</div>${isDraft ? reserveDraftSection(task) : ''}<div class="detail-section"><h3>付款信息</h3>${detailRow('收款地址', taskRecipient(task), true)}${detailRow('所在网络', `${mode()} · Chain ${expectedChain() || '—'}`)}${detailRow('钱包合约', walletAddress(), true)}${detailRow('任务 ID', taskId, true)}${detailRow('策略版本', value(quote, 'policyVersion') || value(task, 'policyVersion'))}</div>
+  return `<div class="drawer-backdrop" data-action="close-drawer"></div><aside class="drawer" aria-label="操作详情" role="dialog" aria-modal="true"><div class="drawer-header"><span>${icon(isDraft ? 'layers' : 'activity')} ${isDraft ? '确认操作' : '操作详情'}</span><button class="icon-button" data-action="close-drawer" aria-label="关闭详情">${icon('close')}</button></div><div class="drawer-body"><div class="drawer-title"><div class="eyebrow">${isDraft ? '提交前确认' : `AEG-${esc(taskId.slice(-6).toUpperCase())}`}</div><h2>${esc(taskName(task))}</h2><span class="badge ${c}">${isDraft && !quote ? '等待预览' : statusLabel({ status: s })}</span></div><div class="transfer-hero"><span>付款金额</span><strong>${eth(taskAmount(task))}<small> ETH</small></strong>${get(quote, 'costUsd6') !== undefined ? `<span>预计 ${usd(get(quote, 'costUsd6'))} · 执行时重新计价</span>` : ''}</div>${isDraft ? reserveDraftSection(task) : ''}<div class="detail-section"><h3>付款信息</h3>${detailRow('收款地址', taskRecipient(task), true)}${detailRow('所在网络', `${mode()} · Chain ${expectedChain() || '—'}`)}${detailRow('钱包合约', walletAddress(), true)}${detailRow('任务 ID', taskId, true)}${detailRow('策略版本', value(quote, 'policyVersion') || value(task, 'policyVersion'))}</div>
     ${quote && Object.keys(quote).length ? `<div class="detail-section"><h3>规则预检</h3>${detailRow('状态', s === 'READY' ? '已通过预检，提交时仍会重新检查' : value(quote, 'reason', 'message', 'blockReason') || reasons(quote) || s)}${detailRow('美元最高成本', get(quote, 'maxUsdCost6') !== undefined ? usd(get(quote, 'maxUsdCost6')) : '')}${detailRow('报价有效至', dateTime(get(quote, 'quoteExpiresAtSeconds', 'expiresAt')))}${detailRow('授权路径', get(quote, 'requiresApproval') === true || /APPROVAL/.test(value(quote, 'decision', 'path')) ? '需要 Owner 审批' : value(quote, 'decision', 'path') || '以提交后链上结果为准')}</div>` : ''}
     ${taskReason(task) ? `<div class="info-panel error-panel">${icon('info')}<p>${esc(taskReason(task))}</p></div>` : ''}
     ${transactions.length ? `<div class="detail-section"><h3>交易记录</h3>${transactions.map(tx => { const hash = value(tx, 'txHash', 'hash', 'transactionHash'); const link = explorer(hash); return `<div class="transaction-item"><div><span>${esc(value(tx, 'action', 'kind', 'type') || '链上交易')}</span><span>${esc(value(tx, 'status') || '待核对')}</span></div>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener noreferrer" class="mono">${esc(short(hash, 12))}${icon('external')}</a>` : `<span class="mono">${esc(hash || '尚未取得交易哈希')}</span>`}</div>`; }).join('')}</div>` : ''}
@@ -570,6 +630,7 @@ app.addEventListener('click', event => {
     case 'dismiss-owner': state.ownerReview = null; render(); break;
     case 'sign-owner': void signOwner(); break;
     case 'observe-owner': void observeOwner(); break;
+    case 'toggle-theme': toggleTheme(); render(); break;
     case 'dismiss-toast': state.toast = ''; render(); break;
   }
 });

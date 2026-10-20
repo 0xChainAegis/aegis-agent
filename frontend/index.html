@@ -3,10 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#111114" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f4f3ef" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Aegis — 有边界的 Agent 钱包</title>
     <meta name="description" content="查看钱包预算，提出操作，审批付款，并核验真实链上结果。" />
+    <script>
+      // Apply the saved appearance before the first paint.
+      try { if (localStorage.getItem('aegis.ui.theme.v1') === 'dark') { document.documentElement.dataset.theme = 'dark'; document.querySelector('meta[name="theme-color"]').setAttribute('content', '#121314'); } } catch (e) { /* default: light */ }
+    </script>
   </head>
   <body>
     <div id="app"></div>
