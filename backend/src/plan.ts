@@ -106,4 +106,3 @@ export function verifyPlanHash(intent: Intent, quote: Quote, expected: string): 
   const expectedHash = computePlanHash(computeDraftHash(intent), computeQuoteHash(quote));
   return expectedHash.toLowerCase() === expected.toLowerCase();
 }
-
