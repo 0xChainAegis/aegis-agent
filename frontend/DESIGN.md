@@ -33,6 +33,8 @@ Use the spacing scale 4, 8, 12, 16, 24, and 32px. Major wallet and editor surfac
 
 `public/wallet-material.png` supplies the original graphite Aegis material on the wallet card. `public/aegis-hero.png` supplies the warm-white introductory artwork. Keep both assets proportional and decorative: essential balances, addresses, and actions remain real text and controls.
 
+Blend introductory artwork into the canvas with a soft edge mask and multiply blending in light mode. Use a restrained sage ambient gradient and translucent, blurred navigation and reserve-editor surfaces to connect the composition. Provide opaque fallbacks for unsupported blur and increased-contrast or reduced-transparency preferences. Financial confirmation panels, fields, balances and status text stay crisp and legible; never blur their contents.
+
 Use brief feedback for hover, focus, and loading. Financial panels and confirmation content appear immediately, without opacity entrance animations. Respect `prefers-reduced-motion`; never rely on movement to explain payment status.
 
 ## Financial information and interaction

@@ -377,7 +377,7 @@ function composer(): string {
     <button class="send-button" data-action="send-intent" data-testid="send-intent" ${disabled() ? 'disabled' : ''} aria-label="预览操作">${state.busy === 'intent' ? '<span class="spinner"></span>' : icon('up')}<span>${state.busy === 'intent' ? '处理中' : '预览'}</span></button>
     </div>
     ${Array.isArray(missing) && missing.length ? `<div class="missing-note">${icon('info')}还需要补充：${missing.map(item => esc(({ recipient: '收款地址', amountWei: 'ETH 金额', amount: 'ETH 金额', purpose: '用途' } as Record<string, string>)[String(item)] || item)).join('、')}。请填写后重新预览。</div>` : ''}
-    <p class="composer-disclaimer">${expectedChain() === 31337 ? 'Local 本地链 · Mock Feed · 仅限开发资产' : '测试环境 · 金额、地址与规则以最终预览为准'} · ${get(state.config, 'planner.llmEnabled') === false ? '自然语言使用规则解析，未调用大模型' : '意图解析结果需你确认'}</p>
+    <p class="composer-disclaimer">${expectedChain() === 31337 ? 'Local 本地链 · Mock Feed · 仅限开发资产' : '测试环境 · 金额、地址与规则以最终预览为准'} · ${get(state.config, 'planner.mode') === 'stub' ? 'Stub 离线测试解析，未调用在线模型' : get(state.config, 'planner.llmEnabled') === false ? '自然语言使用规则解析，未调用大模型' : '意图解析结果需你确认'}</p>
   </div></section>`;
 }
 
