@@ -42,7 +42,7 @@
 
 - **Verified:** A single-treasury, single-operating-wallet native ETH top-up flow on local chain 31337 with a Mock ETH/USD Feed.
 - **Intent input:** Rules by default, with configurable Anthropic or OpenAI-compatible draft parsing. Missing or ambiguous fields require clarification; offline stub tests pass.
-- **Pending:** In-application live Chainlink Feed verification, Sepolia deployment and payment, and real model API integration checks.
+- **Testnet:** Sepolia deployment and post-deployment validation scripts are merged. Contract bytecode, feed bindings and roles of the v1 test deployment have been checked through read-only calls. Browser top-ups, Owner approval and real-model API integration on main still await acceptance checks.
 
 <a name="problem-and-solution"></a>
 
@@ -132,7 +132,7 @@ ETH/USD values the transferred principal; it is not a gas-price oracle. The send
 
 **AI.** Rules are the default. `AEGIS_LLM_MODE=live` enables Anthropic or OpenAI-compatible draft parsing; `stub` is an offline test mode and does not demonstrate a real model. Model responses undergo schema and parameter checks: stale values cannot replace the user's new address or amount, and ambiguous fields require clarification. Every draft still needs preview and explicit confirmation, subject to on-chain limits, fresh prices and replay protection. See [integration configuration](docs/INTEGRATION.md).
 
-**Status.** Local-chain and Mock Feed flows, offline model adapters and provider-error handling are verified. Real model API checks, in-application live Feed verification, and Sepolia deployment and payment remain pending.
+**Status.** Local-chain and Mock Feed flows, offline model adapters and provider-error handling are verified. The v1 Sepolia test deployment has passed read-only contract-binding and feed checks; real-model API integration on main, browser testnet payments and approvals still await end-to-end acceptance.
 
 <a name="architecture-and-stack"></a>
 
@@ -144,7 +144,7 @@ Browser UI ─ local API + SQLite ─ treasury contract ─ ETH/USD feed
 ```
 
 - One treasury, one allowed operating wallet, one Owner and one restricted executor; Owner login and approvals use wallet signatures.
-- Local chain 31337 is used for repeatable tests. Ethereum Sepolia is the only intended public network and is not deployed or verified.
+- Local chain 31337 is used for repeatable tests. Ethereum Sepolia is the public test network; the v1 test deployment has passed read-only checks, while the complete application payment flow still awaits acceptance.
 - See [architecture](docs/ARCHITECTURE.md), [API and local integration](docs/INTEGRATION.md) and [security boundaries](docs/SECURITY.md).
 
 <a name="quickstart"></a>
@@ -200,7 +200,7 @@ The browser entry starts a fresh chain and database for each group. Stop manuall
 
 ### Deployment and execution evidence
 
-The published execution evidence currently comes from the local chain; there is no published Aegis Sepolia deployment or payment record yet. Running `npm run deploy:local` writes the actual addresses to the local `contracts/deployments/localhost.json` file. Each executed task exposes its transaction receipt, matching contract event, recipient, amount and request hash in the verification view.
+Published payment-execution evidence currently comes from the local chain. The v1 Sepolia deployment configuration has passed read-only checks; browser payment records will be published after end-to-end acceptance. Running `npm run deploy:local` writes the actual addresses to the local `contracts/deployments/localhost.json` file. Each executed task exposes its transaction receipt, matching contract event, recipient, amount and request hash in the verification view.
 
 Public-network contract addresses and transaction links will be published after a real deployment. A read-only Feed connectivity check does not establish that Aegis was deployed or made a payment.
 
