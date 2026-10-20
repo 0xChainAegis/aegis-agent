@@ -180,7 +180,7 @@ npm run check
 npm run test:e2e
 ```
 
-Verified on the combined mainline on October 20, 2026 with Node 24: type checks and production builds, **34 contract tests**, **45 backend test counts** including nested tests, and **16 browser cases** (9 wallet/connection and 7 reserve cases). Another **7 offline model-launcher tests** pass. Browser cases cover real local payments, Owner approval and cancellation, account changes during login, disconnection, and recovery after refresh.
+Verified on October 21, 2026 with Node 24: type checks and production builds, **34 contract tests**, **56 backend test counts** including nested tests, and **16 browser cases** (9 wallet/connection and 7 reserve cases). Another **7 offline model-launcher tests** pass. Browser cases cover real local payments, Owner approval and cancellation, bound Wallet/PolicyEngine event evidence, account changes during login, disconnection, and recovery after refresh.
 
 Contract tests cover authorization, oracle boundaries, budgets, approvals, replay and direct-call rejection. Backend tests cover HTTP boundaries, persistent recovery, event binding and operating-wallet address binding with explicit chain fixtures. Browser tests use real local contracts and balances with a Mock Feed, including confirmation, approval/cancellation, changed suggestions, missing data, missing or mismatched operating-wallet identity, offline failure and refresh without duplicate payment.
 
@@ -192,7 +192,7 @@ The local payment flow is verified. Sepolia deployment and read-only binding che
 
 The demo covers one funding pool, one receiving operating wallet and native ETH. Scheduled automatic payments, multi-wallet management, subscriptions and CCIP execution are outside the delivered scope.
 
-All published payment-execution evidence comes from the local chain; there is no accepted record of a Sepolia browser payment yet. Running `npm run deploy:local` writes the actual addresses to the local `contracts/deployments/localhost.json` file. Each executed task exposes its transaction receipt, matching contract event, recipient, amount and request hash in the verification view.
+All published payment-execution evidence comes from the local chain; there is no accepted record of a Sepolia browser payment yet. Running `npm run deploy:local` writes the actual addresses to the local `contracts/deployments/localhost.json` file. Each executed task binds the Wallet payment event to the PolicyEngine budget event and exposes the risk decision, Chainlink round, recipient, amount and request hash.
 
 Public-network contract addresses and transaction links will be published after an independently verified deployment and an accepted browser payment. A read-only Feed connectivity check does not establish that Aegis was deployed or made a payment.
 

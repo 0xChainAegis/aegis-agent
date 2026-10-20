@@ -19,9 +19,10 @@ const owner = privateKeyToAccount(OWNER_KEY);
 const agent = privateKeyToAccount(LOCAL_AGENT_KEY);
 const recipient = '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC' as Address;
 const wallet = '0x1000000000000000000000000000000000000001' as Address;
+const policyEngine = '0x7000000000000000000000000000000000000007' as Address;
 const blockHash = keccak256(toHex('block'));
 function config(dbPath = ':memory:'): Config {
-  return { ...loadConfig({}), dbPath, port: 0, deploymentReady: true, walletAddress: wallet, ownerAddress: owner.address, agentAddress: agent.address, recipientAddress: recipient };
+  return { ...loadConfig({}), dbPath, port: 0, deploymentReady: true, walletAddress: wallet, policyEngineAddress: policyEngine, ownerAddress: owner.address, agentAddress: agent.address, recipientAddress: recipient };
 }
 class FakeChain implements Gateway {
   preparations = 0; broadcasts = 0; mined = false; queue = false; missingEvent = false;
@@ -59,7 +60,20 @@ class FakeChain implements Gateway {
       return { status: 'FAILED', transaction: { role, hash, receiptStatus: 0, blockNumber: '3', blockHash, finality: 'mined' }, reasonCode: 'TX_REVERTED' };
     }
     const event = this.missingEvent ? undefined : role === 'cancel' ? 'NativeTransferCancelled' : this.queue && role === 'request' ? 'NativeTransferQueued' : 'NativeTransferExecuted';
-    return { status: this.missingEvent ? 'FAILED' : role === 'cancel' ? 'CANCELLED' : this.queue && role === 'request' ? 'AWAITING_APPROVAL' : 'EXECUTED', transaction: { role, hash, receiptStatus: 1, event, blockNumber: '2', blockHash, finality: 'mined' }, attestationId: '1', reasonCode: this.missingEvent ? 'EXPECTED_EVENT_MISSING' : undefined, eventData: event ? { requestHash: task.requestHash!, amountWei: task.amountWei } : undefined };
+    const executed = event === 'NativeTransferExecuted';
+    return {
+      status: this.missingEvent ? 'FAILED' : role === 'cancel' ? 'CANCELLED' : this.queue && role === 'request' ? 'AWAITING_APPROVAL' : 'EXECUTED',
+      transaction: { role, hash, receiptStatus: 1, event, blockNumber: '2', blockHash, finality: 'mined' },
+      attestationId: '1', reasonCode: this.missingEvent ? 'EXPECTED_EVENT_MISSING' : undefined,
+      eventData: event ? { requestHash: task.requestHash!, amountWei: task.amountWei } : undefined,
+      policyEvidence: executed ? {
+        engineAddress: policyEngine, event: 'BudgetConsumed', actionType: 'NATIVE_TRANSFER',
+        decision: role === 'approve' ? 'REQUIRE_APPROVAL' : 'ALLOW', requestHash: task.requestHash!, actor: task.agentAddress,
+        costUsd6: '3000000', day: '20000', spentUsd6: '3000000', transactionHash: hash,
+        policyVersion: task.policyVersion, oracleAddress: wallet, feedAddress: wallet, roundId: '1', updatedAtSeconds: '1999999999',
+        blockNumber: '2', blockHash, logIndex: 0, verified: true,
+      } : undefined,
+    };
   }
   async findOwnerOutcome(task: Task): Promise<Outcome | null> {
     this.ownerOutcomeChecks++;
@@ -72,6 +86,12 @@ class FakeChain implements Gateway {
       transaction: { role: action, hash, receiptStatus: 1, event, blockNumber: '3', blockHash, finality: 'mined' },
       attestationId: task.attestationId ?? '1',
       eventData: { requestHash: task.requestHash!, amountWei: task.amountWei },
+      policyEvidence: action === 'approve' ? {
+        engineAddress: policyEngine, event: 'BudgetConsumed', actionType: 'NATIVE_TRANSFER', decision: 'REQUIRE_APPROVAL',
+        requestHash: task.requestHash!, actor: task.agentAddress, costUsd6: '3000000', day: '20000', spentUsd6: '3000000',
+        policyVersion: task.policyVersion, oracleAddress: wallet, feedAddress: wallet, roundId: '1', updatedAtSeconds: '1999999999',
+        transactionHash: hash, blockNumber: '3', blockHash, logIndex: 0, verified: true,
+      } : undefined,
     };
   }
   ownerTx(task: Task, action: 'approve' | 'cancel') { return { to: wallet, data: '0x1234' as Hex, value: '0', from: owner.address, chainId: 31337, action }; }
@@ -175,6 +195,17 @@ test('idempotent writes return the same entity; different contents conflict; dup
     const task = await app.call(`/tasks/${submit.body.taskId}`);
     assert.equal(task.body.status, 'EXECUTED'); assert.equal(app.chain.preparations, 1); assert.equal(app.chain.broadcasts, 1);
     assert.equal(task.body.rawTransaction, undefined); assert.equal(task.body.verification.chainVerified, true);
+    assert.equal(task.body.policyEvidence, undefined);
+    const evidence = await app.call(`/tasks/${submit.body.taskId}/evidence`);
+    assert.equal(evidence.body.policy.state, 'VERIFIED');
+    assert.equal(evidence.body.policy.decision, 'ALLOW');
+    assert.equal(evidence.body.policy.requestHash, task.body.requestHash);
+    assert.equal(evidence.body.policy.engineAddress, policyEngine);
+    assert.equal(evidence.body.policy.transactionHash, task.body.txHash);
+    assert.equal(evidence.body.previewPolicy.source, 'chain_read');
+    assert.equal(evidence.body.previewPolicy.decision, 'ALLOW');
+    assert.equal(evidence.body.previewPolicy.observedBlockNumber, '1');
+    assert.equal(evidence.body.sources.evidence, 'wallet_and_policy_contract_events');
     assert.throws(() => app.service.getTask(recipient, submit.body.taskId), /找不到/);
   } finally { await app.close(); }
 });
@@ -191,6 +222,9 @@ test('accepted broadcast followed by timeout survives SQLite restart without re-
     await second.login(); await second.service.tick();
     const task = await second.call(`/tasks/${taskId!}`);
     assert.equal(task.body.status, 'EXECUTED'); assert.equal(chain.preparations, 1); assert.equal(chain.broadcasts, 1);
+    const evidence = await second.call(`/tasks/${taskId!}/evidence`);
+    assert.equal(evidence.body.policy.verified, true);
+    assert.equal(evidence.body.policy.decision, 'ALLOW');
   } finally { await second.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 test('a transaction persisted before broadcast is reused after service reconstruction and blocks the next nonce', async () => {
@@ -265,6 +299,14 @@ test('owner outcomes discovered after restart complete or retain queued tasks wi
         await second.login(); await second.service.tick();
         const recovered = second.service.getTask(owner.address, taskId!);
         assert.equal(recovered.status, scenario.expected);
+        const evidence = await second.call(`/tasks/${taskId!}/evidence`);
+        if (scenario.outcome === 'approve') {
+          assert.equal(evidence.body.policy.state, 'VERIFIED');
+          assert.equal(evidence.body.policy.decision, 'REQUIRE_APPROVAL');
+        } else {
+          assert.equal(evidence.body.policy.consumed, false);
+          assert.equal(evidence.body.policy.state, scenario.outcome === 'cancel' ? 'NOT_CONSUMED' : 'WAITING_FOR_EXECUTION');
+        }
         assert.equal(chain.preparations, 1); assert.equal(chain.broadcasts, 1);
         await second.service.tick();
         assert.equal(chain.preparations, 1); assert.equal(chain.broadcasts, 1);
@@ -374,6 +416,7 @@ test('HTTP boundaries reject malformed or unauthorized writes and never expose s
     const detail = await app.call(`/tasks/${submit.body.taskId}`);
     const evidence = await app.call(`/tasks/${submit.body.taskId}/evidence`);
     assert.equal(configResponse.body.rpcUrl, null);
+    assert.ok(Array.isArray(configResponse.body.abi.policyEngine));
     for (const response of [configResponse, list, detail, evidence, unknownField]) {
       const payload = JSON.stringify(response.body);
       assert.equal(payload.includes(chain.raw), false);

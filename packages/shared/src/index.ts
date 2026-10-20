@@ -13,6 +13,14 @@ export interface TransactionEvidence {
   role: 'request' | 'approve' | 'cancel'; hash: Hex; receiptStatus?: number; blockNumber?: string;
   blockHash?: Hex; event?: string; senderNonce?: string; finality?: 'mined' | 'pending';
 }
+export interface PolicyEvidence {
+  engineAddress: Hex; event: 'BudgetConsumed'; actionType: 'NATIVE_TRANSFER';
+  decision: 'ALLOW' | 'REQUIRE_APPROVAL'; requestHash: Hex; actor: Hex;
+  costUsd6: string; day: string; spentUsd6: string; transactionHash: Hex;
+  policyVersion: string; oracleAddress: Hex; feedAddress: Hex;
+  roundId: string; updatedAtSeconds: string;
+  blockNumber: string; blockHash: Hex; logIndex: number; verified: true;
+}
 export interface Task {
   taskId: string; draftId: string; intentId: string; draftVersion: number; stateVersion: number;
   status: TaskStatus; chainId: number; walletAddress: Hex; ownerAddress: Hex; agentAddress: Hex;
@@ -51,4 +59,7 @@ export const walletAbiSignatures = [
 export const oracleAbiSignatures = [
   'function latestEthQuote(uint256 amountWei) view returns (uint256 costUsd6,uint80 roundId,int256 answer,uint256 updatedAt,uint8 decimals)',
   'function feeds(address token) view returns (address)',
+] as const;
+export const policyEngineAbiSignatures = [
+  'event BudgetConsumed(bytes32 indexed requestHash,uint8 indexed actionType,address indexed actor,uint8 decision,uint256 costUsd6,uint256 day,uint256 spentUsd6)',
 ] as const;

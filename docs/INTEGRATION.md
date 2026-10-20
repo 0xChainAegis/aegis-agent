@@ -62,7 +62,7 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 4. `POST /api/v1/intents/:id/preview`：输入 `{expectedRevision,maxUsdCost6?}`。返回 `quoteId,draftVersion,status,decision,costUsd6,maxUsdCost6,policyVersion,quoteExpiresAtSeconds,requestDeadlineSeconds,budget,oracle` 与报价区块。默认 cap 为当时估值加 1% 向上取整，确认界面必须显示。硬条件失败为 `BLOCKED`，与等待 Owner 不同。
 5. `POST /api/v1/intents/:id/submit`：输入 `{expectedRevision,quoteId}`。后端核对保存的动作、业务版本和报价期限，返回 HTTP 202 与 `taskId,status,stateVersion`。客户端不能覆盖 nonce、策略版本或金额。
 6. `GET /api/v1/tasks/:id` 或 `/api/v1/tasks`：读取权威状态、transactions、requestHash、requestNonce、attestationId、availableActions 和 verification。列表仅返回登录 Owner 的任务。
-7. `GET /api/v1/tasks/:id/evidence`：绑定请求参数、实际交易/事件与来源。`verification.chainVerified/hashVerified` 仅匹配业务事件后为 true；入队验证通过仍不代表付款。
+7. `GET /api/v1/tasks/:id/evidence`：绑定请求参数、预览时指定区块的 `previewPolicy` 与实际交易/事件。执行成功时，`policy` 同时返回 PolicyEngine 地址、ALLOW/REQUIRE_APPROVAL 决策、USD6 成本、累计日支出、策略版本、Oracle/Feed 与 Chainlink round。只有同一回执内 Wallet 和 PolicyEngine 事件的 requestHash、Agent、金额及决策均匹配，风险证据才为 `VERIFIED`；入队尚未消费预算，取消则为 `NOT_CONSUMED`。REJECT 不会留下可持久化的 EVM 事件，BLOCKED 预览明确标为 `chain_read`，不能冒充链上执行记录。
 
 不要混用四种版本：`expectedRevision` 是草稿编辑版本，`draftVersion` 是报价绑定版本，`stateVersion` 是任务状态版本，`policyVersion` 是链上策略版本。
 
@@ -103,11 +103,11 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 
 ## 验证与当前证据
 
-回执 status=1 只证明交易成功执行。还需核对 Wallet 事件的同一请求：NativeTransferExecuted 才是已执行；NativeTransferQueued 是待审批；NativeTransferCancelled 是已取消。PolicyEngine 的 BudgetConsumed 记录同一 requestHash 的动作类型、策略决定和累计预算，但不能单独替代付款事件。缺预期事件或参数不符，不得显示付款成功。
+回执 status=1 只证明交易成功执行。后端会扫描整份回执：Wallet 的 NativeTransferExecuted 证明付款，PolicyEngine 的 BudgetConsumed 证明风险决策与预算消费；二者必须来自配置地址、处于同一交易，并在 requestHash、Agent 和 USD6 成本上相符。Agent 自动执行必须对应 ALLOW。Owner 执行通常对应 REQUIRE_APPROVAL；如果 pending 期间价格下降或 Agent 风险等级降低，执行时重新判断也可能合法变为 ALLOW，审计记录保留实际决定。NativeTransferQueued 是待审批且尚未消费预算，NativeTransferCancelled 是已取消。任一执行事件缺失或参数不符，均不得将审计证据标记为已验证。
 
 请求 hash 使用与合约一致的编码，绑定 domain、chainId、Wallet、Agent、收款人、amountWei、maxUsdCost6、nonce、deadline、policyVersion。它不是自然语言、模型推理与执行后完整记录的证明。结果证据来自回执/事件；一次 mined 确认不代表最终不可逆。
 
-2026 年 10 月 20 日本地验证通过类型检查、生产构建、34 项合约测试、41 项后端测试计数（含嵌套测试）和 16 条浏览器用例（钱包/Provider 组 9 条、储备组 7 条）。后端链侧使用显式假适配器；浏览器分成两组，各自从零启动真实本地 RPC、部署、SQLite、API 和界面，核对接收余额增量及对应事件。覆盖统一策略决策、跨消费者共享预算、消费回滚与防重放，以及付款、Owner 审批、取消、硬预算拒绝、准备金建议重查、刷新、缺失/离线数据、LLM 草稿严格 schema、注入回退、模型不得补全字段和无任务创建。当前使用 Mock Feed；PolicyEngine v2 的公开测试网和真实 Feed 尚未验证。
+2026 年 10 月 21 日本地验证通过类型检查、生产构建、34 项合约测试、56 项后端测试计数（含嵌套测试）和 16 条浏览器用例（钱包/Provider 组 9 条、储备组 7 条）。后端链侧使用显式假适配器；浏览器分成两组，各自从零启动真实本地 RPC、部署、SQLite、API 和界面。覆盖统一策略决策、跨消费者共享预算、消费回滚与防重放、Wallet/PolicyEngine 双事件审计、缺失或伪造策略事件的 fail-closed 校验，以及付款、Owner 审批、取消、硬预算拒绝、准备金建议重查、刷新、缺失/离线数据和 LLM 草稿边界。当前浏览器付款验证使用本地 Mock Feed；PolicyEngine v2 已在 Sepolia 完成部署与只读绑定复核，Sepolia 实际付款闭环仍待验收。
 
 ## 重置本地链
 

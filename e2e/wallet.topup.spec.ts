@@ -51,6 +51,7 @@ test('low reserve (explicit test settings): exact suggestion previews, needs con
  expect(await balanceOf(cfg.recipientAddress)-B).toBe(MILLI);
  const evidence=await authed(page,`/api/v1/tasks/${taskId}/evidence`);
  expect(evidence.verification).toMatchObject({kind:'chain',chainVerified:true,hashVerified:true});
+ expect(evidence.policy).toMatchObject({event:'BudgetConsumed',actionType:'NATIVE_TRANSFER',decision:'ALLOW',verified:true,consumed:true,state:'VERIFIED'});
  expect(evidence.intent.amountWei).toBe('1000000000000000');
  expect(evidence.intent.recipient.toLowerCase()).toBe(cfg.recipientAddress.toLowerCase());
  const executed=evidence.transactions.find((t:any)=>t.event==='NativeTransferExecuted');

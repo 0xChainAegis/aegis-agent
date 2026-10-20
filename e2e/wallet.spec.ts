@@ -19,6 +19,9 @@ test('real local chain: auto payment, owner approval, cancel, hard block, eviden
  expect(BigInt(await rpc('eth_getBalance',[config.recipientAddress,'latest']))-before).toBe(1_000_000_000_000_000n);
  const evidence=await page.request.get(`/api/v1/tasks/${auto.taskId}/evidence`,{headers:{Authorization:`Bearer ${await token(page)}`}}).then(r=>r.json());
  expect(evidence.verification.chainVerified).toBe(true);expect(evidence.verification.hashVerified).toBe(true);
+ expect(evidence.policy).toMatchObject({engineAddress:config.policyEngineAddress,event:'BudgetConsumed',actionType:'NATIVE_TRANSFER',decision:'ALLOW',costUsd6:'3000000',verified:true,consumed:true,state:'VERIFIED'});
+ expect(evidence.policy.requestHash.toLowerCase()).toBe(evidence.intent.requestHash.toLowerCase());
+ expect(evidence.policy.oracleAddress.toLowerCase()).toBe(config.oracleAddress.toLowerCase());expect(evidence.policy.feedAddress.toLowerCase()).toBe(config.feedAddress.toLowerCase());expect(evidence.policy.roundId).toBeTruthy();
  await close(page);
  const approvalPreview=await preview(page,config.recipientAddress,'0.002');expect(approvalPreview.decision).toBe('OWNER_APPROVAL');
  const queued=await submit(page);await expect.poll(async()=>(await task(page,queued.taskId)).status).toBe('AWAITING_APPROVAL');
@@ -27,10 +30,14 @@ test('real local chain: auto payment, owner approval, cancel, hard block, eviden
  await expect(page.getByTestId('sign-owner-transaction')).toBeEnabled();await page.getByTestId('sign-owner-transaction').click();
  await expect.poll(async()=>(await task(page,queued.taskId)).status).toBe('EXECUTED');
  expect(BigInt(await rpc('eth_getBalance',[config.recipientAddress,'latest']))-before).toBe(3_000_000_000_000_000n);
+ const approvedEvidence=await page.request.get(`/api/v1/tasks/${queued.taskId}/evidence`,{headers:{Authorization:`Bearer ${await token(page)}`}}).then(r=>r.json());
+ expect(approvedEvidence.policy).toMatchObject({decision:'REQUIRE_APPROVAL',verified:true,consumed:true,state:'VERIFIED'});
  await close(page);
  await preview(page,config.recipientAddress,'0.002');const cancelled=await submit(page);await expect.poll(async()=>(await task(page,cancelled.taskId)).status).toBe('AWAITING_APPROVAL');
  await expect(page.getByTestId('cancel-task')).toBeVisible();await page.getByTestId('cancel-task').click();await page.getByTestId('sign-owner-transaction').click();
  await expect.poll(async()=>(await task(page,cancelled.taskId)).status).toBe('CANCELLED');
+ const cancelledEvidence=await page.request.get(`/api/v1/tasks/${cancelled.taskId}/evidence`,{headers:{Authorization:`Bearer ${await token(page)}`}}).then(r=>r.json());
+ expect(cancelledEvidence.policy).toMatchObject({consumed:false,verified:false,state:'NOT_CONSUMED'});
  await close(page);
  const blocked=await preview(page,config.recipientAddress,'0.004');expect(blocked.status).toBe('BLOCKED');await expect(page.getByTestId('confirm-transfer')).toBeDisabled();
  expect(BigInt(await rpc('eth_getBalance',[config.recipientAddress,'latest']))-before).toBe(3_000_000_000_000_000n);
