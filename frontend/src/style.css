@@ -392,6 +392,26 @@ button:disabled { cursor: not-allowed; }
 .verification-callout p { font-size: 13px; color: var(--text-2); }
 
 /* 11 · Drawer, modal, toast: opaque and still (no entrance animation) ---- */
+.wallet-options { display: grid; gap: 8px; margin: 20px 0; }
+.wallet-option { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px; border: 1px solid var(--rule); border-radius: var(--r1); text-align: left; background: var(--panel); }
+.wallet-option:hover { border-color: var(--sage); background: var(--sage-tint); }
+.wallet-option:focus-visible { outline: 2px solid var(--sage); outline-offset: 3px; }
+.wallet-option:hover .wallet-option-symbol { transform: translateY(-1px); }
+.wallet-picker .wallet-options { max-height: 45dvh; overflow-y: auto; padding: 3px; margin-left: -3px; margin-right: -3px; }
+.wallet-option-symbol { position: relative; display: grid; place-items: center; flex: 0 0 54px; width: 54px; height: 54px; border-radius: 16px; background: linear-gradient(145deg, var(--panel), var(--surface-2)); border: 1px solid var(--rule); color: var(--sage); box-shadow: inset 0 2px 2px rgb(255 255 255 / 75%), inset 0 -3px 4px rgb(31 37 35 / 8%), 0 5px 10px rgb(31 37 35 / 10%); }
+.wallet-option-symbol img { display: block; width: 36px; height: 36px; object-fit: contain; filter: drop-shadow(0 2px 1px rgb(31 37 35 / 12%)); }
+.wallet-option-symbol { transition: transform 160ms ease; }
+.wallet-option-symbol::after { content: ''; position: absolute; inset: 1px; border-radius: 15px; border-top: 1px solid rgb(255 255 255 / 70%); pointer-events: none; }
+.wallet-support-note { font-size: 12px; color: var(--muted); line-height: 1.6; }
+[data-theme='dark'] .wallet-option-symbol { box-shadow: inset 0 1px 2px rgb(255 255 255 / 12%), inset 0 -3px 4px rgb(0 0 0 / 20%), 0 5px 10px rgb(0 0 0 / 20%); }
+.wallet-option > span:nth-child(2) { flex: 1; min-width: 0; }
+.wallet-option strong, .wallet-option small { display: block; overflow-wrap: anywhere; }
+.wallet-option small { color: var(--muted); font-size: 12px; margin-top: 3px; }
+.connection-panel { max-width: 720px; margin: 48px auto; padding: 28px; border: 1px solid var(--rule); border-radius: var(--r2); background: var(--panel); }
+.connection-panel h1 { font-size: 28px; letter-spacing: -.03em; }
+.connection-panel > p { color: var(--text-2); font-size: 14px; line-height: 1.7; }
+.connection-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+@media(max-width:600px) { .connection-panel { padding: 18px; margin: 16px 0; } .connection-panel .section-head { flex-wrap: wrap; gap: 8px; } .connection-actions > .button { flex: 1 1 100%; } }
 .drawer-backdrop { position: fixed; inset: 0; background: rgb(31 37 35 / 34%); z-index: 20; }
 .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 480px; max-width: 100%; background: var(--panel); opacity: 1; border-left: 1px solid var(--rule-strong); box-shadow: -10px 0 30px rgb(31 37 35 / 10%); z-index: 21; display: flex; flex-direction: column; }
 .drawer-header { min-height: 56px; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--s4) 0 var(--s5); border-bottom: 1px solid var(--rule); flex-shrink: 0; background: var(--panel); }
@@ -576,4 +596,6 @@ button:disabled { cursor: not-allowed; }
 /* 13 · Reduced motion ---------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
   .spinner { animation-duration: 2s; }
+  .wallet-option-symbol { transition: none; }
+  .wallet-option:hover .wallet-option-symbol { transform: none; }
 }
