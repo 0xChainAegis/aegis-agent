@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/aegis-hero-dark.svg">
-    <img src="docs/images/aegis-hero-light.svg" width="100%" alt="Aegis: the A mark and wordmark">
-  </picture>
+  <img src="frontend/public/aegis-hero.png" width="100%" alt="Aegis: a white ceramic A icon and wordmark with the line Agent wallet control.">
 </p>
 
 <p align="center">
@@ -15,48 +12,15 @@
 </p>
 
 <p align="center">
-  <a href="#where-chainlink-and-ai-fit"><img src="https://img.shields.io/badge/Chainlink-Data%20Feeds-59615F?style=flat-square&amp;labelColor=252B2A" alt="Chainlink Data Feeds"></a>
-  <img src="https://img.shields.io/badge/TypeScript-Node%2024-59615F?style=flat-square&amp;labelColor=252B2A" alt="TypeScript and Node 24">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-59615F?style=flat-square&amp;labelColor=252B2A" alt="MIT license"></a>
-</p>
-
-<p align="center">
-  <a href="#problem-and-solution">About</a> ·
   <a href="#product-screenshots">Screenshots</a> ·
+  <a href="#problem-and-solution">About</a> ·
   <a href="#user-flow">Flow</a> ·
   <a href="#where-chainlink-and-ai-fit">Chainlink</a> ·
   <a href="#quickstart">Run</a> ·
   <a href="#validation">Validation</a> ·
+  <a href="#event-origin">Event</a> ·
   <a href="#team-and-documentation">Team</a>
 </p>
-
-<p align="center">
-  Built at the ETH Shenzhen 2026 Hackathon.
-</p>
-
-<details>
-  <summary>Event reference: ETH Shenzhen 2026 poster</summary>
-  <p align="center">
-    <img src="docs/images/eth-shenzhen-2026-poster.png" width="420" alt="ETH Shenzhen 2026 Hackathon event poster.">
-  </p>
-</details>
-
-## <img src="docs/images/section-problem.svg" width="24" height="24" alt="" align="absmiddle"> Problem and solution
-
-**Problem.** An agent's operating wallet needs native ETH to pay transaction fees. When it runs dry the agent stops, and letting the agent refill itself would hand fund authority to automation.
-
-**Solution.** One funding-pool smart contract pays native ETH to one configured receiving operating wallet to replenish its gas reserve. The user sets a threshold and target in the browser; Aegis suggests target minus actual balance, rechecks when preparing, and after explicit user confirmation the contract executes within its whitelist, permissions and USD limits.
-
-**Four distinct roles.**
-
-| Role | Field | Responsibility |
-|---|---|---|
-| Owner (funding administrator) | `ownerAddress` | Administers the pool and approves pending payments |
-| Executor | `agentAddress` | Submits payment requests within authorized rules |
-| Pool contract | `walletAddress` | Holds and pays the top-up funds |
-| Receiving operating wallet | `recipientAddress` | Receives ETH and is shown on the overview; receiving grants no administrative rights |
-
-Pool and operating-wallet balances are read separately. The LLM only drafts: it never signs and cannot bypass approvals.
 
 ## <img src="docs/images/section-screens.svg" width="24" height="24" alt="" align="absmiddle"> Product screenshots
 
@@ -93,6 +57,21 @@ Actual light and dark interfaces at 390px. The operating wallet, reserve editor,
   <img src="docs/images/reserve-mobile-dark.png" width="300" alt="Actual dark mobile interface for the same wallet and settings.">
 </p>
 
+## <img src="docs/images/section-problem.svg" width="24" height="24" alt="" align="absmiddle"> Problem and solution
+
+**Problem.** An agent's operating wallet needs native ETH to pay transaction fees. When it runs dry the agent stops, and letting the agent refill itself would hand fund authority to automation.
+
+**Solution.** One funding-pool smart contract pays native ETH to one configured receiving operating wallet to replenish its gas reserve. The user sets a threshold and target in the browser; Aegis suggests target minus actual balance, rechecks when preparing, and after explicit user confirmation the contract executes within its whitelist, permissions and USD limits. Payments above the approval threshold need Owner approval; payments above the hard cap are blocked.
+
+**Four distinct roles.**
+
+- **Owner (funding administrator)**, `ownerAddress`: administers the pool and approves pending payments.
+- **Executor**, `agentAddress`: submits payment requests within authorized rules.
+- **Pool contract**, `walletAddress`: holds and pays the top-up funds.
+- **Receiving operating wallet**, `recipientAddress`: receives ETH and is shown on the overview; receiving grants no administrative rights.
+
+Pool and operating-wallet balances are read separately. The LLM only drafts: it never signs and cannot bypass approvals.
+
 ## <img src="docs/images/section-flow.svg" width="24" height="24" alt="" align="absmiddle"> User flow
 
 1. Sign in as Owner with the local test wallet (or a browser wallet); login does not authorize a payment.
@@ -127,6 +106,8 @@ The pool balance, the executor's transaction-gas balance and the recipient's ope
 ETH/USD values the transferred principal; it is not a gas-price oracle. The sender pays transaction gas separately.
 
 **AI.** Rules are the default. `AEGIS_LLM_MODE=live` enables Anthropic or OpenAI-compatible draft parsing; `stub` is an offline test mode and does not demonstrate a real model. Model responses undergo schema and parameter checks: stale values cannot replace the user's new address or amount, and ambiguous fields require clarification. Every draft still needs preview and explicit confirmation, subject to on-chain limits, fresh prices and replay protection. See [integration configuration](docs/INTEGRATION.md).
+
+Optional live models were evaluated on a historical 40-case dataset and have not been re-tested since the safety fixes; rules and stub scores are not model accuracy. See the [intent evaluation report](eval/REPORT.md). The Python Agent under `agent/` is an early prototype outside the current TypeScript runtime.
 
 ## <img src="docs/images/section-architecture.svg" width="24" height="24" alt="" align="absmiddle"> Architecture and stack
 
@@ -169,6 +150,8 @@ npm run dev
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The API listens on port 3001 and the local RPC on 8545; chain ID is 31337. Select the explicit local test-wallet entry to sign in with the public development Owner. These development accounts and ETH have no real-world value and must not be used for public funds.
 
+When a browser wallet is on another network, Connect requests the wallet's native network-switch confirmation. Login still requires the configured Owner account. Switching a wallet to Sepolia does not switch the backend. Local `npm run dev` maintains the verified Mock Feed's timestamp; this maintainer is disabled for testnet and the automated E2E stack.
+
 The deployment funds the pool with 1 ETH and configures a $5 threshold for execution without separate Owner approval, a $10 hard per-payment cap and a $15 shared UTC daily budget. The local Mock Feed initially returns $3,000 per ETH.
 
 Layout: `frontend/` (Vite + TypeScript UI), `backend/` (Node.js, viem, Zod, SQLite), `contracts/` (Solidity, Hardhat, deployment, contract tests), `packages/shared/` (API types and ABI), `agent/skills/` (intent parsing prompt; other Python prototypes are outside the current runtime).
@@ -180,7 +163,7 @@ npm run check
 npm run test:e2e
 ```
 
-Verified on October 21, 2026 with Node 24: type checks and production builds, **34 contract tests**, **56 backend test counts** including nested tests, and **16 browser cases** (9 wallet/connection and 7 reserve cases). Another **7 offline model-launcher tests** pass. Browser cases cover real local payments, Owner approval and cancellation, bound Wallet/PolicyEngine event evidence, account changes during login, disconnection, and recovery after refresh.
+Verified on this version with Node 24: type checks and production builds, **34 contract tests**, **47 backend test counts** including nested tests, and **38 browser cases** (31 wallet, network and readiness cases; 7 reserve cases). Another **9 offline Mock-maintainer tests** and **7 offline model-launcher tests** pass. Browser cases cover real local payments, Owner approval and cancellation, network switching, account changes during login, expired-price payment blocking, disconnection, and recovery after refresh.
 
 Contract tests cover authorization, oracle boundaries, budgets, approvals, replay and direct-call rejection. Backend tests cover HTTP boundaries, persistent recovery, event binding and operating-wallet address binding with explicit chain fixtures. Browser tests use real local contracts and balances with a Mock Feed, including confirmation, approval/cancellation, changed suggestions, missing data, missing or mismatched operating-wallet identity, offline failure and refresh without duplicate payment.
 
@@ -188,13 +171,19 @@ The browser entry starts a fresh chain and database for each group. Stop manuall
 
 ### Deployment and execution evidence
 
-The local payment flow is verified. Sepolia deployment and read-only binding checks exist; browser-payment acceptance with the latest policy-engine deployment remains pending. The [intent evaluation report](eval/REPORT.md) preserves historical model results and limitations; its scores do not describe the current version.
+The local payment flow is verified. The Sepolia v2 deployment report provides contract addresses and read-only binding checks, but live browser payments are still pending acceptance. The [intent evaluation report](eval/REPORT.md) preserves historical model results and limitations; its scores do not describe the current version.
 
 The demo covers one funding pool, one receiving operating wallet and native ETH. Scheduled automatic payments, multi-wallet management, subscriptions and CCIP execution are outside the delivered scope.
 
-All published payment-execution evidence comes from the local chain; there is no accepted record of a Sepolia browser payment yet. Running `npm run deploy:local` writes the actual addresses to the local `contracts/deployments/localhost.json` file. Each executed task binds the Wallet payment event to the PolicyEngine budget event and exposes the risk decision, Chainlink round, recipient, amount and request hash.
+All published payment-execution evidence comes from the local chain; there is no accepted record of a Sepolia browser payment yet. Running `npm run deploy:local` writes the actual addresses to the local `contracts/deployments/localhost.json` file. Each executed task exposes its transaction receipt, matching contract event, recipient, amount and request hash in the verification view.
 
-Public-network contract addresses and transaction links will be published after an independently verified deployment and an accepted browser payment. A read-only Feed connectivity check does not establish that Aegis was deployed or made a payment.
+Public-network payment transaction links will be published after a browser payment is accepted. A read-only Feed connectivity check does not establish that Aegis was deployed or made a payment.
+
+## <img src="docs/images/section-team.svg" width="24" height="24" alt="" align="absmiddle"> Event origin
+
+Built at the ETH Shenzhen 2026 Hackathon.
+
+<img src="docs/images/eth-shenzhen-2026-poster.png" width="100%" alt="ETH Shenzhen 2026 Hackathon event poster.">
 
 ## <img src="docs/images/section-team.svg" width="24" height="24" alt="" align="absmiddle"> Team and documentation
 
@@ -216,8 +205,5 @@ Public-network contract addresses and transaction links will be published after 
 [Contributors](https://github.com/0xChainAegis/aegis-agent/graphs/contributors) · MIT — see [LICENSE](LICENSE).
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/aegis-footer-dark.svg">
-    <img src="docs/images/aegis-footer-light.svg" width="100%" alt="Aegis footer mark">
-  </picture>
+  <img src="frontend/public/favicon.svg" width="28" height="28" alt="Aegis">
 </p>

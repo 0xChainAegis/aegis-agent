@@ -38,11 +38,11 @@ function gatewayConfig(): Config {
   };
 }
 
-function readinessHarness(options: { attestation?: Address; locked?: boolean; policyEngine?: Address; policyOwner?: Address; policyAuthorized?: boolean } = {}) {
+function readinessHarness(options: { attestation?: Address; locked?: boolean; policyEngine?: Address; policyOwner?: Address; policyAuthorized?: boolean; stale?: boolean; authorized?: boolean; chainId?: number } = {}) {
   const gateway = new ViemGateway(gatewayConfig());
   const client = gateway.publicClient as any;
   const bytecodeReads: Address[] = [];
-  client.getChainId = async () => 31337;
+  client.getChainId = async () => options.chainId ?? 31337;
   client.getBytecode = async ({ address }: { address: Address }) => { bytecodeReads.push(address); return '0x01'; };
   client.getBlock = async () => ({ number: 42n, hash: blockHash, timestamp: 1_700_000_000n });
   client.getBalance = async ({ address }: { address: Address }) => address === recipient ? 0n : 1n;
@@ -57,14 +57,14 @@ function readinessHarness(options: { attestation?: Address; locked?: boolean; po
       case 'feeds': return feed;
       case 'configurationLocked': return options.locked ?? true;
       case 'AGENT_ROLE': case 'ATTESTER_ROLE': case 'APPROVER_ROLE': return requestHash;
-      case 'hasRole': return true;
+      case 'hasRole': return options.authorized ?? true;
       case 'tierOf': return 2;
       case 'policyVersion': return 7n;
       case 'autoLimitUsd6': return 5_000_000n;
       case 'perTxLimitUsd6': return 10_000_000n;
       case 'dailyLimitUsd6': return 20_000_000n;
       case 'spendingToday': return [4_000_000n, 16_000_000n];
-      case 'latestEthQuote': return [1n, 1n, 300_000_000_000n, 1_699_999_999n, 8];
+      case 'latestEthQuote': return [1n, 1n, 300_000_000_000n, options.stale ? 1_699_990_000n : 1_699_999_999n, 8];
       case 'maxPriceAge': return 3600n;
       default: throw new Error(`Unexpected contract read: ${address} ${functionName}`);
     }
@@ -78,6 +78,21 @@ test('ViemGateway readiness verifies all bytecode, bindings, roles, and locked f
   assert.equal(result.ready, true);
   assert.equal('deploymentBindingsVerified' in result && result.deploymentBindingsVerified, true);
   assert.ok(bytecodeReads.includes(attestation));
+});
+
+test('stale readiness preserves read-only identity proofs only after all structural and role checks', async () => {
+  const stale = await readinessHarness({ stale: true }).gateway.readiness();
+  assert.equal(stale.ready, false);
+  assert.equal(stale.code, 'FEED_STALE');
+  assert.equal('rpcChainId' in stale && stale.rpcChainId, 31337);
+  assert.equal('deploymentBindingsVerified' in stale && stale.deploymentBindingsVerified, true);
+  assert.equal('feedFresh' in stale && stale.feedFresh, false);
+  for (const options of [{ stale: true, authorized: false }, { stale: true, attestation: otherContract }, { stale: true, chainId: 1 }]) {
+    const failed = await readinessHarness(options).gateway.readiness();
+    assert.equal(failed.ready, false);
+    assert.equal('rpcChainId' in failed, false);
+    assert.equal('deploymentBindingsVerified' in failed, false);
+  }
 });
 
 test('ViemGateway readiness fails closed for changed bindings or unlocked feed', async () => {

@@ -10,7 +10,7 @@
 - `AEGIS_LLM_MODEL`：所选服务实际支持的模型 ID。
 - `AEGIS_LLM_BASE_URL`：所选服务的 HTTP(S) API 基础地址；OpenAI-compatible 使用包含服务所需版本路径的地址，Anthropic 使用追加 `/v1/messages` 前的基础地址。
 - `AEGIS_LLM_API_KEY`：服务密钥，仅放入后端环境，不写入文档或仓库。
-- 可选 `AEGIS_LLM_TIMEOUT_MS`：1–30000，启动脚本默认 30000。
+- 可选 `AEGIS_LLM_TIMEOUT_MS`：1–30000，后端和启动脚本均默认 10000。网页从公开配置读取等待预算，仅延长意图解析请求的等待时间，付款请求不随之延长。
 
 脚本要求显式提供服务、模型、基础地址和密钥，不替用户选择供应商。它会设置 `AEGIS_LLM_MODE=live`。先执行离线配置检查：
 
@@ -35,7 +35,7 @@ python scripts/with-live-llm.py
 python scripts/with-live-llm.py --import tsx scripts/run-intent-eval.mts
 ```
 
-规则扫描命中的输入统一返回 `NEEDS_INPUT / PROMPT_BLOCKED`，清空付款字段；关闭 LLM、显式字段和多轮修改也适用。未命中的普通修正继续沿用原有多轮解析。这是有限的输入启发式检查；确认、字段校验和链上授权仍各自执行。
+规则扫描命中的输入统一走「整条拒绝」：返回 `NEEDS_INPUT / PROMPT_BLOCKED`，清空地址、金额和用途，只留一句固定追问，并且不调用模型。关闭 LLM、显式字段、多轮继承和网页 PATCH 都适用，不允许靠「剥离越权子句」保留剩下的转账。模型返回的 `purpose` / `question` 也受同一套扫描：模型若把越权指令复述回来，同样整条拒绝。未命中的普通修正继续沿用原有多轮解析。这是有限的输入启发式检查；确认、字段校验和链上授权仍各自执行。
 
 ## 网页联调
 

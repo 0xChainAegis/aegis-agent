@@ -8,13 +8,15 @@ Node.js 24+，仓库根目录执行 `npm ci --ignore-scripts`；无锁文件时�
 
 1. `npm run chain`，保持 RPC 运行。
 2. `npm run deploy:local`，生成 `contracts/deployments/localhost.json`。
-3. `npm run dev`，同时启动前后端。
+3. `npm run dev`，同时启动前后端，并维护已核验的本地 Mock 报价时间戳。
 
 前端 `http://localhost:5173`；API `http://127.0.0.1:3001`；RPC `http://127.0.0.1:8545`；Chain ID `31337`。后端绑定 loopback，CORS 仅允许代码配置的 localhost 前端来源。
 
 默认 Owner 为公开 Hardhat 账户 0，Agent 为账户 1，允许收款人为账户 2。1 ETH 在 Wallet 合约金库里，Agent 自己的余额用于交易 Gas。PolicyEngine 统一判断 ALLOW、REQUIRE_APPROVAL 或 REJECT，并由所有已授权执行器共享 UTC 日预算；当前只授权 Wallet。地址以部署 JSON 或 `GET /api/v1/config` 为准，不在文档或 UI 中粘贴私钥。
 
 Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算 $15。`0.001 ETH` 约 $3 自动执行，`0.002 ETH` 约 $6 等待 Owner，`0.004 ETH` 约 $12 硬阻断。日预算按实际执行累计；pending 不预留预算，审批可能因其他付款先占用预算而失败。
+
+本地维护器只在 loopback、chain 31337、准确的 Mock 字节码及合约绑定核验通过后，使用相同的正价格刷新临近过期的模拟轮次；不会补款或改变预算。测试网不会启动该维护器，自动 E2E 启动栈也不包含它。无效价格或身份不一致仍会停止，不自动修复故障测试数据。
 
 后端不自动读取 `.env`。可使用进程环境变量 `AEGIS_MODE`、`AEGIS_DEPLOYMENT_FILE`、`AEGIS_RPC_URL`、`AEGIS_CHAIN_ID`、`AEGIS_DB_PATH`、`AEGIS_PORT`、`AEGIS_AGENT_PRIVATE_KEY`。只有本地 31337 + loopback RPC 可默认使用公开账户 1；测试网没有显式 Agent 密钥会阻断执行。后台不持有 Owner 私钥。测试网部署文件必须包含 `policyEngineAddress`；旧 v1 文件不会被兼容性猜测，需显式重新部署 v2。
 
@@ -26,7 +28,7 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 - `testnet`：预留配置路径；本轮尚未完成 Sepolia 端到端验证，不作为已验证交付。
 - `mock`：不广播、不伪造随机交易 hash。RPC/Feed 出错不会切换成该模式。
 - `parser.kind=rule_parser,model=null`：默认规则解析或模型失败后的确定性 fallback。配置模型名不代表调用过 LLM。
-- `parser.kind=llm,model=<model>`：只有严格 JSON 通过地址、金额、字段白名单校验后才会出现。缺字段、冲突、超时、429、乱码、schema 多字段或注入命中都会回退规则解析；解析器只产生草稿，不授权、不提交、不付款。
+- `parser.kind=llm,model=<model>`：只有严格 JSON 通过地址、金额、字段白名单校验后才会出现。缺字段、冲突、超时、429、乱码或 schema 多字段会回退规则解析。注入规则命中则整条返回 `NEEDS_INPUT / PROMPT_BLOCKED`，清空付款字段，不生成可付款草稿；解析器不授权、不提交、不付款。
 - stub 模式显示 `model=stub-intent-v1`，用于验证接口和边界；它不是 live LLM 的证明。
 
 金额使用十进制整数字符串：`amountWei` 表示 wei；`costUsd6,maxUsdCost6` 及预算表示 USD6（`1000000` = $1）。界面小数只用于展示，不能将 ETH/USD 小数 `Number` 作为交易金额。
@@ -44,6 +46,10 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 
 “本地测试钱包”是用户明确选择的开发入口，使用 loopback 节点已解锁的配置 Owner，核对本机来源、RPC 和 31337 链。它不读取或保存私钥，不能用于公网资金。浏览器钱包则通过 EIP-1193 Provider 连接、签名和发送。
 
+浏览器钱包网络不匹配时，连接按钮请求插件显示网络切换确认；只有批准切换并重新核对账户后才发起登录。未添加的本地网络可在严格的 loopback/31337 配置核验后请求添加；Sepolia 只请求切换已有网络。钱包中选择 Sepolia 不会改变后端所连接的链，测试网仍需显式配置部署与执行账户。当前资金池只允许配置的 Owner 登录，不会因为连接了个人地址就赋予其 Owner 权限。
+
+报价过期或资金不足时，服务会明确暂停付款；只有网络、合约绑定和角色均已核对的情况仍可登录查看。身份或网络校验失败时，连接和付款都停止。页面定期重新核对就绪状态。
+
 ## API 与版本
 
 响应为 flat JSON，包含 `schemaVersion,mode,requestId,serverTime` 与实体字段。HTTP 成功不等于付款成功，必须同时检查业务 `status`。
@@ -51,7 +57,7 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 公共读取：
 
 - `GET /health` 或 `/api/v1/health` 返回 readiness；未就绪 HTTP 503，不模拟成功。
-- `GET /api/v1/config` 返回链、部署地址（含 `policyEngineAddress`）、`abiVersion,abi.wallet,abi.oracle`、readiness、实际 parser 与静态文档链接。`planner` 包含 `mode/provider/model/llmEnabled`，但不返回 API key、完整提示词或凭据。含凭据的 RPC 不直接暴露。
+- `GET /api/v1/config` 返回链、部署地址（含 `policyEngineAddress`）、`abiVersion,abi.wallet,abi.oracle`、readiness、实际 parser 与静态文档链接。`planner` 包含 `mode/provider/model/llmEnabled/timeoutMs`，但不返回 API key、完整提示词或凭据。模型等待默认 10 秒；浏览器按配置仅延长意图解析请求，付款与状态查询保留独立的 12 秒等待上限。含凭据的 RPC 不直接暴露。
 - `GET /api/v1/docs/:slug` 返回固定 allowlist 的 Markdown 和链接，没有 RAG。
 
 以下接口需要 Bearer 会话；业务写接口还需 `Idempotency-Key`：
@@ -62,7 +68,7 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 4. `POST /api/v1/intents/:id/preview`：输入 `{expectedRevision,maxUsdCost6?}`。返回 `quoteId,draftVersion,status,decision,costUsd6,maxUsdCost6,policyVersion,quoteExpiresAtSeconds,requestDeadlineSeconds,budget,oracle` 与报价区块。默认 cap 为当时估值加 1% 向上取整，确认界面必须显示。硬条件失败为 `BLOCKED`，与等待 Owner 不同。
 5. `POST /api/v1/intents/:id/submit`：输入 `{expectedRevision,quoteId}`。后端核对保存的动作、业务版本和报价期限，返回 HTTP 202 与 `taskId,status,stateVersion`。客户端不能覆盖 nonce、策略版本或金额。
 6. `GET /api/v1/tasks/:id` 或 `/api/v1/tasks`：读取权威状态、transactions、requestHash、requestNonce、attestationId、availableActions 和 verification。列表仅返回登录 Owner 的任务。
-7. `GET /api/v1/tasks/:id/evidence`：绑定请求参数、预览时指定区块的 `previewPolicy` 与实际交易/事件。执行成功时，`policy` 同时返回 PolicyEngine 地址、ALLOW/REQUIRE_APPROVAL 决策、USD6 成本、累计日支出、策略版本、Oracle/Feed 与 Chainlink round。只有同一回执内 Wallet 和 PolicyEngine 事件的 requestHash、Agent、金额及决策均匹配，风险证据才为 `VERIFIED`；入队尚未消费预算，取消则为 `NOT_CONSUMED`。REJECT 不会留下可持久化的 EVM 事件，BLOCKED 预览明确标为 `chain_read`，不能冒充链上执行记录。
+7. `GET /api/v1/tasks/:id/evidence`：绑定请求参数、实际交易/事件与来源。`verification.chainVerified/hashVerified` 仅匹配业务事件后为 true；入队验证通过仍不代表付款。
 
 不要混用四种版本：`expectedRevision` 是草稿编辑版本，`draftVersion` 是报价绑定版本，`stateVersion` 是任务状态版本，`policyVersion` 是链上策略版本。
 
@@ -103,11 +109,11 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 
 ## 验证与当前证据
 
-回执 status=1 只证明交易成功执行。后端会扫描整份回执：Wallet 的 NativeTransferExecuted 证明付款，PolicyEngine 的 BudgetConsumed 证明风险决策与预算消费；二者必须来自配置地址、处于同一交易，并在 requestHash、Agent 和 USD6 成本上相符。Agent 自动执行必须对应 ALLOW。Owner 执行通常对应 REQUIRE_APPROVAL；如果 pending 期间价格下降或 Agent 风险等级降低，执行时重新判断也可能合法变为 ALLOW，审计记录保留实际决定。NativeTransferQueued 是待审批且尚未消费预算，NativeTransferCancelled 是已取消。任一执行事件缺失或参数不符，均不得将审计证据标记为已验证。
+回执 status=1 只证明交易成功执行。还需核对 Wallet 事件的同一请求：NativeTransferExecuted 才是已执行；NativeTransferQueued 是待审批；NativeTransferCancelled 是已取消。PolicyEngine 的 BudgetConsumed 记录同一 requestHash 的动作类型、策略决定和累计预算，但不能单独替代付款事件。缺预期事件或参数不符，不得显示付款成功。
 
 请求 hash 使用与合约一致的编码，绑定 domain、chainId、Wallet、Agent、收款人、amountWei、maxUsdCost6、nonce、deadline、policyVersion。它不是自然语言、模型推理与执行后完整记录的证明。结果证据来自回执/事件；一次 mined 确认不代表最终不可逆。
 
-2026 年 10 月 21 日本地验证通过类型检查、生产构建、34 项合约测试、56 项后端测试计数（含嵌套测试）和 16 条浏览器用例（钱包/Provider 组 9 条、储备组 7 条）。后端链侧使用显式假适配器；浏览器分成两组，各自从零启动真实本地 RPC、部署、SQLite、API 和界面。覆盖统一策略决策、跨消费者共享预算、消费回滚与防重放、Wallet/PolicyEngine 双事件审计、缺失或伪造策略事件的 fail-closed 校验，以及付款、Owner 审批、取消、硬预算拒绝、准备金建议重查、刷新、缺失/离线数据和 LLM 草稿边界。当前浏览器付款验证使用本地 Mock Feed；PolicyEngine v2 已在 Sepolia 完成部署与只读绑定复核，Sepolia 实际付款闭环仍待验收。
+2026 年 10 月 21 日本地验证通过类型检查、生产构建、34 项合约测试、47 项后端测试计数（含嵌套测试）和 38 条浏览器用例（钱包、网络与就绪状态组 31 条，储备组 7 条），另有 9 项离线 Mock 维护器测试及 7 项离线模型启动器测试。后端链侧使用显式假适配器；浏览器分成两组，各自从零启动真实本地 RPC、部署、SQLite、API 和界面，核对接收余额增量及对应事件。覆盖统一策略决策、跨消费者共享预算、消费回滚与防重放，以及付款、Owner 审批、取消、硬预算拒绝、网络切换、报价过期时停止付款、准备金建议重查、刷新、缺失/离线数据、LLM 草稿严格 schema、注入拦截、模型不得补全字段和无任务创建。该付款验收使用本地 Mock Feed。Sepolia v2 已核对部署与公开 Feed 绑定，尚未完成网页付款验收；只读部署检查不能代替付款证明。
 
 ## 重置本地链
 

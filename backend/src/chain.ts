@@ -122,6 +122,7 @@ export class ViemGateway implements Gateway {
     if (await this.publicClient.getChainId() !== this.config.chainId) throw new ApiError(503, 'CHAIN_MISMATCH', 'RPC chainId 与配置不一致');
   }
   async readiness() {
+    let verifiedStructure: Record<string, unknown> = {};
     try {
       await this.requireChain();
       const addresses = [this.config.walletAddress, this.config.aclAddress, this.config.attestationAddress, this.config.oracleAddress, this.config.policyEngineAddress, this.config.feedAddress];
@@ -146,13 +147,16 @@ export class ViemGateway implements Gateway {
       if (!authorized) throw new ApiError(503, 'EXECUTOR_UNAUTHORIZED', '执行账户没有 AGENT_ROLE');
       if (agentTier < 2) throw new ApiError(503, 'AGENT_FROZEN', '执行账户处于 Frozen 或 ReadOnly tier');
       if (!walletCanAttest || !walletCanApprove) throw new ApiError(503, 'WALLET_ROLE_MISSING', 'Wallet 缺少写入或审批 attestation 所需角色');
+      // These proofs permit read-only access when only price freshness fails.
+      // Do not retain them for a network, binding, deployment, or role failure.
+      verifiedStructure = { rpcChainId: this.config.chainId, contractsDeployed: true, deploymentBindingsVerified: true, executorAuthorized: true, executorConfigured: true, agentTier: Number(agentTier) };
       const quote = await this.publicClient.readContract({ address: this.config.oracleAddress, abi: oracleAbi, functionName: 'latestEthQuote', args: [1n], blockNumber: observedBlock });
       const maxAge = await this.publicClient.readContract({ address: this.config.walletAddress, abi: walletAbi, functionName: 'maxPriceAge', blockNumber: observedBlock });
       const timestamp = BigInt(snapshot.observedBlockTimestamp!);
       if (!quote[3] || quote[3] > timestamp || timestamp - quote[3] > maxAge) throw new ApiError(503, 'FEED_STALE', 'Feed 超过合约 freshness 限制');
       const funded = BigInt(snapshot.walletBalanceWei) > 0n && BigInt(snapshot.agentBalanceWei) > 0n;
       return { ready: funded, ...(!funded ? { code: 'FUNDING_REQUIRED', message: '资金池或执行账户需要测试 ETH' } : {}), rpcChainId: this.config.chainId, contractsDeployed: true, deploymentBindingsVerified: true, executorAuthorized: true, executorConfigured: true, agentTier: Number(agentTier), feedFresh: true, walletFunded: BigInt(snapshot.walletBalanceWei) > 0n, executorFunded: BigInt(snapshot.agentBalanceWei) > 0n };
-    } catch (error) { const result = chainError(error); return { ready: false, code: result.code, message: result.message }; }
+    } catch (error) { const result = chainError(error); return { ready: false, code: result.code, message: result.message, ...(result.code === 'FEED_STALE' && Object.keys(verifiedStructure).length ? { ...verifiedStructure, feedFresh: false } : {}) }; }
   }
   async snapshot(): Promise<Snapshot> {
     try {
