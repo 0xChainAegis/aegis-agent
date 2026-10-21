@@ -61,6 +61,19 @@ never committed or exposed by the API. Current records do not prove that model
 reasoning was honest; only the contract event and Chainlink-backed policy can
 establish payment outcomes.
 
+A screening hit is handled as whole-request rejection, never as sanitisation. A
+flagged message, purpose, or model-authored purpose/question yields
+`NEEDS_INPUT / PROMPT_BLOCKED` with the recipient and amount cleared and one
+fixed question, and the model is not called. The original text stays only in the
+blocked draft so that later turns on that same draft remain blocked; it never
+becomes a previewable draft. This holds for the rule parser, the LLM path,
+explicit-field edits, multi-turn inheritance and draft PATCHes. A payment that
+arrives together with an unsafe instruction is rejected as a whole; stripping
+only the unsafe clause and keeping the rest of the transfer is not an accepted
+behaviour. The scanner is a bounded heuristic, so confirmation, field validation
+and on-chain authorisation remain separate checks rather than being implied by a
+successful scan.
+
 RPC or Feed failure remains visible and never silently enables simulated success.
 The local test wallet uses public development accounts only on loopback chain
 31337. Never fund those accounts on public networks. Keep executor keys, session

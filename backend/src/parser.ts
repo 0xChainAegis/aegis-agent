@@ -68,19 +68,28 @@ function questionFor(
   return null;
 }
 
+// 产品口径（2026-10-21 确定）：命中越权/提示注入特征时整条拒绝。
+// 不保留地址和金额，也绝不退化成“剥离越权子句、保留剩余转账”的草稿；
+// 规则解析、LLM 关闭、显式字段和多轮继承都必须走这个唯一出口。
+// purpose 保留原始文本只用于让同一草稿在后续轮次继续被拦截，它本身不能变成可预览草稿。
+export const PROMPT_BLOCKED_QUESTION = '请求包含修改规则或审批状态的指令，已整条拒绝；请重新提供干净的收款地址与 ETH 金额。';
+
+export function rejectedDraft(message: string, purpose: string, parser: ParserInfo): ParsedDraft {
+  return {
+    message, recipient: null, to: null, amountWei: null,
+    purpose: purpose.slice(0, 500),
+    missingFields: ['prompt'], status: 'NEEDS_INPUT',
+    question: PROMPT_BLOCKED_QUESTION,
+    parser: { ...parser, kind: 'rule_parser', model: null, reason: 'PROMPT_BLOCKED' },
+  };
+}
+
 export function parseDraft(input: DraftInput, configuredModel: string | null, previous?: Intent, parserOverride?: ParserInfo): ParsedDraft {
   const message = input.message ?? previous?.message ?? '';
   const purpose = input.purpose ?? previous?.purpose ?? message;
   const parser: ParserInfo = parserOverride ?? { kind: 'rule_parser', model: null, configuredModel, fallback: !!configuredModel, reason: configuredModel ? 'LLM_NOT_ENABLED_RULE_PARSER_ONLY' : 'RULE_PARSER_ONLY' };
-  if (scanPrompt(message).blocked || scanPrompt(purpose).blocked) {
-    return {
-      message, recipient: null, to: null, amountWei: null,
-      purpose: purpose.slice(0, 500),
-      missingFields: ['prompt'], status: 'NEEDS_INPUT',
-      question: '请求包含修改规则或审批状态的指令；请重新提供收款地址与 ETH 金额。',
-      parser: { ...parser, kind: 'rule_parser', model: null, reason: 'PROMPT_BLOCKED' },
-    };
-  }
+  if (scanPrompt(message).blocked || scanPrompt(purpose).blocked) return rejectedDraft(message, purpose, parser);
+
   let recipient: Address | null = (previous?.recipient as Address | null) ?? null;
   let amountWei: string | null = previous?.amountWei ?? null;
   let flags = { unsupportedUnit: false, amountConflict: false, recipientConflict: false, negative: false, tooPrecise: false };
