@@ -47,9 +47,11 @@ matches the configured recipient; a missing or different address is rejected.
    requests queue for Owner `approveAndExecute`; hard-limit failures are rejected.
    Approval rechecks the original request against current conditions.
 6. Policy consumption and transfer occur in one transaction, so a failed transfer
-   rolls back the budget. Matching contract events determine task outcome. A
-   queued request or a successful receipt without the expected event is not
-   evidence of payment.
+   rolls back the budget. An executed task requires matching Wallet and
+   PolicyEngine events in the same receipt. The backend binds their request hash,
+   actor, decision and USD6 cost and persists the result with its Chainlink round.
+   A queued request or a successful receipt without both expected events is not
+   verified payment evidence.
 
 ETH quantities use integer wei; USD budgets use USD6 with upward rounding.
 Chainlink ETH/USD values transferred principal, not gas prices. Sender fees are

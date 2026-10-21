@@ -72,7 +72,7 @@ async function lowReserve(page: Page) {
 
 test('expired price preserves verified read-only balances and blocks preparation and payment', async ({ page }) => {
   const { writes } = await fixture(page, { ...verified, ready: false, code: 'FEED_STALE', feedFresh: false }, true);
-  await expect(page.locator('.service-banner')).toContainText('价格已过期，已暂停付款');
+  await expect(page.getByTestId('service-banner')).toContainText('Chainlink 报价待更新');
   await expect(page.getByTestId('reserve-balance')).toHaveText('0.001 ETH');
   await lowReserve(page);
   await expect(page.getByTestId('reserve-prepare')).toBeDisabled();
@@ -87,7 +87,7 @@ test('expired price preserves verified read-only balances and blocks preparation
 
 test('funding requirement has an actionable message and permits read-only connection', async ({ page }) => {
   const { writes } = await fixture(page, { ...verified, ready: false, code: 'FUNDING_REQUIRED', walletFunded: false }, true);
-  await expect(page.locator('.service-banner')).toContainText('补给资金池或执行账户余额不足');
+  await expect(page.getByTestId('service-banner')).toContainText('测试 ETH 余额不足');
   await expect(page.getByTestId('connect-wallet')).toBeEnabled();
   await expect(page.getByTestId('reserve-balance')).toHaveText('0.001 ETH');
   await lowReserve(page);
@@ -97,10 +97,10 @@ test('funding requirement has an actionable message and permits read-only connec
 });
 
 const unavailableCases: { name: string; readiness: Readiness; message: string }[] = [
-  { name: 'unknown', readiness: { ready: false, code: 'FUTURE_UNKNOWN_FAILURE' }, message: '服务尚未确认链上就绪状态' },
-  { name: 'RPC unavailable', readiness: { ready: false, code: 'CHAIN_UNAVAILABLE' }, message: '无法连接链上节点' },
-  { name: 'mismatched network', readiness: { ...verified, rpcChainId: 1, ready: true }, message: '网络与服务配置不一致' },
-  { name: 'stale without identity proofs', readiness: { ready: false, code: 'FEED_STALE' }, message: '价格已过期' },
+  { name: 'unknown', readiness: { ready: false, code: 'FUTURE_UNKNOWN_FAILURE' }, message: '链上状态未确认' },
+  { name: 'RPC unavailable', readiness: { ready: false, code: 'CHAIN_UNAVAILABLE' }, message: '本地链 RPC 暂不可用' },
+  { name: 'mismatched network', readiness: { ...verified, rpcChainId: 1, ready: true }, message: '网络配置不一致' },
+  { name: 'stale without identity proofs', readiness: { ready: false, code: 'FEED_STALE' }, message: 'Chainlink 报价待更新' },
 ];
 for (const { name, readiness, message } of unavailableCases) {
   test(name + ' cannot enable connection or payment', async ({ page }) => {
@@ -137,8 +137,18 @@ test('a ready session detects deterioration on refresh and immediately disables 
   await expect(page.getByTestId('reserve-prepare')).toBeEnabled();
   state.setReadiness({ ...verified, ready: false, code: 'FEED_STALE', feedFresh: false });
   await page.getByRole('button', { name: '刷新服务状态', exact: true }).click();
-  await expect(page.locator('.service-banner')).toContainText('价格已过期');
+  await expect(page.getByTestId('service-banner')).toContainText('Chainlink 报价待更新');
   await expect(page.getByTestId('reserve-prepare')).toBeDisabled();
   await expect(page.getByTestId('send-intent')).toBeDisabled();
   expect(state.writes).toEqual([]);
+});
+
+test('topbar and retry communicate the current service phase', async ({ page }) => {
+  const state = await fixture(page, ready);
+  await expect(page.getByTestId('service-status')).toContainText('本地演示 · 可操作');
+  state.setReadiness({ ready: false, code: 'CHAIN_UNAVAILABLE' });
+  await page.getByRole('button', { name: '刷新服务状态', exact: true }).click();
+  await expect(page.getByTestId('service-status')).toContainText('本地链 RPC 暂不可用');
+  await expect(page.getByTestId('service-banner')).toContainText('API 正在运行');
+  await expect(page.getByTestId('connect-wallet')).toHaveAttribute('title', /RPC 暂不可用/);
 });

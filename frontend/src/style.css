@@ -152,8 +152,15 @@ button:disabled { cursor: not-allowed; }
 .page-heading h1 { font-size:28px; line-height:1.3; font-weight:650; letter-spacing:-.025em; }
 .page-heading p { font-size:14px; color:var(--muted); margin-top:6px; }
 .eyebrow { font-size:12px; color:var(--muted); }
-.service-banner { display:flex; gap:10px; align-items:center; padding:12px 16px; border-left:3px solid var(--amber-dot); background:var(--amber-tint); color:var(--amber); margin-bottom:24px; font-size:13px; }
-.service-banner .text-button { margin-left:auto; color:inherit; }
+.service-banner { display:flex; gap:12px; align-items:flex-start; padding:14px 16px; border-left:3px solid var(--amber-dot); background:var(--amber-tint); color:var(--amber); margin-bottom:24px; font-size:13px; }
+.service-banner > .icon, .service-banner > .spinner { margin-top:3px; }
+.service-banner-copy { min-width:0; flex:1; }
+.service-banner-copy strong { display:block; color:inherit; font-size:14px; line-height:1.4; }
+.service-banner-copy p { margin-top:2px; color:var(--text-2); line-height:1.55; }
+.service-banner .text-button { margin-left:auto; color:inherit; flex:none; }
+.service-banner.red { border-left-color:var(--red-dot); background:var(--red-tint); color:var(--red); }
+.service-banner.green { border-left-color:var(--green-dot); background:var(--sage-tint); color:var(--green); }
+.service-banner.neutral { border-left-color:var(--rule-strong); background:var(--surface-2); color:var(--muted); }
 .section-head { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:12px; }
 .section-head h2 { font-size:16px; font-weight:650; }
 .intro { display:flex; flex-direction:column; align-items:center; text-align:center; padding-bottom:48px; }
@@ -515,6 +522,8 @@ button:disabled { cursor: not-allowed; }
   .nav-item > span { font-size:11px; }
   .nav-count { position:absolute; top:0; right:12%; }
   .content { padding:20px 16px calc(84px + env(safe-area-inset-bottom)); }
+  .service-banner { flex-wrap:wrap; }
+  .service-banner .text-button { width:100%; margin-left:30px; justify-content:flex-start; }
   .reserve { grid-template-columns:1fr; gap:16px; margin-bottom:24px; padding:0; }
   .wallet-card { min-height:270px; padding:24px; border-radius:18px; }
   .wallet-card-head h2 { font-size:18px; }

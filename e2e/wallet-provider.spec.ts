@@ -415,8 +415,11 @@ test('picker fixture: old private poll responses stay discarded after disconnect
       recipient: '0x3333333333333333333333333333333333333333', amountWei: '1', maxUsdCost6: '1',
     }] } });
   });
-  await page.getByRole('button', { name: '刷新服务状态', exact: true }).click();
+  // Exercise the real background poll: manual refresh intentionally locks wallet
+  // reconnect until it finishes, which would expire this gated response first.
+  await page.evaluate(() => Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }));
   await started;
+  await page.evaluate(() => Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }));
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.locator('[data-action="disconnect"]').click();
   await page.evaluate(other => {
@@ -428,6 +431,7 @@ test('picker fixture: old private poll responses stay discarded after disconnect
   const oldResponse = page.waitForResponse(response => response.url().endsWith('/api/v1/tasks'));
   release();
   const response = await oldResponse;
+  expect(response.status()).toBe(200);
   await response.finished();
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await expect(page.getByText('旧 Owner 私密任务', { exact: true })).toHaveCount(0);

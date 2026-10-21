@@ -1,6 +1,9 @@
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { verifyMessage, getAddress, type Address, type Hex } from 'viem';
-import { type Intent, type Task } from '@aegis/shared';
+import {
+  POLICY_EVIDENCE_VERIFICATION_SCOPE, POLICY_EVIDENCE_VERIFIED_FIELDS,
+  type ConfiguredPriceSource, type Intent, type PolicyEvidence, type Task,
+} from '@aegis/shared';
 import type { Config } from './config.js';
 import { Store } from './store.js';
 import { type Gateway, type Quote, type Outcome, chainError } from './chain.js';
@@ -11,7 +14,8 @@ import { ApiError, Mutex } from './errors.js';
 export interface InternalTask extends Task {
   quoteId: string; rawTransaction?: Hex; senderNonce?: string; broadcastAttempts?: number;
   lastBroadcastAt?: number; ownerObserved?: { hash: Hex; action: 'approve' | 'cancel' };
-  eventData?: Record<string, string>; lastError?: { code: string; message: string };
+  eventData?: Record<string, string>; policyEvidence?: PolicyEvidence;
+  lastError?: { code: string; message: string };
 }
 const digest = (text: string) => createHash('sha256').update(text).digest('hex');
 function canonical(value: unknown): string {
@@ -137,7 +141,7 @@ export class AegisService {
     return task;
   }
   publicTask(task: InternalTask): Task & { lastError?: InternalTask['lastError'] } {
-    const { rawTransaction: _raw, broadcastAttempts: _attempts, lastBroadcastAt: _last, senderNonce: _nonce, ownerObserved: _owner, eventData: _event, quoteId: _quote, ...safe } = task;
+    const { rawTransaction: _raw, broadcastAttempts: _attempts, lastBroadcastAt: _last, senderNonce: _nonce, ownerObserved: _owner, eventData: _event, policyEvidence: _policy, quoteId: _quote, ...safe } = task;
     return safe;
   }
   private save(task: InternalTask) {
@@ -155,6 +159,7 @@ export class AegisService {
       task.status = outcome.status; task.attestationId = outcome.attestationId ?? task.attestationId;
       task.reasonCodes = outcome.reasonCode ? [outcome.reasonCode] : outcome.status === 'AWAITING_APPROVAL' ? task.reasonCodes.length ? task.reasonCodes : ['OWNER_APPROVAL_REQUIRED'] : [];
       task.eventData = outcome.eventData;
+      task.policyEvidence = outcome.policyEvidence;
       task.verification = { kind: 'chain', chainVerified: outcome.status !== 'FAILED', hashVerified: outcome.status !== 'FAILED' };
       delete task.lastError;
       if (ownerAction) delete task.ownerObserved;
@@ -184,13 +189,40 @@ export class AegisService {
   }
   evidence(owner: Address, id: string) {
     const task = this.getTask(owner, id);
+    const quote = this.store.get<Quote>('quote', task.quoteId, owner);
+    const previewPolicy = quote ? {
+      source: this.config.mode === 'mock' ? 'mock' : 'chain_read',
+      decision: quote.decision === 'AUTO' ? 'ALLOW' : quote.decision === 'OWNER_APPROVAL' ? 'REQUIRE_APPROVAL' : 'REJECT',
+      reasonCodes: quote.reasonCodes, costUsd6: quote.costUsd6, maxUsdCost6: quote.maxUsdCost6,
+      policyVersion: quote.policyVersion, observedBlockNumber: quote.observedBlockNumber,
+      observedBlockHash: quote.observedBlockHash, oracle: quote.oracle,
+    } : null;
+    const receipt = task.policyEvidence;
+    // Older stored rows also contain configuration addresses; only project receipt facts.
+    const policy = receipt ? {
+      engineAddress: receipt.engineAddress, event: receipt.event, actionType: receipt.actionType,
+      decision: receipt.decision, requestHash: receipt.requestHash, actor: receipt.actor,
+      costUsd6: receipt.costUsd6, day: receipt.day, spentUsd6: receipt.spentUsd6,
+      transactionHash: receipt.transactionHash, policyVersion: receipt.policyVersion,
+      roundId: receipt.roundId, updatedAtSeconds: receipt.updatedAtSeconds,
+      blockNumber: receipt.blockNumber, blockHash: receipt.blockHash, logIndex: receipt.logIndex,
+      verified: true, verificationScope: POLICY_EVIDENCE_VERIFICATION_SCOPE,
+      verifiedFields: POLICY_EVIDENCE_VERIFIED_FIELDS, consumed: true, state: 'VERIFIED',
+    } : {
+      engineAddress: this.config.policyEngineAddress, consumed: false, verified: false,
+      state: task.status === 'AWAITING_APPROVAL' ? 'WAITING_FOR_EXECUTION' : task.status === 'CANCELLED' ? 'NOT_CONSUMED' : 'UNVERIFIED',
+    };
+    const configuredPriceSource: ConfiguredPriceSource = {
+      oracleAddress: this.config.oracleAddress, feedAddress: this.config.feedAddress,
+      verified: false, scope: 'CURRENT_CONFIGURATION',
+    };
     return {
       taskId: id, status: task.status, chainId: task.chainId, verification: task.verification,
       intent: { draftId: task.draftId, draftVersion: task.draftVersion, walletAddress: task.walletAddress, agentAddress: task.agentAddress, recipient: task.recipient, amountWei: task.amountWei, maxUsdCost6: task.maxUsdCost6, policyVersion: task.policyVersion, requestNonce: task.requestNonce, requestDeadlineSeconds: task.requestDeadlineSeconds, requestHash: task.requestHash },
-      attestationId: task.attestationId, transactions: task.transactions, outcome: task.eventData ?? null,
+      attestationId: task.attestationId, transactions: task.transactions, outcome: task.eventData ?? null, previewPolicy, policy, configuredPriceSource,
       approvalMode: 'owner_approve_and_execute', finality: 'mined_is_not_irreversible', confirmationsRequired: 1,
       explorerBaseUrl: this.config.mode === 'testnet' ? 'https://sepolia.etherscan.io' : null,
-      sources: { planner: task.parser.kind, quote: this.config.mode === 'mock' ? 'mock' : 'chain', transaction: this.config.mode === 'mock' ? 'none' : 'chain', evidence: task.verification.chainVerified ? 'contract_event' : 'unverified' },
+      sources: { planner: task.parser.kind, quote: this.config.mode === 'mock' ? 'mock' : 'chain', transaction: this.config.mode === 'mock' ? 'none' : 'chain', evidence: task.policyEvidence ? 'wallet_and_policy_contract_events' : task.verification.chainVerified ? 'wallet_contract_event' : 'unverified' },
     };
   }
   async tick() {

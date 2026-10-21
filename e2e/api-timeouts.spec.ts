@@ -11,7 +11,7 @@ test('intent deadlines follow the live model budget without extending payment de
   const wallet = '0x2222222222222222222222222222222222222222';
   const recipient = '0x3333333333333333333333333333333333333333';
   const agent = '0x4444444444444444444444444444444444444444';
-  const config = {mode:'local_chain',chainId:31337,ownerAddress:owner,walletAddress:wallet,recipientAddress:recipient,agentAddress:agent,readiness:{ready:true,rpcChainId:31337,contractsDeployed:true,deploymentBindingsVerified:true}};
+  const config = {mode:'local_chain',chainId:31337,ownerAddress:owner,walletAddress:wallet,recipientAddress:recipient,agentAddress:agent,readiness:{ready:true,rpcChainId:31337,contractsDeployed:true,deploymentBindingsVerified:true,feedFresh:true}};
   const draft = {draftId:'draft-1',status:'READY',revision:1,recipient,amountWei:'1',purpose:'Timeout fixture'};
   const task = {taskId:'task-1',status:'SUBMITTING',chainId:31337,ownerAddress:owner,walletAddress:wallet,recipient,agentAddress:agent,amountWei:'1',maxUsdCost6:'2'};
   await page.route('**/api/v1/**', route => {

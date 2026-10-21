@@ -13,6 +13,26 @@ export interface TransactionEvidence {
   role: 'request' | 'approve' | 'cancel'; hash: Hex; receiptStatus?: number; blockNumber?: string;
   blockHash?: Hex; event?: string; senderNonce?: string; finality?: 'mined' | 'pending';
 }
+export const POLICY_EVIDENCE_VERIFICATION_SCOPE = 'MATCHED_WALLET_AND_POLICY_RECEIPT_EVENTS' as const;
+export const POLICY_EVIDENCE_VERIFIED_FIELDS = [
+  'engineAddress', 'event', 'actionType', 'decision', 'requestHash', 'actor',
+  'costUsd6', 'day', 'spentUsd6', 'transactionHash', 'policyVersion',
+  'roundId', 'updatedAtSeconds', 'blockNumber', 'blockHash', 'logIndex',
+] as const;
+export interface ConfiguredPriceSource {
+  oracleAddress: Hex; feedAddress: Hex;
+  verified: false; scope: 'CURRENT_CONFIGURATION';
+}
+export interface PolicyEvidence {
+  engineAddress: Hex; event: 'BudgetConsumed'; actionType: 'NATIVE_TRANSFER';
+  decision: 'ALLOW' | 'REQUIRE_APPROVAL'; requestHash: Hex; actor: Hex;
+  costUsd6: string; day: string; spentUsd6: string; transactionHash: Hex;
+  policyVersion: string;
+  roundId: string; updatedAtSeconds: string;
+  blockNumber: string; blockHash: Hex; logIndex: number; verified: true;
+  verificationScope: typeof POLICY_EVIDENCE_VERIFICATION_SCOPE;
+  verifiedFields: typeof POLICY_EVIDENCE_VERIFIED_FIELDS;
+}
 export interface Task {
   taskId: string; draftId: string; intentId: string; draftVersion: number; stateVersion: number;
   status: TaskStatus; chainId: number; walletAddress: Hex; ownerAddress: Hex; agentAddress: Hex;
@@ -51,4 +71,7 @@ export const walletAbiSignatures = [
 export const oracleAbiSignatures = [
   'function latestEthQuote(uint256 amountWei) view returns (uint256 costUsd6,uint80 roundId,int256 answer,uint256 updatedAt,uint8 decimals)',
   'function feeds(address token) view returns (address)',
+] as const;
+export const policyEngineAbiSignatures = [
+  'event BudgetConsumed(bytes32 indexed requestHash,uint8 indexed actionType,address indexed actor,uint8 decision,uint256 costUsd6,uint256 day,uint256 spentUsd6)',
 ] as const;

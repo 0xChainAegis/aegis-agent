@@ -4,7 +4,11 @@ import {
   type Address, type Hex,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { walletAbiSignatures, oracleAbiSignatures, type Task, type TransactionEvidence } from '@aegis/shared';
+import {
+  walletAbiSignatures, oracleAbiSignatures, policyEngineAbiSignatures,
+  POLICY_EVIDENCE_VERIFICATION_SCOPE, POLICY_EVIDENCE_VERIFIED_FIELDS,
+  type PolicyEvidence, type Task, type TransactionEvidence,
+} from '@aegis/shared';
 import type { Config } from './config.js';
 import { ApiError, errorMessage } from './errors.js';
 
@@ -31,7 +35,8 @@ const oracleBindingAbi = parseAbi([
   'function feeds(address token) view returns (address)',
   'function configurationLocked() view returns (bool)',
 ]);
-const policyEngineAbi = parseAbi([
+export const policyEngineAbi = parseAbi([
+  ...policyEngineAbiSignatures,
   'function owner() view returns (address)',
   'function acl() view returns (address)',
   'function oracle() view returns (address)',
@@ -66,7 +71,7 @@ export interface Prepared {
 export interface Outcome {
   status: 'EXECUTED' | 'AWAITING_APPROVAL' | 'CANCELLED' | 'FAILED';
   transaction: TransactionEvidence; attestationId?: string; reasonCode?: string;
-  eventData?: Record<string, string>;
+  eventData?: Record<string, string>; policyEvidence?: PolicyEvidence;
 }
 export interface Gateway {
   readiness(): Promise<Record<string, unknown>>;
@@ -297,23 +302,65 @@ export class ViemGateway implements Gateway {
     if (!equal(transaction.from, sender) || !transaction.to || !equal(transaction.to, this.config.walletAddress) || !equal(transaction.input, expected) || transaction.value !== 0n) throw new ApiError(422, 'TX_BINDING_MISMATCH', '交易的 sender、合约、calldata 或金额不属于该任务');
     const evidence: TransactionEvidence = { role, hash, receiptStatus: receipt.status === 'success' ? 1 : 0, blockNumber: receipt.blockNumber.toString(), blockHash: receipt.blockHash, senderNonce: transaction.nonce.toString(), finality: 'mined' };
     if (receipt.status !== 'success') return { status: 'FAILED', transaction: evidence, reasonCode: 'TX_REVERTED' };
-    for (const log of receipt.logs) {
-      if (!equal(log.address, this.config.walletAddress)) continue;
-      let decoded;
-      try { decoded = decodeEventLog({ abi: walletAbi, data: log.data, topics: log.topics, strict: true }); } catch { continue; }
-      if (!['NativeTransferExecuted', 'NativeTransferQueued', 'NativeTransferCancelled'].includes(decoded.eventName)) continue;
-      const args = decoded.args as unknown as Record<string, string | bigint>;
-      if (!equal(String(args.requestHash), task.requestHash!)) continue;
-      if (task.attestationId && String(args.attestationId) !== task.attestationId) continue;
-      if (decoded.eventName === 'NativeTransferCancelled') {
-        if (role !== 'cancel') continue;
-        return { status: 'CANCELLED', attestationId: String(args.attestationId), transaction: { ...evidence, event: decoded.eventName }, eventData: Object.fromEntries(Object.entries(args).map(([k, v]) => [k, String(v)])) };
+    let walletEvent: { eventName: 'NativeTransferExecuted' | 'NativeTransferQueued' | 'NativeTransferCancelled'; args: Record<string, string | bigint> } | undefined;
+    let policyEvent: { args: Record<string, string | bigint>; logIndex: number } | undefined;
+    let sawPolicyEvent = false;
+    for (const [index, log] of receipt.logs.entries()) {
+      if (equal(log.address, this.config.walletAddress)) {
+        let decoded;
+        try { decoded = decodeEventLog({ abi: walletAbi, data: log.data, topics: log.topics, strict: true }); } catch { continue; }
+        if (!['NativeTransferExecuted', 'NativeTransferQueued', 'NativeTransferCancelled'].includes(decoded.eventName)) continue;
+        const args = decoded.args as unknown as Record<string, string | bigint>;
+        if (!task.requestHash || !equal(String(args.requestHash), task.requestHash)) continue;
+        if (task.attestationId && String(args.attestationId) !== task.attestationId) continue;
+        if (decoded.eventName === 'NativeTransferCancelled') {
+          if (role === 'cancel') walletEvent = { eventName: decoded.eventName, args };
+          continue;
+        }
+        if (role === 'cancel' || !equal(String(args.agent), task.agentAddress) || !equal(String(args.to), task.recipient) || String(args.amountWei) !== task.amountWei || String(args.policyVersion) !== task.policyVersion) continue;
+        if (decoded.eventName === 'NativeTransferQueued' && (role !== 'request' || String(args.maxUsdCost6) !== task.maxUsdCost6 || String(args.deadline) !== String(task.requestDeadlineSeconds))) continue;
+        walletEvent = { eventName: decoded.eventName, args };
+        continue;
       }
-      if (!equal(String(args.agent), task.agentAddress) || !equal(String(args.to), task.recipient) || String(args.amountWei) !== task.amountWei || String(args.policyVersion) !== task.policyVersion) continue;
-      if (role === 'cancel') continue;
-      if (decoded.eventName === 'NativeTransferQueued' && (role !== 'request' || String(args.maxUsdCost6) !== task.maxUsdCost6 || String(args.deadline) !== String(task.requestDeadlineSeconds))) continue;
-      return { status: decoded.eventName === 'NativeTransferExecuted' ? 'EXECUTED' : 'AWAITING_APPROVAL', attestationId: String(args.attestationId), transaction: { ...evidence, event: decoded.eventName }, eventData: Object.fromEntries(Object.entries(args).map(([k, v]) => [k, String(v)])) };
+      if (!equal(log.address, this.config.policyEngineAddress)) continue;
+      let decoded;
+      try { decoded = decodeEventLog({ abi: policyEngineAbi, data: log.data, topics: log.topics, strict: true }); } catch { continue; }
+      if (decoded.eventName !== 'BudgetConsumed') continue;
+      sawPolicyEvent = true;
+      const args = decoded.args as unknown as Record<string, string | bigint>;
+      const decision = BigInt(args.decision);
+      const decisionMatchesExecution = role === 'request' ? decision === 1n : role === 'approve' ? decision === 1n || decision === 2n : false;
+      if (!task.requestHash || !equal(String(args.requestHash), task.requestHash) || !equal(String(args.actor), task.agentAddress)) continue;
+      if (BigInt(args.actionType) !== 0n || !decisionMatchesExecution) continue;
+      policyEvent = { args, logIndex: Number(log.logIndex ?? index) };
     }
-    return { status: 'FAILED', transaction: evidence, reasonCode: 'EXPECTED_EVENT_MISSING' };
+    if (!walletEvent) return { status: 'FAILED', transaction: evidence, reasonCode: 'EXPECTED_EVENT_MISSING' };
+    const eventData = Object.fromEntries(Object.entries(walletEvent.args).map(([key, value]) => [key, String(value)]));
+    const boundTransaction = { ...evidence, event: walletEvent.eventName };
+    if (walletEvent.eventName === 'NativeTransferCancelled') {
+      if (sawPolicyEvent) return { status: 'FAILED', transaction: boundTransaction, reasonCode: 'UNEXPECTED_POLICY_EVENT' };
+      return { status: 'CANCELLED', attestationId: String(walletEvent.args.attestationId), transaction: boundTransaction, eventData };
+    }
+    if (walletEvent.eventName === 'NativeTransferQueued') {
+      if (sawPolicyEvent) return { status: 'FAILED', transaction: boundTransaction, reasonCode: 'UNEXPECTED_POLICY_EVENT' };
+      return { status: 'AWAITING_APPROVAL', attestationId: String(walletEvent.args.attestationId), transaction: boundTransaction, eventData };
+    }
+    if (!policyEvent) return { status: 'FAILED', transaction: boundTransaction, reasonCode: sawPolicyEvent ? 'POLICY_EVENT_MISMATCH' : 'POLICY_EVENT_MISSING' };
+    const policyCost = String(policyEvent.args.costUsd6);
+    if (policyCost !== String(walletEvent.args.costUsd6) || BigInt(policyEvent.args.spentUsd6) < BigInt(policyEvent.args.costUsd6)) {
+      return { status: 'FAILED', transaction: boundTransaction, reasonCode: 'POLICY_EVENT_MISMATCH' };
+    }
+    const decision = BigInt(policyEvent.args.decision) === 1n ? 'ALLOW' : 'REQUIRE_APPROVAL';
+    const policyEvidence: PolicyEvidence = {
+      engineAddress: this.config.policyEngineAddress, event: 'BudgetConsumed', actionType: 'NATIVE_TRANSFER', decision,
+      requestHash: String(policyEvent.args.requestHash) as Hex, actor: String(policyEvent.args.actor) as Hex,
+      costUsd6: policyCost, day: String(policyEvent.args.day), spentUsd6: String(policyEvent.args.spentUsd6),
+      policyVersion: String(walletEvent.args.policyVersion),
+      roundId: String(walletEvent.args.roundId), updatedAtSeconds: String(walletEvent.args.updatedAt),
+      transactionHash: hash, blockNumber: receipt.blockNumber.toString(), blockHash: receipt.blockHash,
+      logIndex: policyEvent.logIndex, verified: true,
+      verificationScope: POLICY_EVIDENCE_VERIFICATION_SCOPE, verifiedFields: POLICY_EVIDENCE_VERIFIED_FIELDS,
+    };
+    return { status: 'EXECUTED', attestationId: String(walletEvent.args.attestationId), transaction: boundTransaction, eventData, policyEvidence };
   }
 }

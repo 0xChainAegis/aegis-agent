@@ -42,8 +42,10 @@ request nonce and request hash. An uncertain broadcast is reconciled against the
 original hash; recovery may rebroadcast identical bytes, never automatically
 create a replacement payment. One process owns each executor/database.
 
-A matching wallet execution event is required for `EXECUTED`. Approval hints are
-independently checked against sender, target, calldata, receipt and event binding.
+A matching Wallet execution event and PolicyEngine budget event in the same
+receipt are required for `EXECUTED`. Their request hash, actor, action type,
+decision and USD6 cost must agree. Approval hints are independently checked
+against sender, target, calldata, receipt and event binding.
 One mined confirmation is not irreversible finality. Multi-process signing and
 deep-reorganization recovery are not implemented; a local chain reset requires
 a fresh matching database rather than reusing old transaction evidence.

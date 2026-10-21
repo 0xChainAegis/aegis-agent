@@ -8,11 +8,11 @@ const addresses = {
   agentAddress: '0x4444444444444444444444444444444444444444',
 };
 const structural = { rpcChainId: 31337, contractsDeployed: true, deploymentBindingsVerified: true };
-const config = { chainId: 31337, ...addresses };
+const config = { mode: 'local_chain', chainId: 31337, ...addresses };
 
 describe('service readiness permissions', () => {
   it('allows payment only for explicitly ready and structurally verified service', () => {
-    expect(serviceReadiness({ ...config, readiness: { ...structural, ready: true } })).toEqual({ canConnect: true, canPay: true, message: '' });
+    expect(serviceReadiness({ ...config, readiness: { ...structural, ready: true } })).toMatchObject({ phase: 'ready', code: 'READY', title: '本地演示可用', canConnect: true, canPay: true });
     for (const readiness of [
       { ...structural, ready: false }, { ready: true }, { ...structural, contractsDeployed: false, ready: true },
       { ...structural, deploymentBindingsVerified: false, ready: true }, { ...structural, ready: true, code: 'UNKNOWN' },
@@ -25,32 +25,36 @@ describe('service readiness permissions', () => {
   });
 
   it.each([
-    ['FEED_STALE', '价格已过期'],
-    ['FUNDING_REQUIRED', '余额不足'],
-  ])('allows verified %s read-only connection while blocking payment', (code, message) => {
+    ['FEED_STALE', 'Chainlink 报价待更新'],
+    ['FUNDING_REQUIRED', '测试 ETH 余额不足'],
+  ])('allows verified %s read-only connection while blocking payment', (code, title) => {
     const result = serviceReadiness({ ...config, readiness: { ...structural, ready: false, code } });
     expect(result.canConnect).toBe(true);
     expect(result.canPay).toBe(false);
-    expect(result.message).toContain(message);
+    expect(result.title).toBe(title);
+    expect(result.message).toContain('付款已暂停');
     expect(serviceReadiness({ ...config, readiness: { ready: false, code } }).canConnect).toBe(false);
   });
 
   it.each([
-    ['CHAIN_UNAVAILABLE', '无法连接链上节点'], ['RPC_UNAVAILABLE', '无法连接链上节点'],
-    ['DEPLOYMENT_MISSING', '部署配置'], ['OWNER_MISMATCH', '部署配置'],
-    ['EXECUTOR_MISMATCH', '部署配置'], ['UNRECOGNIZED_FAILURE', '尚未确认链上就绪状态'],
-  ])('keeps %s stopped and gives the relevant explanation', (code, message) => {
+    ['CHAIN_UNAVAILABLE', '本地链 RPC 暂不可用'], ['RPC_UNAVAILABLE', '本地链 RPC 暂不可用'],
+    ['DEPLOYMENT_MISSING', '合约配置未就绪'], ['OWNER_MISMATCH', '合约配置未就绪'],
+    ['EXECUTOR_MISMATCH', '合约配置未就绪'], ['UNRECOGNIZED_FAILURE', '链上状态未确认'],
+  ])('keeps %s stopped and gives the relevant explanation', (code, title) => {
     const result = serviceReadiness({ ...config, readiness: { ...structural, ready: false, code } });
     expect(result.canConnect).toBe(false);
     expect(result.canPay).toBe(false);
-    expect(result.message).toContain(message);
+    expect(result.title).toBe(title);
+    expect(result.message).not.toBe('');
+    expect(result.actionLabel).not.toBe('');
   });
 
   it('prioritizes wrong-network evidence over a stale-price label', () => {
     const result = serviceReadiness({ ...config, readiness: { ...structural, rpcChainId: 1, ready: false, code: 'FEED_STALE' } });
     expect(result.canConnect).toBe(false);
     expect(result.canPay).toBe(false);
-    expect(result.message).toContain('网络与服务配置不一致');
+    expect(result.code).toBe('CHAIN_MISMATCH');
+    expect(result.title).toBe('网络配置不一致');
   });
 
   it.each(['walletAddress', 'ownerAddress', 'recipientAddress', 'agentAddress'])('rejects an invalid or zero %s', key => {
@@ -58,7 +62,8 @@ describe('service readiness permissions', () => {
       const result = serviceReadiness({ ...config, [key]: address, readiness: { ...structural, ready: true } });
       expect(result.canConnect).toBe(false);
       expect(result.canPay).toBe(false);
-      expect(result.message).toContain('配置不完整');
+      expect(result.code).toBe('CONFIG_INVALID');
+      expect(result.title).toContain('配置不完整');
     }
   });
 

@@ -106,7 +106,7 @@ test('invalid settings and missing/offline data never prepare a payment',async({
  // Offline: every API call fails.
  await page.route('**/api/v1/**',route=>route.abort());
  await page.locator('[data-action="refresh"]').first().click();
- await expect(page.getByText('服务离线',{exact:true})).toBeVisible();
+ await expect(page.getByTestId('service-banner').getByText('API 离线',{exact:true})).toBeVisible();
  await expect(card).toHaveAttribute('data-state','unavailable');
  await expect(page.getByTestId('reserve-balance')).toHaveText('— ETH');
  await expect(page.getByTestId('reserve-prepare')).toHaveCount(0);

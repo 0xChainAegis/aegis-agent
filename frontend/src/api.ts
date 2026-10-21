@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ConfigResponseSchema } from './schemas';
 
 export type Data = Record<string, unknown>;
 
@@ -21,14 +22,10 @@ const timestampSchema = z.string().refine(value => Number.isFinite(Date.parse(va
 const statusSchema = z.enum(['DRAFT', 'NEEDS_INPUT', 'READY', 'SUBMITTING', 'BROADCAST', 'UNKNOWN', 'AWAITING_APPROVAL', 'EXECUTED', 'BLOCKED', 'REQUOTE_REQUIRED', 'CANCELLED', 'EXPIRED', 'FAILED']);
 export const sessionTokenSchema = z.string().min(1).max(4096).regex(/^[\x21-\x7E]+$/);
 
-export const configResponseSchema = z.looseObject({
-  mode: z.enum(['local_chain', 'testnet', 'mock']), chainId: positiveIntegerSchema,
-  walletAddress: addressSchema, ownerAddress: addressSchema, recipientAddress: addressSchema, agentAddress: addressSchema,
+export const configResponseSchema = ConfigResponseSchema.extend({
+  chainId: positiveIntegerSchema,
   rpcUrl: httpUrlSchema.nullable().optional(), explorerBaseUrl: httpUrlSchema.nullable().optional(),
-  readiness: z.looseObject({
-    ready: z.boolean(), code: z.string().optional(), message: z.string().optional(), rpcChainId: positiveIntegerSchema.optional(),
-    contractsDeployed: z.boolean().optional(), deploymentBindingsVerified: z.boolean().optional(), feedFresh: z.boolean().optional(),
-  }),
+  localTestWalletAvailable: z.boolean().optional(),
   planner: z.looseObject({ mode: z.enum(['off', 'stub', 'live']), timeoutMs: z.number().int().min(1).max(30_000) }).optional(),
 });
 export const authChallengeResponseSchema = z.looseObject({

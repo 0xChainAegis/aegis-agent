@@ -3,8 +3,15 @@
   "version": "0.2.0",
   "private": true,
   "description": "Aegis wallet integration workspace",
-  "workspaces": ["frontend", "backend", "packages/shared", "contracts"],
-  "engines": { "node": ">=24.0.0" },
+  "workspaces": [
+    "frontend",
+    "backend",
+    "packages/shared",
+    "contracts"
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:frontend": "npm run dev --workspace frontend",
@@ -24,7 +31,10 @@
     "test:local-mock": "node --test scripts/test-local-mock-feed.mjs",
     "check": "npm run typecheck && npm run build && npm test",
     "verify": "npm run check && npm run test:e2e",
-    "verify:setup": "node -e \"if(Number(process.versions.node.split('.')[0])<24){console.error('Node.js 24 or newer is required.');process.exit(1)}\" && npm ci --ignore-scripts --no-audit --no-fund && playwright install chromium"
+    "verify:setup": "node -e \"if(Number(process.versions.node.split('.')[0])<24){console.error('Node.js 24 or newer is required.');process.exit(1)}\" && npm ci --ignore-scripts --no-audit --no-fund && playwright install chromium",
+    "test:vitest": "npm run test:frontend"
   },
-  "devDependencies": { "@playwright/test": "^1.56.0" }
+  "devDependencies": {
+    "@playwright/test": "^1.56.0"
+  }
 }
