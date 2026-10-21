@@ -1,3 +1,5 @@
+import { ApiObjectSchema, ConfigResponseSchema, SessionTokenSchema } from './schemas';
+
 export type Data = Record<string, unknown>;
 
 export class ApiError extends Error {
@@ -6,7 +8,7 @@ export class ApiError extends Error {
   }
 }
 
-let token = sessionStorage.getItem('aegis.session') || '';
+let token = SessionTokenSchema.catch('').parse(sessionStorage.getItem('aegis.session') || '');
 const pendingMutationKeys = new Map<string, string>();
 let intentTimeoutMs = 12_000;
 
@@ -42,7 +44,12 @@ export async function api<T = Data>(path: string, method = 'GET', body?: Data): 
     });
     const raw = await response.text();
     let data: Data;
-    try { data = raw ? JSON.parse(raw) : {}; }
+    try {
+      const decoded: unknown = raw ? JSON.parse(raw) : {};
+      const parsed = ApiObjectSchema.safeParse(decoded);
+      if (!parsed.success) throw new Error('Response must be an object');
+      data = parsed.data;
+    }
     catch { throw new ApiError(response.status, 'INVALID_RESPONSE', '服务返回了无法读取的结果，请检查后端是否启动。'); }
     if (!response.ok) {
       const error = data.error && typeof data.error === 'object' ? data.error as Data : data;
@@ -52,6 +59,9 @@ export async function api<T = Data>(path: string, method = 'GET', body?: Data): 
     }
     if (fingerprint) pendingMutationKeys.delete(fingerprint);
     if (method === 'GET' && path === '/config') {
+      const config = ConfigResponseSchema.safeParse(data);
+      if (!config.success) throw new ApiError(response.status, 'CONFIG_INVALID', '服务配置未通过安全校验，请检查后端版本和部署配置。', config.error.flatten());
+      data = config.data;
       const planner = data.planner && typeof data.planner === 'object' ? data.planner as Data : {};
       const modelTimeout = Number(planner.timeoutMs);
       intentTimeoutMs = planner.mode === 'live' && Number.isInteger(modelTimeout) && modelTimeout >= 1 && modelTimeout <= 30_000
