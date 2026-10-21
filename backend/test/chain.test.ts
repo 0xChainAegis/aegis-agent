@@ -12,7 +12,7 @@ import {
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import type { Task } from '@aegis/shared';
-import { ViemGateway, walletAbi } from '../src/chain.js';
+import { ViemGateway, policyEngineAbi, walletAbi } from '../src/chain.js';
 import { loadConfig, LOCAL_AGENT_KEY, type Config } from '../src/config.js';
 import { ApiError } from '../src/errors.js';
 
@@ -189,7 +189,7 @@ function requestInput(current: Task) {
   });
 }
 
-function executedLog(current: Task, options: { address?: Address; hash?: Hex } = {}) {
+function executedLog(current: Task, options: { address?: Address; hash?: Hex; costUsd6?: bigint } = {}) {
   const hash = options.hash ?? current.requestHash!;
   return {
     address: options.address ?? wallet,
@@ -200,17 +200,58 @@ function executedLog(current: Task, options: { address?: Address; hash?: Hex } =
     }),
     data: encodeAbiParameters(
       parseAbiParameters('address,uint256,uint256,uint80,uint256,uint64'),
-      [recipient, BigInt(current.amountWei), 3_000_000n, 1n, 1_999_999_999n, BigInt(current.policyVersion)],
+      [recipient, BigInt(current.amountWei), options.costUsd6 ?? 3_000_000n, 1n, 1_999_999_999n, BigInt(current.policyVersion)],
     ),
+    logIndex: 1,
+  };
+}
+
+function budgetLog(current: Task, options: {
+  address?: Address; hash?: Hex; actor?: Address; actionType?: number;
+  decision?: number; costUsd6?: bigint; spentUsd6?: bigint;
+} = {}) {
+  return {
+    address: options.address ?? policyEngine,
+    topics: encodeEventTopics({
+      abi: policyEngineAbi,
+      eventName: 'BudgetConsumed',
+      args: {
+        requestHash: options.hash ?? current.requestHash!,
+        actionType: options.actionType ?? 0,
+        actor: options.actor ?? agent.address,
+      },
+    }),
+    data: encodeAbiParameters(
+      parseAbiParameters('uint8,uint256,uint256,uint256'),
+      [options.decision ?? 1, options.costUsd6 ?? 3_000_000n, 20_000n, options.spentUsd6 ?? 3_000_000n],
+    ),
+    logIndex: 0,
+  };
+}
+
+function queuedLog(current: Task) {
+  return {
+    address: wallet,
+    topics: encodeEventTopics({
+      abi: walletAbi,
+      eventName: 'NativeTransferQueued',
+      args: { requestHash: current.requestHash!, attestationId: 1n, agent: agent.address },
+    }),
+    data: encodeAbiParameters(
+      parseAbiParameters('address,uint256,uint256,uint64,uint64'),
+      [recipient, BigInt(current.amountWei), BigInt(current.maxUsdCost6), BigInt(current.requestDeadlineSeconds), BigInt(current.policyVersion)],
+    ),
+    logIndex: 0,
   };
 }
 
 function harness(options: {
   from?: Address; to?: Address | null; input?: Hex; value?: bigint;
-  receiptStatus?: 'success' | 'reverted'; logs?: ReturnType<typeof executedLog>[];
-  missingReceipt?: boolean;
+  receiptStatus?: 'success' | 'reverted'; logs?: Array<ReturnType<typeof executedLog> | ReturnType<typeof budgetLog> | ReturnType<typeof queuedLog>>;
+  missingReceipt?: boolean; role?: 'request' | 'approve';
 } = {}) {
   const current = task();
+  if (options.role === 'approve') current.attestationId = '1';
   const gateway = new ViemGateway(gatewayConfig());
   const client = gateway.publicClient as any;
   client.getChainId = async () => 31337;
@@ -218,20 +259,22 @@ function harness(options: {
     if (options.missingReceipt) throw new Error('Transaction receipt could not be found');
     return {
       status: options.receiptStatus ?? 'success', blockNumber: 2n, blockHash,
-      logs: options.logs ?? [executedLog(current)],
+      logs: options.logs ?? [budgetLog(current, { decision: options.role === 'approve' ? 2 : 1 }), executedLog(current)],
     };
   };
   client.getTransaction = async () => ({
-    from: options.from ?? agent.address,
+    from: options.from ?? (options.role === 'approve' ? owner : agent.address),
     to: options.to === undefined ? wallet : options.to,
-    input: options.input ?? requestInput(current),
+    input: options.input ?? (options.role === 'approve'
+      ? encodeFunctionData({ abi: walletAbi, functionName: 'approveAndExecute', args: [1n] })
+      : requestInput(current)),
     value: options.value ?? 0n,
     nonce: 7,
   });
   return { current, gateway };
 }
 
-test('ViemGateway outcome accepts only a bound transaction with the matching wallet event', async () => {
+test('ViemGateway outcome binds matching Wallet and PolicyEngine evidence', async () => {
   const { current, gateway } = harness();
   const outcome = await gateway.outcome(current, transactionHash, 'request');
   assert.equal(outcome?.status, 'EXECUTED');
@@ -239,6 +282,31 @@ test('ViemGateway outcome accepts only a bound transaction with the matching wal
   assert.equal(outcome?.transaction.event, 'NativeTransferExecuted');
   assert.equal(outcome?.eventData?.requestHash, requestHash);
   assert.equal(outcome?.eventData?.amountWei, current.amountWei);
+  assert.equal(outcome?.policyEvidence?.decision, 'ALLOW');
+  assert.equal(outcome?.policyEvidence?.costUsd6, '3000000');
+  assert.equal(outcome?.policyEvidence?.spentUsd6, '3000000');
+  assert.equal(outcome?.policyEvidence?.engineAddress, policyEngine);
+  assert.equal(outcome?.policyEvidence?.policyVersion, current.policyVersion);
+  assert.equal(outcome?.policyEvidence?.oracleAddress, oracle);
+  assert.equal(outcome?.policyEvidence?.feedAddress, feed);
+  assert.equal(outcome?.policyEvidence?.roundId, '1');
+  assert.equal(outcome?.policyEvidence?.updatedAtSeconds, '1999999999');
+  assert.equal(outcome?.policyEvidence?.verified, true);
+});
+
+test('ViemGateway records REQUIRE_APPROVAL for an owner execution', async () => {
+  const { current, gateway } = harness({ role: 'approve' });
+  const outcome = await gateway.outcome(current, transactionHash, 'approve');
+  assert.equal(outcome?.status, 'EXECUTED');
+  assert.equal(outcome?.policyEvidence?.decision, 'REQUIRE_APPROVAL');
+});
+
+test('ViemGateway accepts an ALLOW re-evaluation in an owner execution after risk falls', async () => {
+  const base = task();
+  const { current, gateway } = harness({ role: 'approve', logs: [budgetLog(base, { decision: 1 }), executedLog(base)] });
+  const outcome = await gateway.outcome(current, transactionHash, 'approve');
+  assert.equal(outcome?.status, 'EXECUTED');
+  assert.equal(outcome?.policyEvidence?.decision, 'ALLOW');
 });
 
 test('ViemGateway rejects transaction sender, target, calldata, and value mismatches', async t => {
@@ -262,8 +330,8 @@ test('ViemGateway rejects transaction sender, target, calldata, and value mismat
 test('ViemGateway does not accept wrong hashes, foreign contract logs, or missing business events', async t => {
   const base = task();
   const cases = [
-    { name: 'wrong request hash', logs: [executedLog(base, { hash: keccak256(toHex('another request')) })] },
-    { name: 'foreign contract log', logs: [executedLog(base, { address: otherContract })] },
+    { name: 'wrong request hash', logs: [budgetLog(base), executedLog(base, { hash: keccak256(toHex('another request')) })] },
+    { name: 'foreign contract log', logs: [budgetLog(base), executedLog(base, { address: otherContract })] },
     { name: 'no business event', logs: [] },
   ];
   for (const entry of cases) {
@@ -274,6 +342,40 @@ test('ViemGateway does not accept wrong hashes, foreign contract logs, or missin
       assert.equal(outcome?.reasonCode, 'EXPECTED_EVENT_MISSING');
     });
   }
+});
+
+test('ViemGateway fails closed for missing or mismatched PolicyEngine evidence', async t => {
+  const current = task();
+  const cases = [
+    { name: 'missing event', logs: [executedLog(current)], reason: 'POLICY_EVENT_MISSING' },
+    { name: 'foreign engine', logs: [budgetLog(current, { address: otherContract }), executedLog(current)], reason: 'POLICY_EVENT_MISSING' },
+    { name: 'wrong request hash', logs: [budgetLog(current, { hash: keccak256(toHex('wrong policy request')) }), executedLog(current)], reason: 'POLICY_EVENT_MISMATCH' },
+    { name: 'wrong actor', logs: [budgetLog(current, { actor: recipient }), executedLog(current)], reason: 'POLICY_EVENT_MISMATCH' },
+    { name: 'wrong decision', logs: [budgetLog(current, { decision: 2 }), executedLog(current)], reason: 'POLICY_EVENT_MISMATCH' },
+    { name: 'cost mismatch', logs: [budgetLog(current, { costUsd6: 4_000_000n }), executedLog(current)], reason: 'POLICY_EVENT_MISMATCH' },
+    { name: 'invalid cumulative spend', logs: [budgetLog(current, { spentUsd6: 2_000_000n }), executedLog(current)], reason: 'POLICY_EVENT_MISMATCH' },
+  ];
+  for (const entry of cases) {
+    await t.test(entry.name, async () => {
+      const { current: bound, gateway } = harness({ logs: entry.logs });
+      const outcome = await gateway.outcome(bound, transactionHash, 'request');
+      assert.equal(outcome?.status, 'FAILED');
+      assert.equal(outcome?.reasonCode, entry.reason);
+    });
+  }
+});
+
+test('ViemGateway treats queued requests as unconsumed and rejects an unexpected budget event', async () => {
+  const base = task();
+  const queued = harness({ logs: [queuedLog(base)] });
+  const waiting = await queued.gateway.outcome(queued.current, transactionHash, 'request');
+  assert.equal(waiting?.status, 'AWAITING_APPROVAL');
+  assert.equal(waiting?.policyEvidence, undefined);
+
+  const inconsistent = harness({ logs: [budgetLog(base), queuedLog(base)] });
+  const failed = await inconsistent.gateway.outcome(inconsistent.current, transactionHash, 'request');
+  assert.equal(failed?.status, 'FAILED');
+  assert.equal(failed?.reasonCode, 'UNEXPECTED_POLICY_EVENT');
 });
 
 test('ViemGateway keeps an unmined transaction pending and reports a reverted receipt as failed', async () => {

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { isAddress, type Address, type Hex } from 'viem';
 import { SCHEMA_VERSION } from '@aegis/shared';
 import { AegisService } from './service.js';
-import { walletAbi, oracleAbi } from './chain.js';
+import { walletAbi, oracleAbi, policyEngineAbi } from './chain.js';
 import { ApiError } from './errors.js';
 
 const address = z.string().refine(value => isAddress(value), 'Invalid Ethereum address');
@@ -19,7 +19,7 @@ const docs: Record<string, { title: string; markdown: string }> = {
   overview: { title: 'Aegis 运行钱包补给', markdown: '# Aegis\n\n读取运行钱包真实 ETH 余额，按用户设置的下限与目标建议补给金额。重新读取后生成预览，用户确认才提交。准备金设置保存在浏览器，后台不会自动监控或补款。\n\n自然语言只生成草稿。付款由 agent 在合约预算与收款范围内发起；超过自动额度的请求等待 owner 链上 approveAndExecute。审批时仍检查报价与硬预算。' },
   roles: { title: '角色与签名', markdown: '# 角色与签名\n\nOwner 用钱包签一次性登录消息，并在浏览器签规则修改、充值及高风险审批交易。登录不授权付款。后台只保存受限 agent 执行密钥，绝不保存 owner 私钥。\n\n当前是单 owner 资金池；Bearer 会话过期后需重新登录。' },
   chainlink: { title: 'Chainlink 与硬规则', markdown: '# Chainlink\n\n合约在请求及审批执行时读取 ETH/USD Data Feed，检查正价格与时间新鲜度，并最终校验 USD 单笔、累计日预算、允许收款人、请求期限和策略版本。前端预览不是执行许可。\n\n金额使用整数 wei 与 USD6。美元输入不会被当作 ETH。CCIP、x402、CRE 与自动监控均不属于当前核心流程。' },
-  evidence: { title: '交易与验证', markdown: '# 可核查的结果\n\nSUBMITTING 表示正在准备；BROADCAST 表示已发送；UNKNOWN 表示广播结果不明。链上 receipt 成功且有匹配的 NativeTransferExecuted 才能显示已付款。NativeTransferQueued 表示等待 owner。\n\n后台保存原始签名交易、原哈希与 nonce 后再发送。超时和重启优先查原哈希，不创建新付款。一次 mined 确认不代表最终不可逆。local_chain 是本地真实链交易，testnet 是测试网真实交易，mock 没有链上执行。' },
+  evidence: { title: '交易与验证', markdown: '# 可核查的结果\n\nSUBMITTING 表示正在准备；BROADCAST 表示已发送；UNKNOWN 表示广播结果不明。链上 receipt 成功且同一交易中有相互匹配的 NativeTransferExecuted 与 PolicyEngine BudgetConsumed，才能显示已付款并验证风险预算。NativeTransferQueued 表示等待 owner，尚未消费预算。\n\n后台保存原始签名交易、原哈希与 nonce 后再发送。超时和重启优先查原哈希，不创建新付款。一次 mined 确认不代表最终不可逆。local_chain 是本地真实链交易，testnet 是测试网真实交易，mock 没有链上执行。' },
   api: { title: '联调 API', markdown: '# API\n\n接口版本 aegis.v1，路径 /api/v1。先 auth/challenge，再用钱包签 message 调 auth/verify，后续使用 Authorization: Bearer token。\n\nintents → preview → submit → tasks/:id → evidence。所有业务写请求带 Idempotency-Key；相同 key 同内容返回原结果，异内容返回 409。编辑使用 expectedRevision。文档是静态 Markdown，没有 RAG。' },
 };
 async function readJson(request: IncomingMessage): Promise<unknown> {
@@ -68,7 +68,7 @@ export function createApiServer(service: AegisService) {
           walletAddress: config.walletAddress, aclAddress: config.aclAddress, attestationAddress: config.attestationAddress,
           oracleAddress: config.oracleAddress, policyEngineAddress: config.policyEngineAddress, feedAddress: config.feedAddress, ownerAddress: config.ownerAddress, agentAddress: config.agentAddress, recipientAddress: config.recipientAddress,
           addresses: { wallet: config.walletAddress, acl: config.aclAddress, attestation: config.attestationAddress, oracle: config.oracleAddress, policyEngine: config.policyEngineAddress, feed: config.feedAddress, owner: config.ownerAddress, agent: config.agentAddress, recipient: config.recipientAddress },
-          abi: { wallet: walletAbi, oracle: oracleAbi }, walletAbi, oracleAbi,
+          abi: { wallet: walletAbi, oracle: oracleAbi, policyEngine: policyEngineAbi }, walletAbi, oracleAbi, policyEngineAbi,
           readiness: await service.chain.readiness(), explorerBaseUrl: config.mode === 'testnet' ? 'https://sepolia.etherscan.io' : null,
           planner: {
             kind: config.llm.mode === 'off' ? 'rule_parser' : 'llm',
