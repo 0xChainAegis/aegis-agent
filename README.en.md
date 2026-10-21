@@ -19,7 +19,8 @@
   <a href="#quickstart">Run</a> ·
   <a href="#validation">Validation</a> ·
   <a href="#event-origin">Event</a> ·
-  <a href="#team-and-documentation">Team</a>
+  <a href="#team">Team</a> ·
+  <a href="#documentation">Docs</a>
 </p>
 
 ## <img src="docs/images/section-screens.svg" width="24" height="24" alt="" align="absmiddle"> Product screenshots
@@ -74,7 +75,7 @@ Pool and operating-wallet balances are read separately. The LLM only drafts: it 
 
 ## <img src="docs/images/section-flow.svg" width="24" height="24" alt="" align="absmiddle"> User flow
 
-1. Sign in as Owner with the local test wallet (or a browser wallet); login does not authorize a payment.
+1. Choose and connect a wallet extension, then select “Sign in as Owner.” The default local deployment also offers a local test wallet. Login does not authorize a payment.
 2. On Overview, read operating-wallet balance B. Set the threshold to B + 0.0005 ETH and the target to B + 0.001 ETH.
 3. Prepare the 0.001 ETH suggestion, inspect the confirmation drawer, confirm, then check the task, receipt and event evidence.
 4. At the initial mock price a 0.002 ETH payment needs a separate Owner approval; 0.004 ETH exceeds the hard cap and is blocked. Owner approval cannot override hard limits.
@@ -150,7 +151,9 @@ npm run dev
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The API listens on port 3001 and the local RPC on 8545; chain ID is 31337. Select the explicit local test-wallet entry to sign in with the public development Owner. These development accounts and ETH have no real-world value and must not be used for public funds.
 
-When a browser wallet is on another network, Connect requests the wallet's native network-switch confirmation. Login still requires the configured Owner account. Switching a wallet to Sepolia does not switch the backend. Local `npm run dev` maintains the verified Mock Feed's timestamp; this maintainer is disabled for testnet and the automated E2E stack.
+Connect first opens a chooser with the detected extensions' names and icons, using EIP-6963 with legacy injection support. Choosing an extension reads its account and network. If the account matches the pool's Owner, explicitly select “Sign in as Owner.” Other accounts can remain connected in read-only mode.
+
+A network mismatch requests the extension's native switch confirmation. Switching to Sepolia does not change the backend or the Owner of a testnet contract. For a personal-wallet local demo, set the public `AEGIS_LOCAL_OWNER_ADDRESS` before deployment; see [wallet connection and Owner configuration](docs/INTEGRATION.md#owner-登录). Local `npm run dev` maintains the verified Mock Feed's timestamp; this maintainer is disabled for testnet and the automated E2E stack.
 
 The deployment funds the pool with 1 ETH and configures a $5 threshold for execution without separate Owner approval, a $10 hard per-payment cap and a $15 shared UTC daily budget. The local Mock Feed initially returns $3,000 per ETH.
 
@@ -185,12 +188,30 @@ Built at the ETH Shenzhen 2026 Hackathon.
 
 <img src="docs/images/eth-shenzhen-2026-poster.png" width="100%" alt="ETH Shenzhen 2026 Hackathon event poster.">
 
-## <img src="docs/images/section-team.svg" width="24" height="24" alt="" align="absmiddle"> Team and documentation
+## <img src="docs/images/section-team.svg" width="24" height="24" alt="" align="absmiddle"> Team
 
-<a href="https://github.com/mia03ther"><img src="https://github.com/mia03ther.png?size=80" width="28" height="28" alt="GitHub avatar of mia03ther" align="absmiddle"> <b>MIA_Ether</b></a> — Product · Frontend · Integration<br>
-<a href="https://github.com/gitgdut"><img src="https://github.com/gitgdut.png?size=80" width="28" height="28" alt="GitHub avatar of gitgdut" align="absmiddle"> <b>purple sun</b></a> — Backend · Contracts<br>
-<a href="https://github.com/qiwei999"><img src="https://github.com/qiwei999.png?size=80" width="28" height="28" alt="GitHub avatar of qiwei999" align="absmiddle"> <b>qiwei999</b></a> — AI intent parsing · Boundary validation<br>
-<a href="https://github.com/mantianxingdou10086"><img src="https://github.com/mantianxingdou10086.png?size=80" width="28" height="28" alt="GitHub avatar of mantianxingdou10086" align="absmiddle"> <b>mantianxingdou10086</b></a> — Agent engineering · Intent evaluation
+<table width="100%">
+  <tr>
+    <td width="25%" align="center" valign="top">
+      <a href="https://github.com/mia03ther"><img src="https://github.com/mia03ther.png?size=144" width="64" height="64" alt="GitHub avatar of MIA_Ether"><br><b>MIA_Ether</b></a><br>
+      <sub>Product · Frontend<br>Integration</sub>
+    </td>
+    <td width="25%" align="center" valign="top">
+      <a href="https://github.com/gitgdut"><img src="https://github.com/gitgdut.png?size=144" width="64" height="64" alt="GitHub avatar of purple sun"><br><b>purple sun</b></a><br>
+      <sub>Backend<br>Smart contracts</sub>
+    </td>
+    <td width="25%" align="center" valign="top">
+      <a href="https://github.com/qiwei999"><img src="https://github.com/qiwei999.png?size=144" width="64" height="64" alt="GitHub avatar of qiwei999"><br><b>qiwei999</b></a><br>
+      <sub>Intent parsing<br>Boundary validation</sub>
+    </td>
+    <td width="25%" align="center" valign="top">
+      <a href="https://github.com/mantianxingdou10086"><img src="https://github.com/mantianxingdou10086.png?size=144" width="64" height="64" alt="GitHub avatar of 满天星斗烟火繁"><br><b>满天星斗烟火繁</b></a><br>
+      <sub>Agent engineering<br>Intent evaluation</sub>
+    </td>
+  </tr>
+</table>
+
+## <img src="docs/images/section-architecture.svg" width="24" height="24" alt="" align="absmiddle"> Documentation
 
 | Document | Contents |
 |---|---|

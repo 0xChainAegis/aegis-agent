@@ -6,6 +6,7 @@ import {
 import { privateKeyToAccount } from 'viem/accounts';
 import {
   walletAbiSignatures, oracleAbiSignatures, policyEngineAbiSignatures,
+  POLICY_EVIDENCE_VERIFICATION_SCOPE, POLICY_EVIDENCE_VERIFIED_FIELDS,
   type PolicyEvidence, type Task, type TransactionEvidence,
 } from '@aegis/shared';
 import type { Config } from './config.js';
@@ -354,10 +355,11 @@ export class ViemGateway implements Gateway {
       engineAddress: this.config.policyEngineAddress, event: 'BudgetConsumed', actionType: 'NATIVE_TRANSFER', decision,
       requestHash: String(policyEvent.args.requestHash) as Hex, actor: String(policyEvent.args.actor) as Hex,
       costUsd6: policyCost, day: String(policyEvent.args.day), spentUsd6: String(policyEvent.args.spentUsd6),
-      policyVersion: String(walletEvent.args.policyVersion), oracleAddress: this.config.oracleAddress, feedAddress: this.config.feedAddress,
+      policyVersion: String(walletEvent.args.policyVersion),
       roundId: String(walletEvent.args.roundId), updatedAtSeconds: String(walletEvent.args.updatedAt),
       transactionHash: hash, blockNumber: receipt.blockNumber.toString(), blockHash: receipt.blockHash,
       logIndex: policyEvent.logIndex, verified: true,
+      verificationScope: POLICY_EVIDENCE_VERIFICATION_SCOPE, verifiedFields: POLICY_EVIDENCE_VERIFIED_FIELDS,
     };
     return { status: 'EXECUTED', attestationId: String(walletEvent.args.attestationId), transaction: boundTransaction, eventData, policyEvidence };
   }

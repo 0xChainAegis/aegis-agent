@@ -1,21 +1,28 @@
 // Appearance preference only. It never touches wallet, draft or API state.
-export type Theme = 'light' | 'dark';
+import { z } from 'zod';
+
+const themeSchema = z.enum(['light', 'dark']);
+export type Theme = z.infer<typeof themeSchema>;
 export const THEME_KEY = 'aegis.ui.theme.v1';
 
 function stored(): Theme | null {
   try {
-    const value = localStorage.getItem(THEME_KEY);
-    return value === 'dark' || value === 'light' ? value : null;
+    const value: unknown = localStorage.getItem(THEME_KEY);
+    const parsed = themeSchema.safeParse(value);
+    return parsed.success ? parsed.data : null;
   } catch { return null; } // storage can be unavailable (private mode, policy)
 }
 
 export function currentTheme(): Theme {
-  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+  const parsed = themeSchema.safeParse(document.documentElement.dataset.theme);
+  return parsed.success ? parsed.data : 'light';
 }
 
 export function applyTheme(theme: Theme): void {
-  document.documentElement.dataset.theme = theme;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#121314' : '#f4f3ef');
+  const parsed = themeSchema.safeParse(theme);
+  const value = parsed.success ? parsed.data : 'light';
+  document.documentElement.dataset.theme = value;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', value === 'dark' ? '#121314' : '#f4f3ef');
 }
 
 /** Default is light unless a valid saved choice exists. */
