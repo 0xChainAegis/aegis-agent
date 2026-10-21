@@ -30,17 +30,26 @@ export function loadLocalMockFeedConfig({env = process.env, root = ROOT} = {}) {
   const deployment = JSON.parse(readFileSync(env.AEGIS_DEPLOYMENT_FILE ?? path.join(root, 'contracts/deployments/localhost.json'), 'utf8'));
   if (Number(deployment.chainId) !== 31337 || Number(env.AEGIS_CHAIN_ID ?? 31337) !== 31337) throw new Error('Local Mock heartbeat requires chain 31337.');
   const rpcUrl = requireLoopbackRpc(env.AEGIS_RPC_URL ?? deployment.rpcUrl ?? 'http://127.0.0.1:8545');
+  const mockUpdaterAddress = deployment.mockUpdaterAddress ?? deployment.ownerAddress;
   for (const name of ['walletAddress', 'oracleAddress', 'feedAddress', 'ownerAddress']) {
     if (!/^0x[0-9a-fA-F]{40}$/.test(deployment[name] ?? '') || same(deployment[name], zeroAddress)) throw new Error(`Local deployment is missing ${name}.`);
   }
+  if (!/^0x[0-9a-fA-F]{40}$/.test(mockUpdaterAddress ?? '') || same(mockUpdaterAddress, zeroAddress)) {
+    throw new Error('Local deployment is missing mockUpdaterAddress.');
+  }
   const artifact = JSON.parse(readFileSync(path.join(root, 'contracts/artifacts/contracts/mocks/MockV3Aggregator.sol/MockV3Aggregator.json'), 'utf8'));
   if (!/^0x[0-9a-fA-F]+$/.test(artifact.deployedBytecode ?? '')) throw new Error('Compile the local MockV3Aggregator artifact first.');
-  return {...deployment, rpcUrl, expectedBytecode: artifact.deployedBytecode};
+  return {...deployment, mockUpdaterAddress, rpcUrl, expectedBytecode: artifact.deployedBytecode};
 }
 
 export function createLocalMockFeedMaintainer(config, {request, now = Date.now, logger = console} = {}) {
   const rpcUrl = requireLoopbackRpc(config.rpcUrl);
   if (Number(config.chainId) !== 31337) throw new Error('Local Mock heartbeat requires chain 31337.');
+  const updater = config.mockUpdaterAddress ?? config.ownerAddress;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(updater ?? '') || same(updater, zeroAddress)
+      || [config.walletAddress, config.oracleAddress, config.feedAddress].some(address => same(updater, address))) {
+    throw new Error('Local Mock refresh requires a valid deployment updater account.');
+  }
   const controller = new AbortController();
   let stopped = false, timer, busy, settle;
   const done = new Promise(resolve => { settle = resolve; });
@@ -82,9 +91,9 @@ export function createLocalMockFeedMaintainer(config, {request, now = Date.now, 
     const currentTime = wallTime > blockTime ? wallTime : blockTime;
     if (currentTime - updatedAt >= maxAge - margin) {
       const accounts = await rpc('eth_accounts');
-      if (!accounts.some(account => same(account, owner))) throw new Error('Local Mock refresh requires the unlocked local deployment owner.');
+      if (!accounts.some(account => same(account, updater))) throw new Error('Local Mock refresh requires the unlocked local deployment updater.');
       const hash = await rpc('eth_sendTransaction', [{
-        from: owner, to: config.feedAddress, value: '0x0',
+        from: updater, to: config.feedAddress, value: '0x0',
         data: encodeFunctionData({abi: feedAbi, functionName: 'updateAnswer', args: [answer]}),
       }]);
       let receipt;

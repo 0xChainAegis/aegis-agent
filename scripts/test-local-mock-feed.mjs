@@ -7,6 +7,8 @@ const wallet = '0x1000000000000000000000000000000000000001';
 const oracle = '0x2000000000000000000000000000000000000002';
 const feed = '0x3000000000000000000000000000000000000003';
 const owner = '0x4000000000000000000000000000000000000004';
+const presenter = '0x5000000000000000000000000000000000000005';
+const updater = '0x6000000000000000000000000000000000000006';
 const bytecode = '0x6000600055';
 const NOW = 1_700_000_000;
 const abi = parseAbi([
@@ -19,23 +21,25 @@ const abi = parseAbi([
 ]);
 const config = {rpcUrl: 'http://127.0.0.1:8545', chainId: 31337, walletAddress: wallet, oracleAddress: oracle, feedAddress: feed, ownerAddress: owner, expectedBytecode: bytecode};
 
-function harness(overrides = {}) {
+function harness(overrides = {}, configOverrides = {}) {
+  const localConfig = {...config, ...configOverrides};
   const state = {chainId: 31337, code: bytecode, description: 'LOCAL MOCK ETH / USD', blockTime: NOW,
-    updatedAt: NOW - 100, answer: 300_000_000_000n, round: 1n, maxAge: 3600n, boundFeed: feed, ...overrides};
+    updatedAt: NOW - 100, answer: 300_000_000_000n, round: 1n, maxAge: 3600n, boundFeed: feed,
+    boundOwner: localConfig.ownerAddress, accounts: [localConfig.mockUpdaterAddress ?? localConfig.ownerAddress], ...overrides};
   const calls = [];
   const request = async (method, params = []) => {
     calls.push({method, params});
     if (method === 'eth_chainId') return `0x${state.chainId.toString(16)}`;
     if (method === 'eth_getCode') return state.code;
     if (method === 'eth_getBlockByNumber') return {timestamp: `0x${state.blockTime.toString(16)}`};
-    if (method === 'eth_accounts') return [owner];
+    if (method === 'eth_accounts') return state.accounts;
     if (method === 'eth_getTransactionReceipt') return {status: '0x1'};
     if (method === 'evm_mine') { state.blockTime = Math.max(state.blockTime + 1, NOW); return '0x0'; }
     const input = params[0];
     const decoded = decodeFunctionData({abi, data: input.data});
     if (method === 'eth_sendTransaction') {
       assert.equal(input.to, feed);
-      assert.equal(input.from.toLowerCase(), owner.toLowerCase());
+      assert.equal(input.from.toLowerCase(), (localConfig.mockUpdaterAddress ?? localConfig.ownerAddress).toLowerCase());
       assert.equal(input.value, '0x0');
       assert.equal(decoded.functionName, 'updateAnswer');
       assert.equal(decoded.args[0], state.answer, 'the existing answer must be retained');
@@ -44,13 +48,13 @@ function harness(overrides = {}) {
     }
     assert.equal(method, 'eth_call', `unexpected RPC method ${method}`);
     const result = {
-      description: state.description, owner, oracle, feeds: state.boundFeed, configurationLocked: true,
+      description: state.description, owner: state.boundOwner, oracle, feeds: state.boundFeed, configurationLocked: true,
       maxPriceAge: state.maxAge,
       latestRoundData: [state.round, state.answer, BigInt(state.updatedAt), BigInt(state.updatedAt), state.round],
     }[decoded.functionName];
     return encodeFunctionResult({abi, functionName: decoded.functionName, result});
   };
-  const keeper = createLocalMockFeedMaintainer(config, {request, now: () => NOW * 1000, logger: {info() {}}});
+  const keeper = createLocalMockFeedMaintainer(localConfig, {request, now: () => NOW * 1000, logger: {info() {}}});
   const writes = () => calls.filter(call => ['eth_sendTransaction', 'evm_mine'].includes(call.method));
   return {keeper, state, calls, writes};
 }
@@ -119,6 +123,30 @@ test('an overnight idle head refreshes from wall time rather than mistaking its 
   const h = harness({blockTime: NOW - 86400, updatedAt: NOW - 86400});
   assert.equal((await h.keeper.tick()).action, 'refreshed');
   assert.equal(h.state.answer, 300_000_000_000n); await h.keeper.stop();
+});
+
+test('a presenter-owned wallet refreshes the same Mock answer using the separate unlocked updater', async () => {
+  const h = harness({updatedAt: NOW - 3550}, {ownerAddress: presenter, mockUpdaterAddress: updater});
+  assert.equal((await h.keeper.tick()).action, 'refreshed');
+  assert.equal(h.state.answer, 300_000_000_000n);
+  assert.equal(h.writes().length, 1);
+  assert.equal(h.writes()[0].params[0].from, updater);
+  assert.equal(h.writes()[0].params[0].value, '0x0');
+  await h.keeper.stop();
+});
+
+test('updater separation never bypasses Owner bindings or signs as a locked presenter', async () => {
+  const mismatch = harness({updatedAt: NOW - 3550, boundOwner: owner}, {ownerAddress: presenter, mockUpdaterAddress: updater});
+  await assert.rejects(mismatch.keeper.tick(), /bindings/);
+  assert.deepEqual(mismatch.writes(), []); await mismatch.keeper.stop();
+  const locked = harness({updatedAt: NOW - 3550, accounts: [presenter]}, {ownerAddress: presenter, mockUpdaterAddress: updater});
+  await assert.rejects(locked.keeper.tick(), /unlocked.*updater/);
+  assert.deepEqual(locked.writes(), []); await locked.keeper.stop();
+  for (const mockUpdaterAddress of ['', 'invalid', '0x0000000000000000000000000000000000000000', feed, wallet, oracle]) {
+    let contacted = false;
+    assert.throws(() => createLocalMockFeedMaintainer({...config, mockUpdaterAddress}, {request() {contacted = true;}}), /updater/);
+    assert.equal(contacted, false);
+  }
 });
 
 test('idle head mining uses no timestamp override, payment or price mutation', async () => {

@@ -11,6 +11,7 @@ import { createApiServer } from '../src/server.js';
 import { loadConfig, LOCAL_AGENT_KEY, type Config } from '../src/config.js';
 import { ApiError } from '../src/errors.js';
 import { StubIntentClient, type LlmIntentClient } from '../src/llm.js';
+import { z } from 'zod';
 import type { Gateway, Snapshot, Quote, Prepared, Outcome } from '../src/chain.js';
 import type { Task } from '@aegis/shared';
 
@@ -111,6 +112,26 @@ async function setup(options: { dbPath?: string; chain?: FakeChain; cfg?: Config
   async function close() { await new Promise<void>(resolve => server.close(() => resolve())); store.close(); }
   return { cfg, store, chain, service, call, rawCall, login, draftAndSubmit, close };
 }
+
+test('public configuration offers the development wallet only for the default local Owner', async () => {
+  const publicConfig = z.object({ localTestWalletAvailable: z.boolean(), ownerAddress: z.string() });
+  const cases: Array<{ mode: Config['mode']; chainId: number; ownerAddress: Address; expected: boolean }> = [
+    { mode: 'local_chain', chainId: 31337, ownerAddress: owner.address, expected: true },
+    { mode: 'local_chain', chainId: 31337, ownerAddress: recipient, expected: false },
+    { mode: 'testnet', chainId: 11155111, ownerAddress: owner.address, expected: false },
+    { mode: 'mock', chainId: 31337, ownerAddress: owner.address, expected: false },
+  ];
+  for (const row of cases) {
+    const app = await setup({ cfg: { ...config(), mode: row.mode, chainId: row.chainId, ownerAddress: row.ownerAddress } });
+    try {
+      const response = await app.call('/config');
+      assert.equal(response.status, 200);
+      const body = publicConfig.parse(response.body);
+      assert.equal(body.localTestWalletAvailable, row.expected);
+      assert.equal(body.ownerAddress, row.ownerAddress);
+    } finally { await app.close(); }
+  }
+});
 
 test('owner login uses real signatures, one-time challenge, chain binding, and protected HTTP routes', async () => {
   const app = await setup();

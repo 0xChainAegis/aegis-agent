@@ -65,6 +65,7 @@ export function createApiServer(service: AegisService) {
         const config = service.config;
         send(200, {
           chainId: config.chainId, rpcUrl: publicRpc(config.rpcUrl), abiVersion: config.abiVersion,
+          localTestWalletAvailable: config.mode === 'local_chain' && config.chainId === 31337 && config.ownerAddress.toLowerCase() === '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266',
           walletAddress: config.walletAddress, aclAddress: config.aclAddress, attestationAddress: config.attestationAddress,
           oracleAddress: config.oracleAddress, policyEngineAddress: config.policyEngineAddress, feedAddress: config.feedAddress, ownerAddress: config.ownerAddress, agentAddress: config.agentAddress, recipientAddress: config.recipientAddress,
           addresses: { wallet: config.walletAddress, acl: config.aclAddress, attestation: config.attestationAddress, oracle: config.oracleAddress, policyEngine: config.policyEngineAddress, feed: config.feedAddress, owner: config.ownerAddress, agent: config.agentAddress, recipient: config.recipientAddress },
