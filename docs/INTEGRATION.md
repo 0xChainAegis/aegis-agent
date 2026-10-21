@@ -56,7 +56,8 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 
 公共读取：
 
-- `GET /health` 或 `/api/v1/health` 返回 readiness；未就绪 HTTP 503，不模拟成功。
+- `GET /health` 或 `/api/v1/health` 只表示后端进程存活，固定返回 HTTP 200，不依赖 RPC。
+- `GET /api/v1/readiness` 返回链上 readiness；网络、部署、绑定、角色、Feed 或资金未就绪时返回 HTTP 503，不模拟成功。短时间内的并发检查会合并并缓存，降低公共 RPC 压力。
 - `GET /api/v1/config` 返回链、部署地址（含 `policyEngineAddress`）、`abiVersion,abi.wallet,abi.oracle`、readiness、实际 parser 与静态文档链接。`planner` 包含 `mode/provider/model/llmEnabled/timeoutMs`，但不返回 API key、完整提示词或凭据。模型等待默认 10 秒；浏览器按配置仅延长意图解析请求，付款与状态查询保留独立的 12 秒等待上限。含凭据的 RPC 不直接暴露。
 - `GET /api/v1/docs/:slug` 返回固定 allowlist 的 Markdown 和链接，没有 RAG。
 

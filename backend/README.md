@@ -15,12 +15,23 @@ export AEGIS_AGENT_PRIVATE_KEY="0x_your_agent_key"
 npm run start --workspace backend
 ```
 
-`GET /health` returns 200 only after checking all six bytecode addresses: Wallet,
-ACL, Attestation, Oracle, PolicyEngine and Feed. It also verifies Wallet and
+Before starting the UI, the same environment can run a read-only gate with
+`npm run check:sepolia`. This command may read the repository-root `.env`, never
+prints the RPC URL or private key, and never signs or broadcasts a transaction.
+
+`GET /health` and `GET /api/v1/health` are process-liveness probes. They do not
+depend on RPC availability. `GET /api/v1/readiness` checks all six bytecode
+addresses: Wallet, ACL, Attestation, Oracle, PolicyEngine and Feed. It also verifies Wallet and
 PolicyEngine bindings, Wallet consumer/manager authorization, the locked native
 ETH Feed, executor and Wallet roles, Feed freshness, and both Wallet and executor
-test-ETH balances. Testnet deployment files must include `policyEngineAddress`;
+test-ETH balances. Readiness calls are deduplicated and cached briefly; use the
+CLI for an explicit fresh check. Testnet deployment files must include `policyEngineAddress`;
 old v1 deployment files fail closed instead of silently bypassing the engine.
+
+RPC behavior can be bounded with `AEGIS_RPC_TIMEOUT_MS` (1000–30000,
+default 8000), `AEGIS_RPC_RETRY_COUNT` (0–3, default 1), and
+`AEGIS_READINESS_TTL_MS` (0–60000, default 5000). These inputs are validated at
+startup.
 
 Optional LLM draft parsing uses `AEGIS_LLM_MODE=off|stub|live` (default `off`), `AEGIS_LLM_PROVIDER=anthropic|openai`, `AEGIS_LLM_MODEL`, `AEGIS_LLM_BASE_URL`, `AEGIS_LLM_TIMEOUT_MS` and a process-environment API key. The model deadline defaults to 10 seconds (configurable from 1 to 30000 milliseconds). Public `planner.timeoutMs` lets the browser wait for intent parsing without extending payment deadlines. Keys are never committed or returned by `/api/v1/config`; `stub` is not live-model evidence.
 
@@ -28,7 +39,7 @@ Optional LLM draft parsing uses `AEGIS_LLM_MODE=off|stub|live` (default `off`), 
 
 Amounts are decimal integer strings: ETH in wei, USD in USD6. Parsing defaults to the deterministic `rule_parser`; an optional `AEGIS_LLM_MODE=stub|live` path can produce a draft with a strict JSON schema, but never authorizes or executes it. Only native ETH is supported. USD/other-token text asks for clarification, and never becomes an ETH amount. A complete draft still needs preview and explicit confirmation.
 
-Public reads: `GET /health`, `GET /api/v1/config`, `GET /api/v1/docs/:slug`. Login: `POST /api/v1/auth/challenge {address,chainId}`, sign the returned message with the configured owner wallet, then `POST /api/v1/auth/verify {challengeId,address,signature}`. Every challenge binds domain, address, chain, random nonce and expiration, and is consumed once. Use the returned token in `Authorization: Bearer ...`.
+Public reads: `GET /health`, `GET /api/v1/health`, `GET /api/v1/readiness`, `GET /api/v1/config`, `GET /api/v1/docs/:slug`. Login: `POST /api/v1/auth/challenge {address,chainId}`, sign the returned message with the configured owner wallet, then `POST /api/v1/auth/verify {challengeId,address,signature}`. Every challenge binds domain, address, chain, random nonce and expiration, and is consumed once. Use the returned token in `Authorization: Bearer ...`.
 
 Authenticated routes:
 

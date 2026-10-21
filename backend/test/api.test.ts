@@ -365,7 +365,8 @@ test('policy change fails before broadcast and RPC failure never silently switch
     assert.equal((await app.call(`/tasks/${submit.body.taskId}`)).body.status, 'REQUOTE_REQUIRED'); assert.equal(app.chain.broadcasts, 0);
     app.chain.unavailable = true;
     const state = await app.call('/wallets/current'); assert.equal(state.status, 503); assert.equal(state.body.mode, 'local_chain');
-    assert.equal((await app.call('/health')).status, 503);
+    assert.equal((await app.call('/health')).status, 200);
+    assert.equal((await app.call('/readiness')).status, 503);
   } finally { await app.close(); }
 });
 test('an unresolved agent transaction blocks another nonce allocation and expired quotes never submit', async () => {

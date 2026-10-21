@@ -58,8 +58,11 @@ export function createApiServer(service: AegisService) {
       const url = new URL(request.url ?? '/', `http://127.0.0.1:${service.config.port}`);
       const path = url.pathname;
       if (request.method === 'GET' && (path === '/health' || path === '/api/v1/health')) {
+        send(200, { status: 'ok' }); return;
+      }
+      if (request.method === 'GET' && path === '/api/v1/readiness') {
         const readiness = await service.chain.readiness();
-        send(readiness.ready ? 200 : 503, { status: readiness.ready ? 'ok' : 'not_ready', readiness }); return;
+        send(readiness.ready ? 200 : 503, { status: readiness.ready ? 'ready' : 'not_ready', readiness }); return;
       }
       if (request.method === 'GET' && path === '/api/v1/config') {
         const config = service.config;
