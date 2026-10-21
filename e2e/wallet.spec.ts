@@ -46,5 +46,5 @@ test('missing recipient needs user input and offline never fabricates success',a
  await login(page);await page.getByTestId('intent-message').fill('转 0.001 ETH');await page.getByTestId('send-intent').click();
  await expect(page.getByTestId('recipient-input')).toBeVisible();await expect(page.getByTestId('recipient-input')).toHaveValue('');
  await page.route('**/api/v1/**',route=>route.abort());await page.locator('[data-action="refresh"]').first().click();
- await expect(page.getByTestId('send-intent')).toBeDisabled();await expect(page.getByText('服务离线',{exact:true})).toBeVisible();
+ await expect(page.getByTestId('send-intent')).toBeDisabled();await expect(page.getByTestId('service-banner').getByText('API 离线',{exact:true})).toBeVisible();
 });

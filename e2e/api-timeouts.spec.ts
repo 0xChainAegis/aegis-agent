@@ -7,7 +7,8 @@ test.beforeEach(async ({page}) => {
 
 test('intent deadlines follow the live model budget without extending payment deadlines', async ({page}) => {
   let planner:Record<string,unknown> = {mode:'live',timeoutMs:30_000};
-  await page.route('**/api/v1/**', route => route.fulfill({json:route.request().url().endsWith('/config')?{planner}:{ok:true}}));
+  const config = {mode:'testnet',chainId:11155111,walletAddress:'0x1111111111111111111111111111111111111111',ownerAddress:'0x2222222222222222222222222222222222222222',recipientAddress:'0x3333333333333333333333333333333333333333',agentAddress:'0x4444444444444444444444444444444444444444',readiness:{ready:true,rpcChainId:11155111,contractsDeployed:true,deploymentBindingsVerified:true,feedFresh:true}};
+  await page.route('**/api/v1/**', route => route.fulfill({json:route.request().url().endsWith('/config')?{...config,planner}:{ok:true}}));
   const result = await page.evaluate(async (moduleUrl) => {
     const {api} = await import(moduleUrl);
     const observed:number[] = [];

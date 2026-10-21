@@ -19,6 +19,9 @@ const state = {
   tasks: [] as Data[],
   online: false,
   initialLoading: true,
+  refreshing: false,
+  serviceErrorCode: '',
+  serviceErrorMessage: '',
   address: sessionStorage.getItem('aegis.address') || '',
   chainId: 0,
   busy: '',
@@ -100,11 +103,27 @@ function taskRecipient(task: Data): string { return value(task, 'recipient', 'in
 function taskAmount(task: Data): string { return value(task, 'amountWei', 'intent.amountWei', 'request.amountWei'); }
 function walletAddress(): string { return value(state.config, 'walletAddress', 'addresses.wallet', 'contracts.wallet', 'wallet.address') || value(state.wallet, 'walletAddress', 'address'); }
 function expectedChain(): number { return Number(get(state.config, 'chainId', 'chain.id') || 0); }
-function validConfig(): boolean { return serviceReadiness(state.config).canPay; }
-function canConnect(): boolean { return serviceReadiness(state.config).canConnect; }
-function readinessMessage(): string { return serviceReadiness(state.config).message; }
+function currentServiceStatus() {
+  return serviceReadiness(state.config, {
+    online: state.online,
+    apiErrorCode: state.serviceErrorCode,
+    apiErrorMessage: state.serviceErrorMessage,
+  });
+}
+function displayedServiceStatus() {
+  return serviceReadiness(state.config, {
+    online: state.online,
+    initialLoading: state.initialLoading,
+    refreshing: state.refreshing,
+    apiErrorCode: state.serviceErrorCode,
+    apiErrorMessage: state.serviceErrorMessage,
+  });
+}
+function validConfig(): boolean { return currentServiceStatus().canPay; }
+function canConnect(): boolean { return currentServiceStatus().canConnect; }
+function readinessMessage(): string { return currentServiceStatus().message; }
 function connected(): boolean { return Boolean(state.address && hasSession()); }
-function disabled(): boolean { return !state.online || !validConfig() || !connected() || Boolean(state.busy); }
+function disabled(): boolean { return !state.online || !validConfig() || !connected() || state.refreshing || Boolean(state.busy); }
 function mode(): string { return expectedChain() === 31337 ? 'Local' : value(state.config, 'mode') === 'mock' ? 'Mock' : expectedChain() === 11155111 ? 'Sepolia' : expectedChain() ? `Chain ${expectedChain()}` : '未连接'; }
 function dateTime(item: unknown): string { if (!item) return '—'; const n = Number(item); const d = new Date(Number.isFinite(n) ? n < 1e12 ? n * 1000 : n : String(item)); return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); }
 function explorer(hash: string): string { const base = value(state.config, 'explorerBaseUrl', 'explorerUrl', 'blockExplorerUrl', 'chain.blockExplorerUrl'); return /^https?:\/\//.test(base) && /^0x[0-9a-fA-F]{64}$/.test(hash) ? `${base.replace(/\/$/, '')}/tx/${hash}` : ''; }
@@ -122,21 +141,25 @@ function render() {
   const pendingCount = state.tasks.filter(t => column(t) === 'approval').length;
   const activeNav = nav.find(item => item[0] === state.view)!;
   const themeNow = currentTheme();
-  const statusText = !state.online ? 'API 离线' : expectedChain() === 31337 ? '本地演示 · Mock Feed' : esc(mode());
+  const availability = displayedServiceStatus();
+  const statusText = availability.phase === 'ready'
+    ? expectedChain() === 31337 ? '本地演示 · 可操作' : `${esc(mode())} · 可操作`
+    : esc(availability.title);
+  const connectDisabledReason = availability.canConnect ? '' : ` title="${esc(availability.title)}：${esc(availability.message)}" aria-describedby="service-status-title"`;
   app.innerHTML = `<div class="app-shell">
     <header class="topbar">
       <button class="brand" data-nav="overview" aria-label="Aegis 总览"><span class="brand-symbol">${mark()}</span><span class="brand-name">Aegis</span></button>
       <nav class="main-nav" aria-label="主导航">${nav.map(([key, symbol, label]) => `<button data-nav="${key}" class="nav-item ${state.view === key ? 'active' : ''}" aria-current="${state.view === key ? 'page' : 'false'}">${icon(symbol)}<span>${label}</span>${key === 'approvals' && pendingCount ? `<b class="nav-count">${pendingCount}</b>` : ''}</button>`).join('')}</nav>
-      <div class="topbar-status" role="status"><span class="status-dot ${state.online ? 'green' : 'red'}"></span><span>${statusText}</span></div>
+      <div class="topbar-status" role="status" data-testid="service-status"><span class="status-dot ${availability.tone}"></span><span>${statusText}</span></div>
       <div class="topbar-actions">
-        <button class="icon-button" data-action="refresh" aria-label="刷新服务状态" title="刷新服务状态">${icon('refresh')}</button>
+        <button class="icon-button ${state.refreshing ? 'is-loading' : ''}" data-action="refresh" aria-label="${state.refreshing ? '正在刷新服务状态' : '刷新服务状态'}" title="${state.refreshing ? '正在刷新服务状态' : '刷新服务状态'}" ${state.refreshing ? 'disabled' : ''}>${state.refreshing ? '<span class="spinner"></span>' : icon('refresh')}</button>
         <button class="icon-button" id="theme-toggle" data-action="toggle-theme" data-testid="theme-toggle" aria-label="${themeNow === 'dark' ? '切换到浅色模式' : '切换到深色模式'}" title="${themeNow === 'dark' ? '切换到浅色模式' : '切换到深色模式'}">${icon(themeNow === 'dark' ? 'sun' : 'moon')}</button>
-        ${localWalletAvailable(state.config) && !connected() ? `<button class="button subtle local-wallet-button" data-action="local-wallet" data-testid="local-wallet" ${!state.online || !canConnect() || state.busy ? 'disabled' : ''}>本地测试钱包</button>` : ''}<button data-action="connect" data-testid="connect-wallet" class="button ${connected() ? 'connected-button' : 'primary'}" ${state.busy === 'connect' || !state.online || !canConnect() ? 'disabled' : ''}>${icon('wallet')}<span>${state.busy === 'connect' ? '等待钱包确认…' : connected() ? short(state.address) : '连接钱包'}</span></button>
+        ${localWalletAvailable(state.config) && !connected() ? `<button class="button subtle local-wallet-button" data-action="local-wallet" data-testid="local-wallet" ${!state.online || !canConnect() || state.refreshing || state.busy ? 'disabled' : ''}${connectDisabledReason}>本地测试钱包</button>` : ''}<button data-action="connect" data-testid="connect-wallet" class="button ${connected() ? 'connected-button' : 'primary'}" ${state.busy === 'connect' || !state.online || !canConnect() || state.refreshing ? 'disabled' : ''}${connectDisabledReason}>${icon('wallet')}<span>${state.busy === 'connect' ? '等待钱包确认…' : connected() ? short(state.address) : '连接钱包'}</span></button>
       </div>
     </header>
     <main class="main">
       <div class="content ${state.view === 'settings' ? 'settings-content' : ''}">
-        ${!state.online ? `<div class="service-banner" role="status">${icon('info')}<span><strong>${state.initialLoading ? '正在连接服务' : '服务离线'}</strong> · ${state.initialLoading ? '正在读取实际网络与钱包配置。' : '无法获取真实钱包状态。启动本地 API 后刷新，当前不会提交任何操作。'}</span><button class="text-button" data-action="refresh">重新连接</button></div>` : !validConfig() ? `<div class="service-banner" role="alert">${icon('info')}<span>${esc(readinessMessage())}</span><button class="text-button" data-action="refresh">刷新状态重试</button></div>` : ''}
+        ${availability.phase !== 'ready' ? `<div class="service-banner ${availability.tone}" role="${availability.phase === 'loading' ? 'status' : 'alert'}" data-testid="service-banner" aria-live="polite">${availability.phase === 'loading' ? '<span class="spinner"></span>' : icon('info')}<div class="service-banner-copy"><strong id="service-status-title">${esc(availability.title)}</strong><p>${esc(availability.message)}</p></div>${availability.actionLabel ? `<button class="text-button" data-action="refresh" ${state.refreshing ? 'disabled' : ''}>${esc(availability.actionLabel)}</button>` : ''}</div>` : ''}
         ${state.view === 'settings' ? settingsView() : state.view === 'verification' ? verificationView() : operationsView()}
         ${connected() && ['overview', 'operations'].includes(state.view) ? composer() : ''}
       </div>
@@ -208,12 +231,14 @@ function recentTasks(): string {
 /** Signed-out introduction: product facts only, no balances or activity. */
 function intro(): string {
   const localOffered = localWalletAvailable(state.config) && !connected();
+  const availability = displayedServiceStatus();
+  const disabledReason = availability.canConnect ? '' : ` title="${esc(availability.title)}：${esc(availability.message)}" aria-describedby="service-status-title"`;
   return `<section class="intro" aria-label="Aegis 简介">
     <div class="intro-copy">
       <p class="intro-word">Aegis</p>
       <h1>为运行钱包，补足下一步。</h1>
       <p class="intro-lead">读取一个运行钱包的真实 ETH 余额；低于你设定的下限时，建议补到目标余额。预览不会付款，需要你明确确认后，才会在链上美元限额内执行。</p>
-      <div class="intro-actions">${localOffered ? `<button class="button primary" data-action="local-wallet" ${!state.online || !canConnect() || state.busy ? 'disabled' : ''}>使用本地测试钱包</button>` : ''}<button class="button ${localOffered ? '' : 'primary'}" data-action="connect" ${state.busy === 'connect' || !state.online || !canConnect() ? 'disabled' : ''}>${icon('wallet')}连接钱包</button></div>
+      <div class="intro-actions">${localOffered ? `<button class="button primary" data-action="local-wallet" ${!state.online || !canConnect() || state.refreshing || state.busy ? 'disabled' : ''}${disabledReason}>使用本地测试钱包</button>` : ''}<button class="button ${localOffered ? '' : 'primary'}" data-action="connect" ${state.busy === 'connect' || !state.online || !canConnect() || state.refreshing ? 'disabled' : ''}${disabledReason}>${icon('wallet')}连接钱包</button></div>
       <p class="intro-note">登录只验证 Owner 身份，不会授权付款。${expectedChain() === 31337 ? '当前是本地链与 Mock Feed 演示，不涉及真实资金。' : ''}</p>
     </div>
     <div class="intro-art"><img class="intro-art-light" src="/aegis-hero.png" alt="Aegis 应用图标：白色陶瓷质感的 A 字标志" width="2022" height="778"><span class="intro-art-dark">${mark()}</span></div>
@@ -449,7 +474,7 @@ function ownerModal(): string {
   return `<div class="modal-backdrop"><section class="owner-modal" role="dialog" aria-modal="true" aria-labelledby="owner-review-title"><div class="modal-symbol">${icon('shield')}</div><h2 id="owner-review-title">${review.action === 'approve' ? '确认 Owner 批准' : '确认取消这笔请求'}</h2><p>${review.action === 'approve' ? '此签名将批准并执行付款。请再次核对收款地址和金额。' : '此签名将取消链上的待审批请求。'}</p><div class="modal-details">${detailRow('金额', `${eth(taskAmount(review.task))} ETH`)}${detailRow('收款地址', taskRecipient(review.task), true)}${detailRow('网络', `${mode()} · Chain ${expectedChain()}`)}${detailRow('签名账户', value(review.tx, 'from'), true)}${detailRow('目标合约', value(review.tx, 'to'), true)}</div><div class="review-note">${icon('verify')}<p>已核对合约、方法与待审批记录 ID。钱包打开后，请继续检查交易详情。</p></div><div class="modal-actions"><button class="button subtle" data-action="dismiss-owner">返回</button><button class="button primary" data-action="sign-owner" data-testid="sign-owner-transaction" ${disabled() ? 'disabled' : ''}>${icon('wallet')}${state.busy ? '等待钱包…' : review.action === 'approve' ? '打开钱包批准' : '打开钱包取消'}</button></div></section></div>`;
 }
 function localWalletModal(): string {
-  return `<div class="modal-backdrop"><section class="owner-modal" role="dialog" aria-modal="true" aria-labelledby="local-wallet-title"><div class="modal-symbol">${icon('wallet')}</div><h2 id="local-wallet-title">使用本地测试钱包</h2><p>使用本机节点已解锁的公开开发 Owner 账户。仅限 Chain 31337，测试 ETH 没有真实价值。此入口不会读取或保存私钥，也不能用于 Sepolia 或公网资金。</p><div class="modal-details">${detailRow('网络', 'Local · 真实本地链')}${detailRow('价格', '本地 Mock Feed，非公网 Chainlink 行情')}${detailRow('公开开发账户', value(state.config, 'ownerAddress'), true)}${detailRow('RPC', value(state.config, 'rpcUrl'))}</div><div class="modal-actions"><button class="button subtle" data-action="dismiss-local-wallet">返回</button><button class="button primary" data-action="confirm-local-wallet" data-testid="confirm-local-wallet" ${!state.online || !canConnect() || state.busy ? 'disabled' : ''}>${state.busy ? '正在签名登录…' : '确认使用公开开发账户'}</button></div></section></div>`;
+  return `<div class="modal-backdrop"><section class="owner-modal" role="dialog" aria-modal="true" aria-labelledby="local-wallet-title"><div class="modal-symbol">${icon('wallet')}</div><h2 id="local-wallet-title">使用本地测试钱包</h2><p>使用本机节点已解锁的公开开发 Owner 账户。仅限 Chain 31337，测试 ETH 没有真实价值。此入口不会读取或保存私钥，也不能用于 Sepolia 或公网资金。</p><div class="modal-details">${detailRow('网络', 'Local · 真实本地链')}${detailRow('价格', '本地 Mock Feed，非公网 Chainlink 行情')}${detailRow('公开开发账户', value(state.config, 'ownerAddress'), true)}${detailRow('RPC', value(state.config, 'rpcUrl'))}</div><div class="modal-actions"><button class="button subtle" data-action="dismiss-local-wallet">返回</button><button class="button primary" data-action="confirm-local-wallet" data-testid="confirm-local-wallet" ${!state.online || !canConnect() || state.refreshing || state.busy ? 'disabled' : ''}>${state.busy ? '正在签名登录…' : '确认使用公开开发账户'}</button></div></section></div>`;
 }
 
 async function refresh(initial = false) {
@@ -457,6 +482,8 @@ async function refresh(initial = false) {
     state.config = await api('/config');
     state.chainId = expectedChain();
     state.online = true;
+    state.serviceErrorCode = '';
+    state.serviceErrorMessage = '';
     if (!canConnect()) { state.wallet = null; state.walletError = readinessMessage(); state.tasks = []; state.ownerReview = null; state.drawer = ''; }
     if (hasSession() && canConnect()) {
       const results = await Promise.allSettled([api('/wallets/current'), api<unknown>('/tasks')]);
@@ -469,13 +496,31 @@ async function refresh(initial = false) {
           // A failed snapshot is "unavailable", never a stale or zero balance.
           if (index === 0) { state.wallet = null; state.walletError = errorMessage(result.reason); }
           if (result.reason instanceof ApiError && result.reason.status === 401) { state.address = ''; state.wallet = null; state.tasks = []; state.ownerReview = null; state.drawer = ''; sessionStorage.removeItem('aegis.address'); }
-          else if (result.reason instanceof ApiError && result.reason.status === 0) state.online = false;
+          else if (result.reason instanceof ApiError && result.reason.status === 0) {
+            state.online = false;
+            state.serviceErrorCode = result.reason.code;
+            state.serviceErrorMessage = result.reason.message;
+          }
         }
       }
       if (state.drawer && state.drawer !== 'draft') { try { state.detail = await api(`/tasks/${encodeURIComponent(state.drawer)}`); } catch { /* Retain the last server response while the network recovers. */ } }
     }
-  } catch (error) { state.online = false; if (!initial && state.busy) throw error; }
+  } catch (error) {
+    state.config = null;
+    state.online = error instanceof ApiError && error.status !== 0;
+    state.serviceErrorCode = error instanceof ApiError ? error.code : 'OFFLINE';
+    state.serviceErrorMessage = errorMessage(error);
+    if (!initial && state.busy) throw error;
+  }
   finally { state.initialLoading = false; syncReserveSettings(); render(); }
+}
+
+async function refreshWithFeedback() {
+  if (state.refreshing) return;
+  state.refreshing = true;
+  render();
+  try { await refresh(true); }
+  finally { state.refreshing = false; render(); }
 }
 
 async function run(name: string, operation: () => Promise<void>) {
@@ -616,11 +661,11 @@ app.addEventListener('click', event => {
   if (button.dataset.openTask) { void openTask(button.dataset.openTask); return; }
   if (button.dataset.copy) { void navigator.clipboard.writeText(button.dataset.copy).then(() => notify('已复制')).catch(() => notify('无法访问剪贴板，请手动复制。', true)); return; }
   switch (button.dataset.action) {
-    case 'refresh': void refresh(true); break;
-    case 'connect': void run('connect', async () => { if (connected()) { state.view = 'settings'; state.settingsTab = 'account'; return; } if (!state.online || !canConnect()) throw new Error(readinessMessage() || '服务尚未提供有效钱包配置。'); const session = await connectWallet(expectedChain(), undefined, state.config!); state.address = session.address; state.chainId = session.chainId; state.walletKind = 'browser'; sessionStorage.setItem('aegis.wallet-kind', 'browser'); sessionStorage.setItem('aegis.address', session.address); registerWalletListeners(); await refresh(); notify('钱包已连接，签名登录成功。'); }); break;
+    case 'refresh': void refreshWithFeedback(); break;
+    case 'connect': void run('connect', async () => { if (connected()) { state.view = 'settings'; state.settingsTab = 'account'; return; } const config = state.config; if (!state.online || !canConnect() || !config) throw new Error(readinessMessage() || '服务尚未提供有效钱包配置。'); const session = await connectWallet(expectedChain(), undefined, config); state.address = session.address; state.chainId = session.chainId; state.walletKind = 'browser'; sessionStorage.setItem('aegis.wallet-kind', 'browser'); sessionStorage.setItem('aegis.address', session.address); registerWalletListeners(); await refresh(); notify('钱包已连接，签名登录成功。'); }); break;
     case 'local-wallet': state.localWalletConfirm = true; render(); break;
     case 'dismiss-local-wallet': if (!state.busy) { state.localWalletConfirm = false; render(); } break;
-    case 'confirm-local-wallet': void run('connect', async () => { if (!state.online || !canConnect() || !localWalletAvailable(state.config)) throw new Error('当前环境不允许本地测试钱包。'); const session = await connectWallet(31337, state.config!); state.address = session.address; state.chainId = session.chainId; state.walletKind = 'local'; sessionStorage.setItem('aegis.wallet-kind', 'local'); sessionStorage.setItem('aegis.address', session.address); state.localWalletConfirm = false; await refresh(); notify('已登录本地公开开发账户，仅用于 Local 测试。'); }); break;
+    case 'confirm-local-wallet': void run('connect', async () => { const config = state.config; if (!state.online || !canConnect() || !config || !localWalletAvailable(config)) throw new Error('当前环境不允许本地测试钱包。'); const session = await connectWallet(31337, config); state.address = session.address; state.chainId = session.chainId; state.walletKind = 'local'; sessionStorage.setItem('aegis.wallet-kind', 'local'); sessionStorage.setItem('aegis.address', session.address); state.localWalletConfirm = false; await refresh(); notify('已登录本地公开开发账户，仅用于 Local 测试。'); }); break;
     case 'disconnect': setToken(''); disconnectProvider(); sessionStorage.removeItem('aegis.address'); sessionStorage.removeItem('aegis.wallet-kind'); state.walletKind = ''; state.address = ''; state.wallet = null; state.tasks = []; state.drawer = ''; notify('本次会话已断开。'); break;
     case 'send-intent': void createIntent(); break;
     case 'reserve-prepare': void prepareReserve(button.dataset.reserveKey || ''); break;
