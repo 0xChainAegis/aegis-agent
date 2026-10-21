@@ -5,7 +5,7 @@ import { getAddress, isAddress, parseEther, zeroAddress } from 'viem';
 import { z } from 'zod';
 import type { Config, LlmConfig } from './config.js';
 import type { ParserInfo } from '@aegis/shared';
-import { parseDraft, type DraftInput, type ParsedDraft } from './parser.js';
+import { parseDraft, rejectedDraft, scanPrompt, type DraftInput, type ParsedDraft } from './parser.js';
 export { scanPrompt } from './parser.js';
 
 const ETH_AMOUNT_RE = /(?:^|[^\w.])(\d+(?:\.\d+)?)\s*(ETH|ether|以太坊|以太)\b/gi;
@@ -262,6 +262,12 @@ export async function parseDraftWithLlm(
     candidate = validateCandidate(raw);
   } catch {
     return parseDraft(input, config.configuredModel, previous, fallback('LLM_SCHEMA_INVALID'));
+  }
+
+  // 整条拒绝：模型自己写回的 purpose / question 也走同一套扫描。若模型把越权
+  // 指令复述进这两个字段，就不能当无害文本继续出草稿，否则整条拒绝会被绕开。
+  if (scanPrompt([candidate.purpose, candidate.question ?? ''].join('\n')).blocked) {
+    return { ...rejectedDraft(message, candidate.purpose || authoritativeDraft.purpose, authoritativeDraft.parser), parser: fallback('PROMPT_BLOCKED') };
   }
 
   // Validate against the current merged request. A prior value is only valid
