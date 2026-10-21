@@ -37,6 +37,8 @@ Blend introductory artwork into the canvas with a soft edge mask and multiply bl
 
 Use brief feedback for hover, focus, and loading. Financial panels and confirmation content appear immediately, without opacity entrance animations. Respect `prefers-reduced-motion`; never rely on movement to explain payment status.
 
+Wallet choices preserve each detected extension's own image inside a 54px rounded ceramic tile. Use a restrained bevel, fine highlight and soft shadow; keep the brand image unmodified. Render announced data-URI icons as image elements, never inline SVG or executable markup, and show a neutral wallet symbol if an image fails. Show only detected extensions as selectable accounts. The chooser, its scrolling list and its focus rings must remain usable in light, dark and narrow layouts. Choosing an extension only connects it; Owner login remains a separate explicit action.
+
 ## Financial information and interaction
 
 - Display unavailable observations as unavailable, never as a zero balance. Include the observed chain, block, and time when available.
