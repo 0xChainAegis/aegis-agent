@@ -163,8 +163,9 @@ npm run check
 npm run test:e2e
 ```
 
-配置好根目录 `.env` 中的 Sepolia 部署、HTTPS RPC 和专用 Agent
-执行密钥后，可运行 `npm run check:sepolia`。它只读取 chain ID、合约代码、
+配置好 `contracts/.env`（也可由已导出的 `AEGIS_*` 变量覆盖）
+中的 Sepolia HTTPS RPC 和专用 Agent 执行密钥后，可运行
+`npm run check:sepolia`。它只读取 chain ID、合约代码、
 绑定、角色、Feed 与余额，不签名、不发交易，也不会输出 RPC URL 或私钥；
 命令成功仅代表只读门槛通过，不等于网页付款已经验收。
 

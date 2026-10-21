@@ -16,7 +16,9 @@ npm run start --workspace backend
 ```
 
 Before starting the UI, the same environment can run a read-only gate with
-`npm run check:sepolia`. This command may read the repository-root `.env`, never
+`npm run check:sepolia`. This command reads `contracts/.env`; exported
+`AEGIS_*` variables take precedence. It maps the
+deployment script's `RPC_URL` to the backend RPC setting, never
 prints the RPC URL or private key, and never signs or broadcasts a transaction.
 
 `GET /health` and `GET /api/v1/health` are process-liveness probes. They do not

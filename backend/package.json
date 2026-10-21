@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
     "test:vitest": "vitest run --config vitest.config.ts",
-    "check:sepolia": "node --env-file-if-exists=../.env --import tsx src/check-sepolia.ts"
+    "check:sepolia": "node --env-file=../contracts/.env --import tsx src/check-sepolia.ts"
   },
   "dependencies": { "@aegis/shared": "file:../packages/shared", "viem": "^2.38.0", "zod": "^4.1.0" },
   "devDependencies": { "@types/node": "^24.0.0", "typescript": "^5.9.0", "tsx": "^4.20.0", "vitest": "^3.2.7" }
