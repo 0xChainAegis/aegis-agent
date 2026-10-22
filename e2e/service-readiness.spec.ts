@@ -12,6 +12,7 @@ type Readiness = Record<string, unknown>;
 
 async function fixture(page: Page, readiness: Readiness, signedIn = false, interactiveOwner = false, previewRecovery = false) {
   let current = readiness;
+  let currentTasks: Record<string, unknown>[] = [];
   let previewAttempts = 0;
   const writes: string[] = [];
   const authRequests: string[] = [];
@@ -77,12 +78,22 @@ async function fixture(page: Page, readiness: Readiness, signedIn = false, inter
       await route.fulfill({ json: { mode: 'local_chain', chainId: 31337, rpcUrl: 'http://127.0.0.1:8545', walletAddress: wallet, ownerAddress: owner, recipientAddress: recipient, agentAddress: agent, readiness: current } });
     } else if (path.endsWith('/wallets/current')) {
       await route.fulfill({ json: { chainId: 31337, walletAddress: wallet, ownerAddress: owner, recipientAddress: recipient, walletBalanceWei: '1000000000000000000', agentBalanceWei: '1000000000000000000', recipientBalanceWei: '1000000000000000', observedBlockNumber: '42', observedBlockHash: '0x' + 'ab'.repeat(32), observedAt: new Date().toISOString(), dataSource: 'chain' } });
-    } else if (path.endsWith('/tasks')) await route.fulfill({ json: { tasks: [] } });
+    } else if (path.endsWith('/tasks')) await route.fulfill({ json: { tasks: currentTasks } });
+    else if (/\/tasks\/[^/]+$/.test(path)) {
+      const taskId = path.split('/').at(-1);
+      const task = currentTasks.find(item => item.taskId === taskId);
+      await route.fulfill(task ? { json: task } : { status: 404, json: { error: { code: 'TASK_NOT_FOUND', message: 'Missing task' } } });
+    }
     else await route.fulfill({ status: 404, json: {} });
   });
   await page.goto('/');
   await expect(page.locator('.topbar-status')).not.toContainText('API 离线');
-  return { writes, authRequests, setReadiness(value: Readiness) { current = value; }, previewAttempts: () => previewAttempts };
+  return {
+    writes, authRequests,
+    setReadiness(value: Readiness) { current = value; },
+    setTasks(value: Record<string, unknown>[]) { currentTasks = value; },
+    previewAttempts: () => previewAttempts,
+  };
 }
 
 async function lowReserve(page: Page) {
@@ -216,4 +227,19 @@ test('a failed chain preview keeps the draft and can be retried without another 
   expect(state.previewAttempts()).toBe(2);
   expect(state.writes.filter(path => path.endsWith('/intents'))).toHaveLength(1);
   expect(state.writes.some(path => path.endsWith('/submit'))).toBe(false);
+});
+
+test('a submitted task is polled until its terminal chain result appears', async ({ page }) => {
+  const state = await fixture(page, ready, true);
+  const baseTask = {
+    taskId: 'adaptive-poll-task', status: 'SUBMITTING', chainId: 31337,
+    ownerAddress: owner, walletAddress: wallet, agentAddress: agent, recipient,
+    amountWei: '100000000000000', maxUsdCost6: '500000', purpose: 'Adaptive polling',
+  };
+  state.setTasks([baseTask]);
+  await page.getByRole('button', { name: '刷新服务状态', exact: true }).click();
+  await expect(page.getByText('提交中', { exact: true })).toBeVisible();
+  state.setTasks([{ ...baseTask, status: 'EXECUTED', txHash: '0x' + 'ab'.repeat(32) }]);
+  await expect(page.getByText('链上已确认', { exact: true })).toBeVisible();
+  expect(state.writes).toEqual([]);
 });

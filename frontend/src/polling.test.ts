@@ -17,6 +17,18 @@ describe('adaptive service polling', () => {
     expect(nextRefreshDelay(config, false)).toBe(NORMAL_REFRESH_MS);
   });
 
+  it('polls active transaction states quickly and returns to normal after a terminal result', () => {
+    const ready = { ...config, readiness: { ready: true } };
+    for (const status of ['SUBMITTING', 'BROADCAST', 'UNKNOWN']) {
+      expect(nextRefreshDelay(ready, true, [{ status }])).toBe(PENDING_REFRESH_MS);
+    }
+    for (const status of ['EXECUTED', 'AWAITING_APPROVAL', 'FAILED']) {
+      expect(nextRefreshDelay(ready, true, [{ status }])).toBe(NORMAL_REFRESH_MS);
+    }
+    expect(nextRefreshDelay(ready, true, null)).toBe(NORMAL_REFRESH_MS);
+    expect(nextRefreshDelay(ready, false, [{ status: 'SUBMITTING' }])).toBe(NORMAL_REFRESH_MS);
+  });
+
   it.each([null, {}, { ...config, chainId: 0 }, { ...config, readiness: null }])(
     'uses the bounded normal interval for empty or malformed external state: %#', value => {
       expect(nextRefreshDelay(value)).toBe(NORMAL_REFRESH_MS);

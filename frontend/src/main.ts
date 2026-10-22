@@ -587,11 +587,13 @@ let refreshTimer: number | undefined;
 function scheduleNextRefresh() {
   if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
   const active = !document.hidden && !state.busy && !state.refreshing;
+  const trackedTasks: unknown[] = [...state.tasks];
+  if (state.detail) trackedTasks.push(state.detail);
   refreshTimer = window.setTimeout(async () => {
     refreshTimer = undefined;
     if (!document.hidden && !state.busy && !state.refreshing) await refresh();
     scheduleNextRefresh();
-  }, nextRefreshDelay(state.config, active));
+  }, nextRefreshDelay(state.config, active, trackedTasks));
 }
 
 async function run(name: string, operation: () => Promise<void>) {
@@ -663,6 +665,7 @@ async function submitIntent() {
     state.draft = null; state.quote = null; state.message = ''; state.recipient = ''; state.amount = ''; state.purpose = '';
     state.drawer = taskId; state.detail = result; state.evidence = null;
     await refresh();
+    scheduleNextRefresh();
     notify('已提交请求，正在核对链上结果。');
     void loadEvidence();
   });
