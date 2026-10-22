@@ -20,7 +20,10 @@ export class ConcurrencyGate {
   }
 }
 
-export function boundedHttp(url: string, config: HttpTransportConfig, concurrency = 2): HttpTransport {
+export function boundedHttp(url: string, config: HttpTransportConfig, concurrency = 4): HttpTransport {
+  // Readiness performs many independent reads at one observed block. Allow a
+  // bounded group to overlap, while retaining one JSON-RPC object per HTTP
+  // request because not every configured provider accepts batch payloads.
   const base = http(url, config);
   const gate = new ConcurrencyGate(concurrency);
   return parameters => {

@@ -118,7 +118,7 @@ describe('public Sepolia readiness display cache', () => {
     const first = value.read();
     await vi.advanceTimersByTimeAsync(1000);
     expect((await first).ready).toBe(false);
-    await vi.advanceTimersByTimeAsync(29_000);
+    await vi.advanceTimersByTimeAsync(89_000);
     expect(await value.read()).toMatchObject({ ready: false, code: 'READINESS_TIMEOUT', source: 'error' });
     await vi.advanceTimersByTimeAsync(5000);
     expect(await value.read()).toMatchObject({ ready: false, code: 'READINESS_TIMEOUT' });

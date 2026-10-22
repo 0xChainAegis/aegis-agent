@@ -57,7 +57,7 @@ const timingSchema = z.object({
   refreshAfterMs: z.number().int().min(1).max(299_999),
   staleIfErrorMs: z.number().int().min(3).max(300_000),
   waitMs: z.number().int().min(1).max(1000),
-  checkTimeoutMs: z.number().int().min(1).max(30_000),
+  checkTimeoutMs: z.number().int().min(1).max(120_000),
 }).refine(value => value.refreshAfterMs < value.ttlMs, 'Revalidation must start before the hard display expiry')
   .refine(value => value.ttlMs < value.staleIfErrorMs, 'Transient-error retention must exceed the fresh display expiry');
 
@@ -97,7 +97,7 @@ export class PublicReadinessCache {
       refreshAfterMs: options.refreshAfterMs ?? 30_000,
       staleIfErrorMs: options.staleIfErrorMs ?? 300_000,
       waitMs: options.waitMs ?? 1000,
-      checkTimeoutMs: options.checkTimeoutMs ?? 30_000,
+      checkTimeoutMs: options.checkTimeoutMs ?? 90_000,
     });
     this.now = options.now ?? (() => performance.now());
     this.wallTime = options.wallTime ?? Date.now;
