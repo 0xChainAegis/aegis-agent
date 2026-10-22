@@ -60,13 +60,19 @@ describe('serviceReadiness', () => {
   });
 
   it.each([
-    ['CHAIN_UNAVAILABLE', 'Sepolia RPC 暂不可用'],
     ['DEPLOYMENT_BINDING_MISMATCH', '合约配置未就绪'],
     ['FUTURE_UNKNOWN_FAILURE', '链上状态未确认'],
   ])('maps %s to an actionable blocked state', (code, title) => {
     const result = serviceReadiness({ ...config, readiness: { ...config.readiness, ready: false, code } });
     expect(result).toMatchObject({ title, canPay: false });
     expect(result.actionLabel).not.toBe('');
+  });
+
+  it('keeps a verified wallet connected across a transient RPC error but blocks payment', () => {
+    expect(serviceReadiness({ ...config, readiness: { ...config.readiness, ready: false, code: 'CHAIN_UNAVAILABLE' } }))
+      .toMatchObject({ phase: 'limited', title: 'Sepolia RPC 暂时波动', canConnect: true, canPay: false });
+    expect(serviceReadiness({ ...config, readiness: { ready: false, code: 'CHAIN_UNAVAILABLE' } }))
+      .toMatchObject({ title: 'Sepolia RPC 暂不可用', canConnect: false, canPay: false });
   });
 
   it('blocks a mismatched chain even if the backend says ready', () => {

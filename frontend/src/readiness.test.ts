@@ -37,7 +37,6 @@ describe('service readiness permissions', () => {
   });
 
   it.each([
-    ['CHAIN_UNAVAILABLE', '本地链 RPC 暂不可用'], ['RPC_UNAVAILABLE', '本地链 RPC 暂不可用'],
     ['DEPLOYMENT_MISSING', '合约配置未就绪'], ['OWNER_MISMATCH', '合约配置未就绪'],
     ['EXECUTOR_MISMATCH', '合约配置未就绪'], ['UNRECOGNIZED_FAILURE', '链上状态未确认'],
   ])('keeps %s stopped and gives the relevant explanation', (code, title) => {
@@ -47,6 +46,15 @@ describe('service readiness permissions', () => {
     expect(result.title).toBe(title);
     expect(result.message).not.toBe('');
     expect(result.actionLabel).not.toBe('');
+  });
+
+  it.each(['READINESS_CHECKING', 'READINESS_TIMEOUT', 'CHAIN_UNAVAILABLE'])('keeps a verified wallet connected during transient %s while blocking payment', code => {
+    const result = serviceReadiness({ ...config, readiness: { ...structural, ready: false, code } });
+    expect(result.canConnect).toBe(true);
+    expect(result.canPay).toBe(false);
+    expect(result.phase).toBe('limited');
+    expect(result.message).toContain('保留上次成功核对');
+    expect(serviceReadiness({ ...config, readiness: { ready: false, code } }).canConnect).toBe(false);
   });
 
   it('prioritizes wrong-network evidence over a stale-price label', () => {

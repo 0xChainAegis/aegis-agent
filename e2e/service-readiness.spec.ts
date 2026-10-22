@@ -143,6 +143,21 @@ test('a ready session detects deterioration on refresh and immediately disables 
   expect(state.writes).toEqual([]);
 });
 
+test('a connected owner stays connected during verified background revalidation while payment remains disabled', async ({ page }) => {
+  const state = await fixture(page, ready, false, true);
+  await page.getByTestId('connect-wallet').click();
+  await page.getByTestId('wallet-option-legacy-0').click();
+  await page.getByTestId('owner-login').click();
+  await expect(page.getByTestId('intent-message')).toBeEnabled();
+  state.setReadiness({ ...verified, ready: false, code: 'READINESS_CHECKING', source: 'checking' });
+  await page.getByRole('button', { name: '刷新服务状态', exact: true }).click();
+  await expect(page.getByTestId('service-banner')).toContainText('保留上次成功核对');
+  await expect(page.getByTestId('connect-wallet')).toContainText('0x1111…1111');
+  await expect(page.getByTestId('intent-message')).toBeDisabled();
+  await expect(page.getByTestId('send-intent')).toBeDisabled();
+  expect(state.writes).toEqual([]);
+});
+
 test('topbar and retry communicate the current service phase', async ({ page }) => {
   const state = await fixture(page, ready);
   await expect(page.getByTestId('service-status')).toContainText('本地演示 · 可操作');

@@ -43,6 +43,22 @@ To test the Sepolia wallet and UI before configuring a model, use deterministic 
 python3 scripts/start-live-web.py --network sepolia --llm off
 ```
 
+The local `contracts/.env.llm` file is ignored by Git and is preconfigured for DeepSeek's OpenAI-compatible API. Paste only the private key after `AEGIS_LLM_API_KEY=`, then load both private environment files and start live parsing:
+
+```bash
+set -a
+source contracts/.env
+source contracts/.env.llm
+set +a
+export AEGIS_MODE=testnet
+export AEGIS_CHAIN_ID=11155111
+export AEGIS_DEPLOYMENT_FILE="$PWD/contracts/deployments/sepolia.json"
+export AEGIS_RPC_URL="$RPC_URL"
+python3 scripts/start-live-web.py --network sepolia --llm live
+```
+
+The checked-in `contracts/.env.llm.example` contains no secret and documents the expected `deepseek-flash` configuration. Never commit or screenshot the populated `.env.llm` file.
+
 `AEGIS_LLM_MODE=off` in the environment has the same effect, so the shorter command also works after exporting it. `--check` validates local configuration only. It does not contact the RPC or model, prove deployed bytecode, or send payment. Sepolia startup does not start or require Hardhat on port 8545, and never falls back to Local. It reuses a deployment-specific SQLite path by default, preserving task recovery across restarts. An explicit `AEGIS_DB_PATH` overrides this; keep it private and stable for the same deployment. Stop an existing app on 3001/5173 before starting another.
 
 On Linux/macOS, when the current deployment settings are in `contracts/.env`,

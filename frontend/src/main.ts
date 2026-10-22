@@ -794,4 +794,4 @@ discovery.subscribe(() => { if (state.walletPicker) render(); });
 discovery.start();
 render();
 void refresh(true);
-window.setInterval(() => { if (!document.hidden && !state.busy) void refresh(); }, 5000);
+window.setInterval(() => { if (!document.hidden && !state.busy) void refresh(); }, 30_000);
