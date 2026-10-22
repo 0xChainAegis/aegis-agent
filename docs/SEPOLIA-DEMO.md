@@ -8,6 +8,12 @@ Deploy the current contracts using `contracts/scripts/deploy.js` and the configu
 
 The deployment JSON contains public addresses. It must include Wallet, ACL, Attestation, Oracle, PolicyEngine, Feed, Owner, executor and recipient. The Owner is the account configured by this deployment, not whichever browser wallet connects first. Use that Owner account in the presenting browser. The executor is a separate restricted signer held only by the backend. The Wallet contract holds the top-up funds; the recipient is the operating wallet receiving ETH.
 
+Each user has a separate treasury and its own policy, allowlist, budget and restricted executor. Connecting another wallet does not make it an administrator of an existing treasury. This MVP serves one configured treasury per running backend; it does not provide automatic pool creation or a shared multi-user service.
+
+For a personal test pool, set `OWNER_ADDRESS` to the intended browser wallet's public EOA address before deploying. The funded deployer performs setup and transfers the actual Ownable and AccessControl administration to that Owner. The script verifies the handoff and removes the previous deployer's administration before saving the deployment. The user never needs to give their Owner private key to the deployer. Omitting `OWNER_ADDRESS` keeps the deployer as Owner.
+
+The script preserves each deployment at `contracts/deployments/sepolia/<owner-address>/<wallet-address>.json` in addition to updating `contracts/deployments/sepolia.json`. Select the preserved file for the specific pool you intend to run, rather than overwriting another user's settings. These generated files are ignored by Git and contain public deployment information. Use a distinct executor per independent pool, fund its gas separately, and run only one backend writer for that executor to avoid nonce conflicts. Separate backend instances also need separate ports and databases; the standard web launcher serves one instance on 3001/5173.
+
 Use dedicated testnet accounts and Sepolia ETH. Keep Owner keys out of the backend and out of the repository. Never reuse Hardhat's published development keys on Sepolia. Follow the current deployment script's signer requirements; do not change a public Owner field without matching on-chain ownership and administration.
 
 ## Start the web demo

@@ -94,12 +94,36 @@ budgets across concurrent agents, expiry, replay, rejection rollback and reentry
 ## Sepolia deployment
 
 The Sepolia script is deliberately fail-closed. It requires an HTTPS RPC, a
-non-development private key, three distinct owner/agent/recipient identities,
+non-development deployer private key, three distinct final Owner/agent/recipient identities,
 explicit USD6 policy limits, initial vault funding, and an explicitly supplied
 ETH/USD Feed address. Before deploying, it verifies the Feed bytecode and current
 round freshness. After deployment, it verifies contract bytecode, Wallet and
 PolicyEngine bindings, Wallet consumer/manager authorization, roles, locked Feed
-configuration, allowlist, tier, and vault balance.
+configuration, allowlist, tier, vault balance, final ownership and administration roles.
+
+`PRIVATE_KEY` identifies the funded deployer that sends the deployment and setup
+transactions. Optional `OWNER_ADDRESS` is the public address of the final Owner's
+externally owned wallet; it does not require that Owner's private key. When omitted,
+the deployer remains Owner, preserving the existing default. Explicit blank, zero,
+invalid or conflicting Owner addresses fail before deployment. Existing contract
+wallets and addresses of the five contracts about to be deployed are rejected,
+because the current Owner login supports externally owned wallets.
+
+Setup completes under the deployer before handing Wallet, PolicyEngine and Oracle
+ownership to the final Owner. The final Owner also receives ACL `DEFAULT_ADMIN_ROLE`,
+`OWNER_ROLE`, `GUARDIAN_ROLE`, and Attestation `DEFAULT_ADMIN_ROLE` and `APPROVER_ROLE`.
+When the final Owner differs from the deployer, all five deployer administration
+roles are revoked and checked. The agent's restricted executor role and the Wallet's
+policy consumer/manager and attester/approver grants remain intact. Owner approvals
+still obey the hard transaction and daily budget rules. This handoff consists of
+separate confirmed transactions; it is not atomic, and a failed run requires checking
+the completed on-chain steps before continuing.
+
+Each user's pool is a separate deployment with that user's own `OWNER_ADDRESS` and
+a separate `AGENT_ADDRESS`. Fund that restricted executor with Sepolia ETH for gas;
+vault funding does not fund the executor. The deployer cannot also be the agent or
+recipient. Keep each executor's key and backend/database specific to its own pool;
+the current backend serves one configured pool, without a universal Owner login.
 
 Copy `.env.example` to the ignored `contracts/.env`, fill every value, and verify
 `ETH_USD_FEED_ADDRESS` against Chainlink's official deployment list. Then run:
@@ -115,7 +139,11 @@ npm run deploy:sepolia
 
 This is the only command in this section that broadcasts transactions and spends
 Sepolia ETH. A successful run writes the public, non-secret addresses and its
-verification summary to `deployments/sepolia.json`; that runtime file is ignored
-by Git. PolicyEngine v2 changes constructor bindings, so a v1 deployment JSON is
+verification summary to `deployments/sepolia.json`, the compatibility pointer to the
+latest pool. It also preserves each pool at
+`deployments/sepolia/<owner-address>/<wallet-address>.json`, using lowercase addresses,
+so deploying another pool does not overwrite earlier handoff records. Both locations
+are ignored runtime files, contain public metadata only, and include `deployerAddress`
+separately from the final `ownerAddress`. PolicyEngine v2 changes constructor bindings, so a v1 deployment JSON is
 not compatible and must be replaced by an explicit new deployment. Never place
 an owner key in the backend executor-key setting.
