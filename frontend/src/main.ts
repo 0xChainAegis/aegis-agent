@@ -665,10 +665,12 @@ async function submitIntent() {
     state.draft = null; state.quote = null; state.message = ''; state.recipient = ''; state.amount = ''; state.purpose = '';
     state.drawer = taskId; state.detail = result; state.evidence = null;
     await refresh();
-    scheduleNextRefresh();
     notify('已提交请求，正在核对链上结果。');
     void loadEvidence();
   });
+  // run() clears the busy flag in its finally block. Schedule only afterwards,
+  // otherwise an active transaction is incorrectly assigned the 30-second idle delay.
+  scheduleNextRefresh();
 }
 
 async function openTask(taskId: string) {
