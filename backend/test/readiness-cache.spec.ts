@@ -16,7 +16,10 @@ function deferred<T>() {
 }
 const caches: PublicReadinessCache[] = [];
 function cache(load: () => Promise<unknown>, identity: () => string = () => 'deployment-one') {
-  const result = new PublicReadinessCache(load, identity, { now: Date.now, wallTime: Date.now });
+  const result = new PublicReadinessCache(load, identity, {
+    ttlMs: 15_000, refreshAfterMs: 5000, staleIfErrorMs: 60_000,
+    now: Date.now, wallTime: Date.now,
+  });
   caches.push(result);
   return result;
 }
@@ -72,7 +75,7 @@ describe('public Sepolia readiness display cache', () => {
     await vi.advanceTimersByTimeAsync(15_000);
     const expired = value.read();
     await vi.advanceTimersByTimeAsync(1000);
-    expect(await expired).toMatchObject({ ready: false, source: 'checking', checkedAt: null });
+    expect(await expired).toMatchObject({ ready: false, code: 'READINESS_CHECKING', source: 'checking', checkedAt: '2026-10-22T01:00:00.000Z', cacheAgeMs: 16_000 });
     expect(load).toHaveBeenCalledTimes(2);
     second.resolve({ ready: false, code: 'FEED_STALE', feedFresh: false });
     await vi.advanceTimersByTimeAsync(0);
@@ -115,7 +118,7 @@ describe('public Sepolia readiness display cache', () => {
     const first = value.read();
     await vi.advanceTimersByTimeAsync(1000);
     expect((await first).ready).toBe(false);
-    await vi.advanceTimersByTimeAsync(29_000);
+    await vi.advanceTimersByTimeAsync(89_000);
     expect(await value.read()).toMatchObject({ ready: false, code: 'READINESS_TIMEOUT', source: 'error' });
     await vi.advanceTimersByTimeAsync(5000);
     expect(await value.read()).toMatchObject({ ready: false, code: 'READINESS_TIMEOUT' });
@@ -154,7 +157,7 @@ describe('public Sepolia readiness display cache', () => {
     await vi.advanceTimersByTimeAsync(10_000);
     const expired = value.read();
     await vi.advanceTimersByTimeAsync(1000);
-    expect(await expired).toMatchObject({ ready: false, code: 'READINESS_CHECKING', checkedAt: null, cacheAgeMs: null });
+    expect(await expired).toMatchObject({ ready: false, code: 'READINESS_CHECKING', checkedAt: '2026-10-22T01:00:00.000Z', cacheAgeMs: 16_000 });
     expect(load).toHaveBeenCalledTimes(2);
   });
 
@@ -173,12 +176,47 @@ describe('public Sepolia readiness display cache', () => {
 
   it('validates the revalidation threshold against the bounded hard TTL', () => {
     for (const options of [
-      { ttlMs: 15_001 }, { refreshAfterMs: 15_000 },
+      { ttlMs: 300_001 }, { refreshAfterMs: 300_000 },
       { ttlMs: 100, refreshAfterMs: 100 }, { ttlMs: 100, refreshAfterMs: 101 },
-      { refreshAfterMs: 0 },
+      { refreshAfterMs: 0 }, { ttlMs: 100, staleIfErrorMs: 100 },
     ]) expect(() => new PublicReadinessCache(async () => ready, () => 'fixture', options)).toThrow();
-    const value = new PublicReadinessCache(async () => ready, () => 'fixture', { ttlMs: 100, refreshAfterMs: 25 });
+    const value = new PublicReadinessCache(async () => ready, () => 'fixture', { ttlMs: 100, refreshAfterMs: 25, staleIfErrorMs: 200 });
     caches.push(value);
+  });
+
+  it('uses a one-minute fresh window and starts background revalidation after thirty seconds', async () => {
+    const next = deferred<unknown>();
+    const load = vi.fn<() => Promise<unknown>>().mockResolvedValueOnce(ready).mockImplementationOnce(() => next.promise);
+    const value = new PublicReadinessCache(load, () => 'default-timing', { now: Date.now, wallTime: Date.now });
+    caches.push(value);
+    expect(await value.read()).toMatchObject({ ready: true, cacheTtlMs: 60_000 });
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect((await value.read()).ready).toBe(true);
+    expect(load).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await value.read()).toMatchObject({ ready: true, source: 'cache', cacheAgeMs: 30_000 });
+    expect(load).toHaveBeenCalledTimes(2);
+    next.resolve(ready);
+  });
+
+  it('retains verified read-only evidence across a transient refresh error but never marks it ready', async () => {
+    const load = vi.fn<() => Promise<unknown>>()
+      .mockResolvedValueOnce(ready)
+      .mockResolvedValue({ ready: false, code: 'CHAIN_UNAVAILABLE', message: 'private upstream detail' });
+    const value = cache(load);
+    expect((await value.read()).ready).toBe(true);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect((await value.read()).ready).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await value.read()).toMatchObject({
+      ready: false, code: 'CHAIN_UNAVAILABLE', source: 'error',
+      rpcChainId: 11155111, contractsDeployed: true, deploymentBindingsVerified: true,
+      checkedAt: '2026-10-22T01:00:00.000Z', cacheTtlMs: 60_000,
+    });
+    await vi.advanceTimersByTimeAsync(55_000);
+    const expired = await value.read();
+    expect(expired).toMatchObject({ ready: false, code: 'CHAIN_UNAVAILABLE' });
+    expect(expired).not.toHaveProperty('deploymentBindingsVerified');
   });
 
   it('invalidates a young proof when a deployment identity changes', async () => {

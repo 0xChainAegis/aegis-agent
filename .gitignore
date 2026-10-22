@@ -8,6 +8,7 @@ __pycache__/
 # env / secrets
 .env
 .env.local
+.env.llm
 *.key
 
 # build artifacts

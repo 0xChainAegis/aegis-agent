@@ -224,6 +224,15 @@ describe('errors, retries, and deadlines', () => {
     expect(schedule.mock.calls.map(call => call[1])).toEqual([12_000, 35_000, 35_000, 12_000, 12_000, 12_000]);
   });
 
+  it('gives validated Sepolia chain reads time to finish without extending ordinary writes', () => {
+    expect(client.requestDeadlineMs('/wallets/current', 'GET')).toBe(45_000);
+    expect(client.requestDeadlineMs('/intents/draft-1/preview', 'POST')).toBe(45_000);
+    expect(client.requestDeadlineMs('/tasks/task-1/owner-tx?action=approve', 'GET')).toBe(45_000);
+    expect(client.requestDeadlineMs('/tasks/task-1/observed-tx', 'POST')).toBe(45_000);
+    expect(client.requestDeadlineMs('/intents/draft-1/submit', 'POST')).toBe(12_000);
+    expect(client.requestDeadlineMs('', 'GET')).toBe(12_000);
+  });
+
   it.each([0, 30_001, '30000'])('rejects an invalid planner budget: %s', async timeoutMs => {
     fetchMock.mockResolvedValue(json({ ...config, planner: { mode: 'live', timeoutMs } }));
     await expect(client.api('/config')).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });

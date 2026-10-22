@@ -92,6 +92,17 @@ function loadToken(): string {
 let token = loadToken();
 const pendingMutationKeys = new Map<string, string>();
 let intentTimeoutMs = 12_000;
+const chainReadTimeoutMs = 45_000;
+
+export function requestDeadlineMs(path: string, method: string, plannerTimeoutMs = intentTimeoutMs): number {
+  const isIntentParsing = method === 'POST' && path === '/intents' || method === 'PATCH' && /^\/intents\/[^/]+$/.test(path);
+  if (isIntentParsing) return plannerTimeoutMs;
+  const isChainRead = method === 'GET' && path === '/wallets/current'
+    || method === 'POST' && /^\/intents\/[^/]+\/preview$/.test(path)
+    || method === 'GET' && /^\/tasks\/[^/]+\/owner-tx\?/.test(path)
+    || method === 'POST' && /^\/tasks\/[^/]+\/observed-tx$/.test(path);
+  return isChainRead ? chainReadTimeoutMs : 12_000;
+}
 
 export function setToken(value: string) {
   const parsed = value === '' ? undefined : sessionTokenSchema.safeParse(value);
@@ -145,7 +156,7 @@ export async function api(path: string, method = 'GET', body?: Data): Promise<Da
   // Intent parsing follows the configured model deadline; payment requests keep
   // an independent 12-second cap and their original idempotency key on retry.
   const isIntentParsing = method === 'POST' && path === '/intents' || method === 'PATCH' && /^\/intents\/[^/]+$/.test(path);
-  const timeout = window.setTimeout(() => controller.abort(), isIntentParsing ? intentTimeoutMs : 12_000);
+  const timeout = window.setTimeout(() => controller.abort(), requestDeadlineMs(path, method));
   const fingerprint = method === 'GET' ? '' : `${method}:${path}:${serializedBody ?? '{}'}`;
   const mutationKey = fingerprint ? pendingMutationKeys.get(fingerprint) || crypto.randomUUID() : '';
   if (fingerprint) pendingMutationKeys.set(fingerprint, mutationKey);

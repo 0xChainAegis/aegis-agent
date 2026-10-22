@@ -10,7 +10,8 @@
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts && npm run test:vitest",
-    "test:vitest": "vitest run test/readiness-cache.spec.ts"
+    "test:vitest": "vitest run test/readiness-cache.spec.ts test/rpc-concurrency.spec.ts test/sepolia-check.vitest.ts",
+    "check:sepolia": "node --env-file=../contracts/.env --import tsx src/check-sepolia.ts"
   },
   "dependencies": { "@aegis/shared": "file:../packages/shared", "viem": "^2.38.0", "zod": "^4.1.0" },
   "devDependencies": { "@types/node": "^24.0.0", "typescript": "^5.9.0", "tsx": "^4.20.0", "vitest": "^5.0.5" }

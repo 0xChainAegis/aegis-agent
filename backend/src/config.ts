@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAddress, zeroAddress, type Address, type Hex } from 'viem';
+import { z } from 'zod';
 import type { RuntimeMode } from '@aegis/shared';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -32,8 +33,22 @@ export interface Config {
   abiVersion: string; deploymentReady: boolean; agentKey?: Hex; origins: string[];
   authDomain: string; sessionSeconds: number; quoteSeconds: number; requestSeconds: number;
   maxAgeSeconds: number; configuredModel: string | null; llm: LlmConfig;
+  rpcTimeoutMs: number; rpcRetryCount: number;
+}
+const optionalNumber = (schema: z.ZodType<number>) => z.preprocess(value => value === '' ? undefined : value, schema);
+const rpcTuningSchema = z.object({
+  AEGIS_RPC_TIMEOUT_MS: optionalNumber(z.coerce.number().int().min(1_000).max(30_000).default(15_000)),
+  AEGIS_RPC_RETRY_COUNT: optionalNumber(z.coerce.number().int().min(0).max(2).default(1)),
+}).passthrough();
+
+function parseRpcTuning(env: NodeJS.ProcessEnv) {
+  const parsed = rpcTuningSchema.safeParse(env);
+  if (parsed.success) return parsed.data;
+  const issue = parsed.error.issues[0];
+  throw new Error(`${issue?.path.join('.') || 'RPC configuration'}: ${issue?.message ?? 'invalid value'}`);
 }
 export function loadConfig(env = process.env): Config {
+  const rpcTuning = parseRpcTuning(env);
   const mode = env.AEGIS_MODE ?? 'local_chain';
   if (!['local_chain', 'testnet', 'mock'].includes(mode)) throw new Error('AEGIS_MODE must be local_chain, testnet, or mock');
   if (mode === 'testnet' && !env.AEGIS_DEPLOYMENT_FILE) throw new Error('AEGIS_MODE=testnet requires AEGIS_DEPLOYMENT_FILE');
@@ -86,5 +101,6 @@ export function loadConfig(env = process.env): Config {
     origins: ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:4173', 'http://127.0.0.1:4173'],
     authDomain: 'localhost', sessionSeconds: 3600, quoteSeconds: 60, requestSeconds: 600,
     maxAgeSeconds: 3600, configuredModel: llmModel ?? env.OPENAI_MODEL ?? null, llm,
+    rpcTimeoutMs: rpcTuning.AEGIS_RPC_TIMEOUT_MS, rpcRetryCount: rpcTuning.AEGIS_RPC_RETRY_COUNT,
   };
 }

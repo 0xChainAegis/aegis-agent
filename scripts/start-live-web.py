@@ -1,4 +1,4 @@
-"""Start the web UI and live LLM backend against an explicitly selected chain."""
+"""Start the web UI and backend against an explicitly selected chain."""
 import argparse
 import json
 import os
@@ -17,12 +17,19 @@ ROOT = Path(__file__).resolve().parents[1]
 _launcher = runpy.run_path(str(ROOT / 'scripts/with-live-llm.py'))
 
 
-def launch_plan(source=None, root=ROOT, network=None):
+def launch_plan(source=None, root=ROOT, network=None, llm_mode=None):
     supplied = os.environ if source is None else source
     mode = {'local': 'local_chain', 'sepolia': 'testnet'}.get(network) if network else supplied.get('AEGIS_MODE', 'local_chain')
     if mode not in ('local_chain', 'testnet'):
         raise ValueError('Choose --network local or --network sepolia; no automatic network fallback')
-    node, env = _launcher['prepare_environment'](source)
+    selected_llm_mode = llm_mode or supplied.get('AEGIS_LLM_MODE', 'live')
+    if selected_llm_mode == 'live':
+        node, env = _launcher['prepare_environment'](source)
+    elif selected_llm_mode == 'off':
+        node, env = _launcher['prepare_node_environment'](source)
+        env['AEGIS_LLM_MODE'] = 'off'
+    else:
+        raise ValueError('Choose --llm off or --llm live; web startup does not support stub mode')
     env['AEGIS_MODE'] = mode
     chain_id = '11155111' if mode == 'testnet' else '31337'
     if env.get('AEGIS_CHAIN_ID', chain_id) != chain_id:
@@ -170,11 +177,12 @@ def main(args=None):
     try:
         parser = argparse.ArgumentParser(description=__doc__)
         parser.add_argument('--network', choices=('local', 'sepolia'))
+        parser.add_argument('--llm', choices=('off', 'live'), help='use deterministic rules or a configured live model')
         parser.add_argument('--check', action='store_true')
         options = parser.parse_args(args)
-        env, commands = launch_plan(network=options.network) if options.network else launch_plan()
+        env, commands = launch_plan(network=options.network, llm_mode=options.llm)
         if options.check:
-            print('Selected chain configuration, live LLM environment, Node 24+, and Vite checked; no RPC/model request or payment was sent.')
+            print(f"Selected chain configuration, LLM mode {env.get('AEGIS_LLM_MODE', 'live')}, Node 24+, and Vite checked; no RPC/model request or payment was sent.")
             return 0
         check_local_chain(env)
         return run_services(env, commands)

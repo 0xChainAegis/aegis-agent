@@ -15,6 +15,20 @@ export AEGIS_AGENT_PRIVATE_KEY="0x_your_agent_key"
 npm run start --workspace backend
 ```
 
+Before starting the UI, run `npm run check:sepolia` from the repository root.
+The command reads `contracts/.env`, maps its deployment `RPC_URL` to the backend,
+performs a fresh read-only sweep, and validates the result with Zod. It checks
+the network, bytecode, bindings, roles, Feed freshness and balances without
+signing or broadcasting a transaction, and never prints the RPC URL or key.
+RPC calls default to a 15-second attempt with one bounded retry. Operators may
+set `AEGIS_RPC_TIMEOUT_MS` (1000–30000) and `AEGIS_RPC_RETRY_COUNT` (0–2); invalid
+external values stop startup instead of silently changing transport behavior.
+Concurrent public reads are admitted through a bounded twenty-request gate and
+collapsed into JSON-RPC batches of at most twenty calls. This keeps the full
+readiness sweep to a small number of HTTP round trips instead of exhausting a
+hosted Sepolia endpoint with dozens of sequential requests. The wallet
+transport used to broadcast signed transactions is not affected by this gate.
+
 `GET /health` returns 200 only after checking all six bytecode addresses: Wallet,
 ACL, Attestation, Oracle, PolicyEngine and Feed. It also verifies Wallet and
 PolicyEngine bindings, Wallet consumer/manager authorization, the locked native
@@ -22,7 +36,7 @@ ETH Feed, executor and Wallet roles, Feed freshness, and both Wallet and executo
 test-ETH balances. Testnet deployment files must include `policyEngineAddress`;
 old v1 deployment files fail closed instead of silently bypassing the engine.
 
-On Sepolia only, public configuration and health reads share a bounded display-readiness cache: each public request waits at most one second for the shared check. Checks continue in the background; completed results revalidate after five seconds and expire after fifteen. Responses distinguish checking, timeout and recent results, with completion time and cache age. Failed refreshes replace ready results. Preview, balances, execution and Owner approval continue to read authoritative state directly. See [Sepolia demo setup and acceptance](../docs/SEPOLIA-DEMO.md); the live web launcher supports `--network sepolia` and a stable deployment-specific recovery database.
+On Sepolia only, public configuration and health reads share a bounded display-readiness cache: each public request waits at most one second for the shared check. Checks continue in the background, have a separate ninety-second whole-sweep deadline, revalidate after thirty seconds and expire after one minute. Responses distinguish checking, timeout and recent results, with completion time and cache age. Failed refreshes preserve a recent verified proof for read-only wallet connection but never authorize payment. Preview, balances, execution and Owner approval continue to read authoritative state directly. See [Sepolia demo setup and acceptance](../docs/SEPOLIA-DEMO.md); the live web launcher supports `--network sepolia` and a stable deployment-specific recovery database.
 
 Optional LLM draft parsing uses `AEGIS_LLM_MODE=off|stub|live` (default `off`), `AEGIS_LLM_PROVIDER=anthropic|openai`, `AEGIS_LLM_MODEL`, `AEGIS_LLM_BASE_URL`, `AEGIS_LLM_TIMEOUT_MS` and a process-environment API key. The model deadline defaults to 10 seconds (configurable from 1 to 30000 milliseconds). Public `planner.timeoutMs` lets the browser wait for intent parsing without extending payment deadlines. Keys are never committed or returned by `/api/v1/config`; `stub` is not live-model evidence.
 

@@ -46,17 +46,22 @@ interface Flight {
 interface Options {
   ttlMs?: number;
   refreshAfterMs?: number;
+  staleIfErrorMs?: number;
   waitMs?: number;
   checkTimeoutMs?: number;
   now?: () => number;
   wallTime?: () => number;
 }
 const timingSchema = z.object({
-  ttlMs: z.number().int().min(2).max(15_000),
-  refreshAfterMs: z.number().int().min(1).max(14_999),
+  ttlMs: z.number().int().min(2).max(300_000),
+  refreshAfterMs: z.number().int().min(1).max(299_999),
+  staleIfErrorMs: z.number().int().min(3).max(300_000),
   waitMs: z.number().int().min(1).max(1000),
-  checkTimeoutMs: z.number().int().min(1).max(30_000),
-}).refine(value => value.refreshAfterMs < value.ttlMs, 'Revalidation must start before the hard display expiry');
+  checkTimeoutMs: z.number().int().min(1).max(120_000),
+}).refine(value => value.refreshAfterMs < value.ttlMs, 'Revalidation must start before the hard display expiry')
+  .refine(value => value.ttlMs < value.staleIfErrorMs, 'Transient-error retention must exceed the fresh display expiry');
+
+const transientCodes = new Set(['CHAIN_UNAVAILABLE', 'RPC_UNAVAILABLE', 'RPC_ERROR', 'READINESS_TIMEOUT']);
 
 // The key is never returned by an endpoint. Changes to transport, identities,
 // contracts or the executor key invalidate even a still-young cached proof.
@@ -78,6 +83,7 @@ export class PublicReadinessCache {
   private identity: string | undefined;
   private generation = 0;
   private entry: Entry | undefined;
+  private lastReady: Entry | undefined;
   private flight: Flight | undefined;
   private closed = false;
 
@@ -87,10 +93,11 @@ export class PublicReadinessCache {
     options: Options = {},
   ) {
     this.timing = timingSchema.parse({
-      ttlMs: options.ttlMs ?? 15_000,
-      refreshAfterMs: options.refreshAfterMs ?? 5000,
+      ttlMs: options.ttlMs ?? 60_000,
+      refreshAfterMs: options.refreshAfterMs ?? 30_000,
+      staleIfErrorMs: options.staleIfErrorMs ?? 300_000,
       waitMs: options.waitMs ?? 1000,
-      checkTimeoutMs: options.checkTimeoutMs ?? 30_000,
+      checkTimeoutMs: options.checkTimeoutMs ?? 90_000,
     });
     this.now = options.now ?? (() => performance.now());
     this.wallTime = options.wallTime ?? Date.now;
@@ -102,6 +109,7 @@ export class PublicReadinessCache {
       this.identity = identity;
       this.generation++;
       this.entry = undefined;
+      this.lastReady = undefined;
     }
     const generation = this.generation;
     const cached = this.current('cache');
@@ -121,15 +129,18 @@ export class PublicReadinessCache {
     if (this.closed) return this.pending('READINESS_UNAVAILABLE', '服务已停止检查。', 'error');
     if (generation !== this.generation) return this.pending('READINESS_CHECKING', '部署配置已变化，正在重新核对。', 'checking');
     if (flight?.expired && flight.generation === generation) {
-      return this.current('fresh') ?? this.pending('READINESS_TIMEOUT', 'Sepolia 链上检查超时；请检查 RPC 后重试。', 'error');
+      return this.current('fresh') ?? this.degraded('READINESS_TIMEOUT', 'Sepolia 链上检查超时；已保留上次核对结果用于只读连接，付款仍暂停。', 'error')
+        ?? this.pending('READINESS_TIMEOUT', 'Sepolia 链上检查超时；请检查 RPC 后重试。', 'error');
     }
-    return this.current('fresh') ?? this.pending('READINESS_CHECKING', '正在核对 Sepolia 网络、合约和价格源，请稍候。', 'checking');
+    return this.current('fresh') ?? this.degraded('READINESS_CHECKING', '正在后台更新 Sepolia 状态；已保留上次核对结果用于只读连接。', 'checking')
+      ?? this.pending('READINESS_CHECKING', '正在核对 Sepolia 网络、合约和价格源，请稍候。', 'checking');
   }
 
   close(): void {
     this.closed = true;
     this.generation++;
     this.entry = undefined;
+    this.lastReady = undefined;
     if (this.flight) {
       if (this.flight.deadline) clearTimeout(this.flight.deadline);
       this.flight.finish();
@@ -141,9 +152,25 @@ export class PublicReadinessCache {
     if (!entry) return undefined;
     const age = this.now() - entry.completedAt;
     if (age < 0 || age >= this.timing.ttlMs) return undefined;
+    if (entry.error && entry.value.code && transientCodes.has(entry.value.code)) {
+      const fallback = this.degraded(entry.value.code, entry.value.message ?? 'Sepolia RPC 暂时不可用；付款已暂停。', 'error');
+      if (fallback) return fallback;
+    }
     return {
       ...entry.value, checkedAt: entry.checkedAt, cacheAgeMs: Math.floor(age),
       cacheTtlMs: this.timing.ttlMs, source: entry.error ? 'error' : source,
+    };
+  }
+
+  private degraded(code: string, message: string, source: 'checking' | 'error'): PublicReadiness | undefined {
+    const entry = this.lastReady;
+    if (!entry) return undefined;
+    const age = this.now() - entry.completedAt;
+    if (age < 0 || age >= this.timing.staleIfErrorMs) return undefined;
+    return {
+      ...entry.value, ready: false, code, message,
+      checkedAt: entry.checkedAt, cacheAgeMs: Math.floor(age),
+      cacheTtlMs: this.timing.staleIfErrorMs, source,
     };
   }
 
@@ -152,7 +179,9 @@ export class PublicReadinessCache {
   }
 
   private save(value: Readiness, error = false): void {
-    this.entry = { value, completedAt: this.now(), checkedAt: new Date(this.wallTime()).toISOString(), error };
+    const entry = { value, completedAt: this.now(), checkedAt: new Date(this.wallTime()).toISOString(), error };
+    this.entry = entry;
+    if (value.ready) this.lastReady = entry;
   }
 
   private start(): void {
@@ -176,7 +205,7 @@ export class PublicReadinessCache {
       const raw = await this.load();
       if (this.closed || flight.expired || flight.generation !== this.generation) return;
       const parsed = readinessSchema.safeParse(raw);
-      if (parsed.success) this.save(parsed.data);
+      if (parsed.success) this.save(parsed.data, Boolean(parsed.data.code && transientCodes.has(parsed.data.code)));
       else this.save({ ready: false, code: 'READINESS_INVALID', message: '链上检查结果未通过校验，请检查服务配置。' }, true);
     } catch {
       if (!this.closed && !flight.expired && flight.generation === this.generation) {

@@ -27,7 +27,7 @@ export const ReadinessSchema = z.object({
   if (!value.ready) return;
   if (!['fresh', 'cache'].includes(value.source) || !value.checkedAt
       || value.cacheAgeMs === undefined || value.cacheAgeMs === null
-      || value.cacheTtlMs === undefined || value.cacheTtlMs <= 0 || value.cacheTtlMs > 15_000
+      || value.cacheTtlMs === undefined || value.cacheTtlMs <= 0 || value.cacheTtlMs > 300_000
       || value.cacheAgeMs >= value.cacheTtlMs) {
     context.addIssue({ code: 'custom', message: 'Ready display proof must be complete and within its hard expiry' });
   }

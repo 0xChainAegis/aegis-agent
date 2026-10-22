@@ -38,8 +38,9 @@ def live_environment(source=None):
     return env
 
 
-def prepare_environment(source=None):
-    env = live_environment(source)
+def prepare_node_environment(source=None):
+    """Copy the environment and verify the Node runtime without requiring an LLM."""
+    env = dict(os.environ if source is None else source)
     configured = env.get('AEGIS_NODE_BINARY')
     node = shutil.which(configured or 'node', path=env.get('PATH', ''))
     if not node:
@@ -54,6 +55,11 @@ def prepare_environment(source=None):
     node = str(Path(node).resolve())
     env['PATH'] = str(Path(node).parent) + os.pathsep + env.get('PATH', '')
     return node, env
+
+
+def prepare_environment(source=None):
+    env = live_environment(source)
+    return prepare_node_environment(env)
 
 
 def main(args=None):

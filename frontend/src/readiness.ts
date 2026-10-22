@@ -55,21 +55,26 @@ export function serviceReadiness(config: unknown, context: ServiceContext = {}):
   const { chainId, mode, readiness } = parsed.data;
   const network = chainId === 11155111 ? 'Sepolia' : chainId === 31337 ? '本地链' : `Chain ${chainId}`;
   const code = readiness.code || '';
+  const verified = readiness.rpcChainId === chainId
+    && readiness.contractsDeployed === true
+    && readiness.deploymentBindingsVerified === true;
   if (code === 'READINESS_CHECKING') return status({
-    phase: 'loading', tone: 'neutral', code, title: `正在核对 ${network}`,
-    message: '正在后台读取网络、部署和价格源。检查完成前不会请求付款；页面会自动更新。',
-    actionLabel: '重新检查状态', canConnect: false, canPay: false,
+    phase: verified ? 'limited' : 'loading', tone: verified ? 'amber' : 'neutral', code,
+    title: verified ? `${network} 正在后台更新` : `正在核对 ${network}`,
+    message: verified
+      ? '保留上次成功核对的连接与只读信息；最新检查完成前暂停预览和付款。'
+      : '正在后台读取网络、部署和价格源。检查完成前不会请求付款；页面会自动更新。',
+    actionLabel: '重新检查状态', canConnect: verified, canPay: false,
   });
-  if (code === 'READINESS_TIMEOUT') return stopped(
-    code, `${network} 检查超时`, '节点检查未在限定时间内完成，付款已暂停。请检查 RPC；完成中的检查结束后可重试。', 'amber',
-  );
+  if (code === 'READINESS_TIMEOUT') return verified ? status({
+    phase: 'limited', tone: 'amber', code, title: `${network} 状态更新超时`,
+    message: '保留上次成功核对的连接与只读信息；付款已暂停，请稍后重新检查 RPC。',
+    actionLabel: '刷新状态重试', canConnect: true, canPay: false,
+  }) : stopped(code, `${network} 检查超时`, '节点检查未在限定时间内完成，付款已暂停。请检查 RPC；完成中的检查结束后可重试。', 'amber');
   if (code === 'CHAIN_MISMATCH' || (readiness.rpcChainId !== undefined && readiness.rpcChainId !== chainId)) {
     return stopped('CHAIN_MISMATCH', '网络配置不一致', `RPC 返回的网络与 ${network} 配置不一致。请修正节点配置后重试。`);
   }
 
-  const verified = readiness.rpcChainId === chainId
-    && readiness.contractsDeployed === true
-    && readiness.deploymentBindingsVerified === true;
   if (readiness.ready && verified && !code) return status({
     phase: 'ready', tone: 'green', code: 'READY',
     title: mode === 'local_chain' ? '本地演示可用' : `${network} 已就绪`,
@@ -86,9 +91,11 @@ export function serviceReadiness(config: unknown, context: ServiceContext = {}):
     message: '资金池或执行账户需要补充测试 ETH，付款已暂停。仍可登录查看当前余额。',
     actionLabel: '补充后重新检查', canConnect: verified, canPay: false,
   });
-  if (['CHAIN_UNAVAILABLE', 'RPC_UNAVAILABLE', 'RPC_ERROR'].includes(code)) return stopped(
-    code, `${network} RPC 暂不可用`, 'API 正在运行，但暂时无法读取链上状态。请检查 RPC 服务或稍后重试。', 'amber',
-  );
+  if (['CHAIN_UNAVAILABLE', 'RPC_UNAVAILABLE', 'RPC_ERROR'].includes(code)) return verified ? status({
+    phase: 'limited', tone: 'amber', code, title: `${network} RPC 暂时波动`,
+    message: '保留上次成功核对的连接与只读信息；最新链上读取恢复前暂停预览和付款。',
+    actionLabel: '刷新状态重试', canConnect: true, canPay: false,
+  }) : stopped(code, `${network} RPC 暂不可用`, 'API 正在运行，但暂时无法读取链上状态。请检查 RPC 服务或稍后重试。', 'amber');
   if (['DEPLOYMENT_MISSING', 'CONTRACT_MISSING', 'OWNER_MISMATCH', 'DEPLOYMENT_BINDING_MISMATCH', 'POLICY_ENGINE_MISMATCH', 'ORACLE_CONFIGURATION_CHANGED', 'EXECUTOR_MISMATCH'].includes(code)) {
     return stopped(code, '合约配置未就绪', '部署地址、合约绑定或权限未通过链上核对。请检查部署文件和后端配置。');
   }

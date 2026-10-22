@@ -10,8 +10,10 @@ const verified = { rpcChainId: 31337, contractsDeployed: true, deploymentBinding
 const ready = { ...verified, ready: true, feedFresh: true };
 type Readiness = Record<string, unknown>;
 
-async function fixture(page: Page, readiness: Readiness, signedIn = false, interactiveOwner = false) {
+async function fixture(page: Page, readiness: Readiness, signedIn = false, interactiveOwner = false, previewRecovery = false) {
   let current = readiness;
+  let currentTasks: Record<string, unknown>[] = [];
+  let previewAttempts = 0;
   const writes: string[] = [];
   const authRequests: string[] = [];
   if (signedIn) await page.addInitScript(({ owner }) => {
@@ -47,6 +49,26 @@ async function fixture(page: Page, readiness: Readiness, signedIn = false, inter
       await route.fulfill({ json: { token: 'readiness-interactive-owner-fixture', address: owner, chainId: 31337, expiresAt } });
       return;
     }
+    if (previewRecovery && request.method() === 'POST' && path.endsWith('/intents')) {
+      writes.push(path);
+      await route.fulfill({ json: { draftId: 'preview-retry-draft', status: 'READY', revision: 1, recipient, amountWei: '100000000000000', purpose: 'Preview retry', missingFields: [] } });
+      return;
+    }
+    if (previewRecovery && request.method() === 'POST' && path.endsWith('/intents/preview-retry-draft/preview')) {
+      writes.push(path);
+      previewAttempts += 1;
+      if (previewAttempts === 1) {
+        await route.fulfill({ status: 503, json: { error: { code: 'CHAIN_UNAVAILABLE', message: 'Sepolia preview temporarily unavailable' } } });
+      } else {
+        await route.fulfill({ json: {
+          quoteId: 'preview-retry-quote', draftId: 'preview-retry-draft', draftVersion: 1,
+          status: 'READY', chainId: 31337, walletAddress: wallet, recipient,
+          amountWei: '100000000000000', maxUsdCost6: '500000', decision: 'AUTO',
+          quoteExpiresAtSeconds: Math.floor(Date.now() / 1000) + 60,
+        } });
+      }
+      return;
+    }
     if (request.method() !== 'GET') {
       writes.push(path);
       await route.fulfill({ status: 503, json: { error: { code: 'FIXTURE_NO_WRITES', message: 'Fixture does not accept writes' } } });
@@ -56,12 +78,22 @@ async function fixture(page: Page, readiness: Readiness, signedIn = false, inter
       await route.fulfill({ json: { mode: 'local_chain', chainId: 31337, rpcUrl: 'http://127.0.0.1:8545', walletAddress: wallet, ownerAddress: owner, recipientAddress: recipient, agentAddress: agent, readiness: current } });
     } else if (path.endsWith('/wallets/current')) {
       await route.fulfill({ json: { chainId: 31337, walletAddress: wallet, ownerAddress: owner, recipientAddress: recipient, walletBalanceWei: '1000000000000000000', agentBalanceWei: '1000000000000000000', recipientBalanceWei: '1000000000000000', observedBlockNumber: '42', observedBlockHash: '0x' + 'ab'.repeat(32), observedAt: new Date().toISOString(), dataSource: 'chain' } });
-    } else if (path.endsWith('/tasks')) await route.fulfill({ json: { tasks: [] } });
+    } else if (path.endsWith('/tasks')) await route.fulfill({ json: { tasks: currentTasks } });
+    else if (/\/tasks\/[^/]+$/.test(path)) {
+      const taskId = path.split('/').at(-1);
+      const task = currentTasks.find(item => item.taskId === taskId);
+      await route.fulfill(task ? { json: task } : { status: 404, json: { error: { code: 'TASK_NOT_FOUND', message: 'Missing task' } } });
+    }
     else await route.fulfill({ status: 404, json: {} });
   });
   await page.goto('/');
   await expect(page.locator('.topbar-status')).not.toContainText('API 离线');
-  return { writes, authRequests, setReadiness(value: Readiness) { current = value; } };
+  return {
+    writes, authRequests,
+    setReadiness(value: Readiness) { current = value; },
+    setTasks(value: Record<string, unknown>[]) { currentTasks = value; },
+    previewAttempts: () => previewAttempts,
+  };
 }
 
 async function lowReserve(page: Page) {
@@ -143,6 +175,21 @@ test('a ready session detects deterioration on refresh and immediately disables 
   expect(state.writes).toEqual([]);
 });
 
+test('a connected owner stays connected during verified background revalidation while payment remains disabled', async ({ page }) => {
+  const state = await fixture(page, ready, false, true);
+  await page.getByTestId('connect-wallet').click();
+  await page.getByTestId('wallet-option-legacy-0').click();
+  await page.getByTestId('owner-login').click();
+  await expect(page.getByTestId('intent-message')).toBeEnabled();
+  state.setReadiness({ ...verified, ready: false, code: 'READINESS_CHECKING', source: 'checking' });
+  await page.getByRole('button', { name: '刷新服务状态', exact: true }).click();
+  await expect(page.getByTestId('service-banner')).toContainText('保留上次成功核对');
+  await expect(page.getByTestId('connect-wallet')).toContainText('0x1111…1111');
+  await expect(page.getByTestId('intent-message')).toBeDisabled();
+  await expect(page.getByTestId('send-intent')).toBeDisabled();
+  expect(state.writes).toEqual([]);
+});
+
 test('topbar and retry communicate the current service phase', async ({ page }) => {
   const state = await fixture(page, ready);
   await expect(page.getByTestId('service-status')).toContainText('本地演示 · 可操作');
@@ -159,8 +206,40 @@ test('background readiness checking stays responsive, blocks wallet actions, and
   await expect(page.getByTestId('service-banner')).toContainText('正在后台读取');
   await expect(page.getByTestId('connect-wallet')).toBeDisabled();
   state.setReadiness(ready);
-  await page.getByRole('button', { name: '刷新服务状态', exact: true }).click();
+  // Pending readiness is polled automatically instead of forcing the user to
+  // click retry or wait for the normal thirty-second refresh interval.
   await expect(page.getByTestId('service-banner')).toHaveCount(0);
   await expect(page.getByTestId('connect-wallet')).toBeEnabled();
+  expect(state.writes).toEqual([]);
+});
+
+test('a failed chain preview keeps the draft and can be retried without another intent', async ({ page }) => {
+  const state = await fixture(page, ready, false, true, true);
+  await page.getByTestId('connect-wallet').click();
+  await page.getByTestId('wallet-option-legacy-0').click();
+  await page.getByTestId('owner-login').click();
+  await page.getByTestId('intent-message').fill(`向 ${recipient} 转 0.0001 ETH，用于预览重试`);
+  await page.getByTestId('send-intent').click();
+  await expect(page.getByText('草稿已保留，可重新预览。')).toBeVisible();
+  await expect(page.getByTestId('retry-preview')).toBeEnabled();
+  await page.getByTestId('retry-preview').click();
+  await expect(page.getByTestId('confirm-transfer')).toBeEnabled();
+  expect(state.previewAttempts()).toBe(2);
+  expect(state.writes.filter(path => path.endsWith('/intents'))).toHaveLength(1);
+  expect(state.writes.some(path => path.endsWith('/submit'))).toBe(false);
+});
+
+test('a submitted task is polled until its terminal chain result appears', async ({ page }) => {
+  const state = await fixture(page, ready, true);
+  const baseTask = {
+    taskId: 'adaptive-poll-task', status: 'SUBMITTING', chainId: 31337,
+    ownerAddress: owner, walletAddress: wallet, agentAddress: agent, recipient,
+    amountWei: '100000000000000', maxUsdCost6: '500000', purpose: 'Adaptive polling',
+  };
+  state.setTasks([baseTask]);
+  await page.getByRole('button', { name: '刷新服务状态', exact: true }).click();
+  await expect(page.getByText('提交中', { exact: true })).toBeVisible();
+  state.setTasks([{ ...baseTask, status: 'EXECUTED', txHash: '0x' + 'ab'.repeat(32) }]);
+  await expect(page.getByText('链上已确认', { exact: true })).toBeVisible();
   expect(state.writes).toEqual([]);
 });

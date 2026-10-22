@@ -166,6 +166,11 @@ npm run check
 npm run test:e2e
 ```
 
+Sepolia operators can additionally run `npm run check:sepolia` after configuring
+`contracts/.env`. This is a fresh read-only deployment, Chainlink and funding
+check; it neither signs nor broadcasts a transaction and does not replace the
+browser payment acceptance flow.
+
 当前版本在 Node 24 环境下验证通过：类型检查与生产构建、**34 项合约测试**、**47 项后端测试（含嵌套测试）**、**38 个浏览器用例**（钱包、网络与服务状态组 31 个，储备组 7 个）。另有 **9 项离线 Mock 维护器测试**及 **7 项离线模型启动器测试**。浏览器用例覆盖本地真实付款、Owner 审批与取消、网络切换、登录时账户变化、报价过期时停止付款、断连和刷新恢复。
 
 合约测试覆盖授权、预言机边界、预算、审批、重放及直接调用拒绝。后端测试通过明确的链测试夹具覆盖 HTTP 边界、持久化恢复、事件绑定与运行钱包地址绑定。浏览器测试使用真实本地合约与余额以及 Mock Feed，覆盖确认、审批与取消、建议金额变化、数据缺失、运行钱包身份缺失或不一致、离线失败，以及刷新后不重复付款。
