@@ -23,6 +23,9 @@ signing or broadcasting a transaction, and never prints the RPC URL or key.
 RPC calls default to an 8-second attempt with one bounded retry. Operators may
 set `AEGIS_RPC_TIMEOUT_MS` (1000–30000) and `AEGIS_RPC_RETRY_COUNT` (0–2); invalid
 external values stop startup instead of silently changing transport behavior.
+Concurrent public reads are admitted through a two-request gate to avoid bursts
+of parallel HTTP requests on rate-limited Sepolia endpoints. The wallet
+transport used to broadcast signed transactions is not affected by this gate.
 
 `GET /health` returns 200 only after checking all six bytecode addresses: Wallet,
 ACL, Attestation, Oracle, PolicyEngine and Feed. It also verifies Wallet and

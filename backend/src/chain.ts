@@ -11,6 +11,7 @@ import {
 } from '@aegis/shared';
 import type { Config } from './config.js';
 import { ApiError, errorMessage } from './errors.js';
+import { boundedHttp } from './rpc-concurrency.js';
 
 export const walletAbi = parseAbi(walletAbiSignatures);
 export const oracleAbi = parseAbi(oracleAbiSignatures);
@@ -112,7 +113,7 @@ export class ViemGateway implements Gateway {
   readonly walletClient;
   constructor(readonly config: Config) {
     const chain = defineChain({ id: config.chainId, name: config.mode === 'local_chain' ? 'Hardhat local' : 'Sepolia', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: { default: { http: [config.rpcUrl] } } });
-    this.publicClient = createPublicClient({ chain, transport: http(config.rpcUrl, { timeout: config.rpcTimeoutMs, retryCount: config.rpcRetryCount }) });
+    this.publicClient = createPublicClient({ chain, transport: boundedHttp(config.rpcUrl, { timeout: config.rpcTimeoutMs, retryCount: config.rpcRetryCount }) });
     try { this.account = config.agentKey ? privateKeyToAccount(config.agentKey) : undefined; }
     catch { throw new Error('AEGIS_AGENT_PRIVATE_KEY is invalid'); }
     this.walletClient = this.account ? createWalletClient({ chain, account: this.account, transport: http(config.rpcUrl, { timeout: config.rpcTimeoutMs, retryCount: config.rpcRetryCount }) }) : undefined;
