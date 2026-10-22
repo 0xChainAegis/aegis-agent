@@ -15,25 +15,23 @@ export AEGIS_AGENT_PRIVATE_KEY="0x_your_agent_key"
 npm run start --workspace backend
 ```
 
-Before starting the UI, the same environment can run a read-only gate with
-`npm run check:sepolia`. This command reads `contracts/.env`; exported
-`AEGIS_*` variables take precedence. It maps the
-deployment script's `RPC_URL` to the backend RPC setting, never
-prints the RPC URL or private key, and never signs or broadcasts a transaction.
+Before starting the UI, run `npm run check:sepolia` from the repository root.
+The command reads `contracts/.env`, maps its deployment `RPC_URL` to the backend,
+performs a fresh read-only sweep, and validates the result with Zod. It checks
+the network, bytecode, bindings, roles, Feed freshness and balances without
+signing or broadcasting a transaction, and never prints the RPC URL or key.
+RPC calls default to an 8-second attempt with one bounded retry. Operators may
+set `AEGIS_RPC_TIMEOUT_MS` (1000–30000) and `AEGIS_RPC_RETRY_COUNT` (0–2); invalid
+external values stop startup instead of silently changing transport behavior.
 
-`GET /health` and `GET /api/v1/health` are process-liveness probes. They do not
-depend on RPC availability. `GET /api/v1/readiness` checks all six bytecode
-addresses: Wallet, ACL, Attestation, Oracle, PolicyEngine and Feed. It also verifies Wallet and
+`GET /health` returns 200 only after checking all six bytecode addresses: Wallet,
+ACL, Attestation, Oracle, PolicyEngine and Feed. It also verifies Wallet and
 PolicyEngine bindings, Wallet consumer/manager authorization, the locked native
 ETH Feed, executor and Wallet roles, Feed freshness, and both Wallet and executor
-test-ETH balances. Readiness calls are deduplicated and cached briefly; use the
-CLI for an explicit fresh check. Testnet deployment files must include `policyEngineAddress`;
+test-ETH balances. Testnet deployment files must include `policyEngineAddress`;
 old v1 deployment files fail closed instead of silently bypassing the engine.
 
-RPC behavior can be bounded with `AEGIS_RPC_TIMEOUT_MS` (1000–30000,
-default 8000), `AEGIS_RPC_RETRY_COUNT` (0–3, default 1), and
-`AEGIS_READINESS_TTL_MS` (0–60000, default 5000). These inputs are validated at
-startup.
+On Sepolia only, public configuration and health reads share a bounded display-readiness cache: each public request waits at most one second for the shared check. Checks continue in the background; completed results revalidate after five seconds and expire after fifteen. Responses distinguish checking, timeout and recent results, with completion time and cache age. Failed refreshes replace ready results. Preview, balances, execution and Owner approval continue to read authoritative state directly. See [Sepolia demo setup and acceptance](../docs/SEPOLIA-DEMO.md); the live web launcher supports `--network sepolia` and a stable deployment-specific recovery database.
 
 Optional LLM draft parsing uses `AEGIS_LLM_MODE=off|stub|live` (default `off`), `AEGIS_LLM_PROVIDER=anthropic|openai`, `AEGIS_LLM_MODEL`, `AEGIS_LLM_BASE_URL`, `AEGIS_LLM_TIMEOUT_MS` and a process-environment API key. The model deadline defaults to 10 seconds (configurable from 1 to 30000 milliseconds). Public `planner.timeoutMs` lets the browser wait for intent parsing without extending payment deadlines. Keys are never committed or returned by `/api/v1/config`; `stub` is not live-model evidence.
 
@@ -41,7 +39,7 @@ Optional LLM draft parsing uses `AEGIS_LLM_MODE=off|stub|live` (default `off`), 
 
 Amounts are decimal integer strings: ETH in wei, USD in USD6. Parsing defaults to the deterministic `rule_parser`; an optional `AEGIS_LLM_MODE=stub|live` path can produce a draft with a strict JSON schema, but never authorizes or executes it. Only native ETH is supported. USD/other-token text asks for clarification, and never becomes an ETH amount. A complete draft still needs preview and explicit confirmation.
 
-Public reads: `GET /health`, `GET /api/v1/health`, `GET /api/v1/readiness`, `GET /api/v1/config`, `GET /api/v1/docs/:slug`. Login: `POST /api/v1/auth/challenge {address,chainId}`, sign the returned message with the configured owner wallet, then `POST /api/v1/auth/verify {challengeId,address,signature}`. Every challenge binds domain, address, chain, random nonce and expiration, and is consumed once. Use the returned token in `Authorization: Bearer ...`.
+Public reads: `GET /health`, `GET /api/v1/config`, `GET /api/v1/docs/:slug`. Login: `POST /api/v1/auth/challenge {address,chainId}`, sign the returned message with the configured owner wallet, then `POST /api/v1/auth/verify {challengeId,address,signature}`. Every challenge binds domain, address, chain, random nonce and expiration, and is consumed once. Use the returned token in `Authorization: Bearer ...`.
 
 Authenticated routes:
 
@@ -51,6 +49,7 @@ Authenticated routes:
 - `POST /api/v1/intents/:id/preview {expectedRevision,maxUsdCost6?}`. Default cap is the displayed Feed valuation plus 1%, rounded up. The UI must show and confirm that cap.
 - `POST /api/v1/intents/:id/submit {expectedRevision,quoteId}` returns a task with HTTP 202. The server verifies the stored quote, revision and expiry. Caller-supplied policy or execution fields are not accepted.
 - `GET /api/v1/tasks/:id`, `GET /api/v1/tasks/:id/evidence`. Evidence preserves the preview-time chain-read decision and observed block, then binds an executed task's Wallet payment event to the PolicyEngine budget event in the same receipt. It exposes the actual decision, USD6 cost, cumulative daily spend, policy version and Chainlink Feed round. A rejected preview has no contract event because reverted EVM logs do not persist; its source remains explicitly `chain_read`, never `contract_event`.
+  Verified policy fields are limited to those matched in the Wallet and PolicyEngine receipt events. `configuredPriceSource` reports the current Oracle and Feed configuration separately with `verified: false`; those addresses are not evidence of the price source used by a historical transaction.
 - `GET /api/v1/tasks/:id/owner-tx?action=approve|cancel` prepares calldata; only the browser owner wallet signs/sends it. High-risk execution uses `owner_approve_and_execute`, not an executor-signed post-approval transaction.
 - `POST /api/v1/tasks/:id/observed-tx {txHash,action:approve|cancel}` registers a hint. The backend independently verifies sender, target, calldata, receipt and matching contract event.
 

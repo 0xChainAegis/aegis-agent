@@ -48,7 +48,8 @@ function parsePositiveBigInt(env, name) {
 
 function readSepoliaDeploymentConfig(env = process.env) {
   const privateKey = parsePrivateKey(env);
-  const ownerAddress = new Wallet(privateKey).address;
+  const deployerAddress = new Wallet(privateKey).address;
+  const ownerAddress = env.OWNER_ADDRESS === undefined ? deployerAddress : parseAddress(env, "OWNER_ADDRESS");
   const agentAddress = parseAddress(env, "AGENT_ADDRESS");
   const recipientAddress = parseAddress(env, "RECIPIENT_ADDRESS");
   const feedAddress = parseAddress(env, "ETH_USD_FEED_ADDRESS");
@@ -72,6 +73,9 @@ function readSepoliaDeploymentConfig(env = process.env) {
   if (new Set([ownerAddress, agentAddress, recipientAddress].map((value) => value.toLowerCase())).size !== 3) {
     throw new Error("owner, agent, and recipient must be three different addresses");
   }
+  if ([agentAddress, recipientAddress].some((value) => value.toLowerCase() === deployerAddress.toLowerCase())) {
+    throw new Error("deployer, agent, and recipient must be three different addresses");
+  }
 
   const confirmations = Number(env.DEPLOY_CONFIRMATIONS || "2");
   if (!Number.isSafeInteger(confirmations) || confirmations < 1 || confirmations > 64) {
@@ -79,7 +83,7 @@ function readSepoliaDeploymentConfig(env = process.env) {
   }
 
   return {
-    privateKey, rpcUrl, ownerAddress, agentAddress, recipientAddress, feedAddress,
+    privateKey, rpcUrl, deployerAddress, ownerAddress, agentAddress, recipientAddress, feedAddress,
     autoLimitUsd6, perTxLimitUsd6, dailyLimitUsd6, maxPriceAge, vaultFundingWei, confirmations,
   };
 }

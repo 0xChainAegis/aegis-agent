@@ -11,8 +11,12 @@ import { createApiServer } from '../src/server.js';
 import { loadConfig, LOCAL_AGENT_KEY, type Config } from '../src/config.js';
 import { ApiError } from '../src/errors.js';
 import { StubIntentClient, type LlmIntentClient } from '../src/llm.js';
+import { z } from 'zod';
 import type { Gateway, Snapshot, Quote, Prepared, Outcome } from '../src/chain.js';
-import type { Task } from '@aegis/shared';
+import {
+  POLICY_EVIDENCE_VERIFICATION_SCOPE, POLICY_EVIDENCE_VERIFIED_FIELDS,
+  type PolicyEvidence, type Task,
+} from '@aegis/shared';
 
 const OWNER_KEY: Hex = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 const owner = privateKeyToAccount(OWNER_KEY);
@@ -70,8 +74,9 @@ class FakeChain implements Gateway {
         engineAddress: policyEngine, event: 'BudgetConsumed', actionType: 'NATIVE_TRANSFER',
         decision: role === 'approve' ? 'REQUIRE_APPROVAL' : 'ALLOW', requestHash: task.requestHash!, actor: task.agentAddress,
         costUsd6: '3000000', day: '20000', spentUsd6: '3000000', transactionHash: hash,
-        policyVersion: task.policyVersion, oracleAddress: wallet, feedAddress: wallet, roundId: '1', updatedAtSeconds: '1999999999',
+        policyVersion: task.policyVersion, roundId: '1', updatedAtSeconds: '1999999999',
         blockNumber: '2', blockHash, logIndex: 0, verified: true,
+        verificationScope: POLICY_EVIDENCE_VERIFICATION_SCOPE, verifiedFields: POLICY_EVIDENCE_VERIFIED_FIELDS,
       } : undefined,
     };
   }
@@ -89,8 +94,9 @@ class FakeChain implements Gateway {
       policyEvidence: action === 'approve' ? {
         engineAddress: policyEngine, event: 'BudgetConsumed', actionType: 'NATIVE_TRANSFER', decision: 'REQUIRE_APPROVAL',
         requestHash: task.requestHash!, actor: task.agentAddress, costUsd6: '3000000', day: '20000', spentUsd6: '3000000',
-        policyVersion: task.policyVersion, oracleAddress: wallet, feedAddress: wallet, roundId: '1', updatedAtSeconds: '1999999999',
+        policyVersion: task.policyVersion, roundId: '1', updatedAtSeconds: '1999999999',
         transactionHash: hash, blockNumber: '3', blockHash, logIndex: 0, verified: true,
+        verificationScope: POLICY_EVIDENCE_VERIFICATION_SCOPE, verifiedFields: POLICY_EVIDENCE_VERIFIED_FIELDS,
       } : undefined,
     };
   }
@@ -131,6 +137,26 @@ async function setup(options: { dbPath?: string; chain?: FakeChain; cfg?: Config
   async function close() { await new Promise<void>(resolve => server.close(() => resolve())); store.close(); }
   return { cfg, store, chain, service, call, rawCall, login, draftAndSubmit, close };
 }
+
+test('public configuration offers the development wallet only for the default local Owner', async () => {
+  const publicConfig = z.object({ localTestWalletAvailable: z.boolean(), ownerAddress: z.string() });
+  const cases: Array<{ mode: Config['mode']; chainId: number; ownerAddress: Address; expected: boolean }> = [
+    { mode: 'local_chain', chainId: 31337, ownerAddress: owner.address, expected: true },
+    { mode: 'local_chain', chainId: 31337, ownerAddress: recipient, expected: false },
+    { mode: 'testnet', chainId: 11155111, ownerAddress: owner.address, expected: false },
+    { mode: 'mock', chainId: 31337, ownerAddress: owner.address, expected: false },
+  ];
+  for (const row of cases) {
+    const app = await setup({ cfg: { ...config(), mode: row.mode, chainId: row.chainId, ownerAddress: row.ownerAddress } });
+    try {
+      const response = await app.call('/config');
+      assert.equal(response.status, 200);
+      const body = publicConfig.parse(response.body);
+      assert.equal(body.localTestWalletAvailable, row.expected);
+      assert.equal(body.ownerAddress, row.ownerAddress);
+    } finally { await app.close(); }
+  }
+});
 
 test('owner login uses real signatures, one-time challenge, chain binding, and protected HTTP routes', async () => {
   const app = await setup();
@@ -202,6 +228,14 @@ test('idempotent writes return the same entity; different contents conflict; dup
     assert.equal(evidence.body.policy.requestHash, task.body.requestHash);
     assert.equal(evidence.body.policy.engineAddress, policyEngine);
     assert.equal(evidence.body.policy.transactionHash, task.body.txHash);
+    assert.equal(evidence.body.policy.verificationScope, POLICY_EVIDENCE_VERIFICATION_SCOPE);
+    assert.deepEqual(evidence.body.policy.verifiedFields, POLICY_EVIDENCE_VERIFIED_FIELDS);
+    assert.equal(evidence.body.policy.oracleAddress, undefined);
+    assert.equal(evidence.body.policy.feedAddress, undefined);
+    assert.deepEqual(evidence.body.configuredPriceSource, {
+      oracleAddress: app.cfg.oracleAddress, feedAddress: app.cfg.feedAddress,
+      verified: false, scope: 'CURRENT_CONFIGURATION',
+    });
     assert.equal(evidence.body.previewPolicy.source, 'chain_read');
     assert.equal(evidence.body.previewPolicy.decision, 'ALLOW');
     assert.equal(evidence.body.previewPolicy.observedBlockNumber, '1');
@@ -217,7 +251,8 @@ test('accepted broadcast followed by timeout survives SQLite restart without re-
     await first.login(); const created = await first.draftAndSubmit(); taskId = created.submit.body.taskId;
     await first.service.tick(); assert.equal(first.service.getTask(owner.address, taskId).status, 'UNKNOWN');
   } finally { await first.close(); }
-  const second = await setup({ dbPath: path, chain });
+  const changedConfig = { ...config(path), oracleAddress: wallet, feedAddress: recipient };
+  const second = await setup({ cfg: changedConfig, chain });
   try {
     await second.login(); await second.service.tick();
     const task = await second.call(`/tasks/${taskId!}`);
@@ -225,6 +260,40 @@ test('accepted broadcast followed by timeout survives SQLite restart without re-
     const evidence = await second.call(`/tasks/${taskId!}/evidence`);
     assert.equal(evidence.body.policy.verified, true);
     assert.equal(evidence.body.policy.decision, 'ALLOW');
+    assert.equal(evidence.body.policy.policyVersion, '1');
+    assert.equal(evidence.body.policy.roundId, '1');
+    assert.equal(evidence.body.policy.updatedAtSeconds, '1999999999');
+    assert.equal(evidence.body.policy.oracleAddress, undefined);
+    assert.equal(evidence.body.policy.feedAddress, undefined);
+    assert.deepEqual(evidence.body.configuredPriceSource, {
+      oracleAddress: wallet, feedAddress: recipient, verified: false, scope: 'CURRENT_CONFIGURATION',
+    });
+  } finally { await second.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+test('legacy stored evidence drops configuration addresses from its verified receipt projection after restart', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'aegis-legacy-evidence-')); const path = join(directory, 'state.sqlite');
+  const first = await setup({ dbPath: path });
+  let taskId = ''; let expectedPolicy: PolicyEvidence | undefined;
+  try {
+    await first.login(); const created = await first.draftAndSubmit(); taskId = created.submit.body.taskId;
+    await first.service.tick(); await first.service.tick();
+    const persisted = first.service.getTask(owner.address, taskId);
+    assert.equal(persisted.status, 'EXECUTED');
+    assert.ok(persisted.policyEvidence);
+    expectedPolicy = persisted.policyEvidence;
+    const legacyPolicy: Record<string, unknown> = { ...expectedPolicy, oracleAddress: wallet, feedAddress: recipient };
+    delete legacyPolicy.verificationScope; delete legacyPolicy.verifiedFields;
+    first.store.put('task', taskId, owner.address, { ...persisted, policyEvidence: legacyPolicy });
+  } finally { await first.close(); }
+  const second = await setup({ cfg: { ...config(path), oracleAddress: policyEngine, feedAddress: wallet } });
+  try {
+    await second.login();
+    const evidence = await second.call(`/tasks/${taskId}/evidence`);
+    assert.ok(expectedPolicy);
+    assert.deepEqual(evidence.body.policy, { ...expectedPolicy, consumed: true, state: 'VERIFIED' });
+    assert.deepEqual(evidence.body.configuredPriceSource, {
+      oracleAddress: policyEngine, feedAddress: wallet, verified: false, scope: 'CURRENT_CONFIGURATION',
+    });
   } finally { await second.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 test('a transaction persisted before broadcast is reused after service reconstruction and blocks the next nonce', async () => {
@@ -365,8 +434,7 @@ test('policy change fails before broadcast and RPC failure never silently switch
     assert.equal((await app.call(`/tasks/${submit.body.taskId}`)).body.status, 'REQUOTE_REQUIRED'); assert.equal(app.chain.broadcasts, 0);
     app.chain.unavailable = true;
     const state = await app.call('/wallets/current'); assert.equal(state.status, 503); assert.equal(state.body.mode, 'local_chain');
-    assert.equal((await app.call('/health')).status, 200);
-    assert.equal((await app.call('/readiness')).status, 503);
+    assert.equal((await app.call('/health')).status, 503);
   } finally { await app.close(); }
 });
 test('an unresolved agent transaction blocks another nonce allocation and expired quotes never submit', async () => {

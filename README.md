@@ -19,7 +19,8 @@
   <a href="#快速开始">运行</a> ·
   <a href="#验证">验证</a> ·
   <a href="#活动来源">活动</a> ·
-  <a href="#团队与文档">团队</a>
+  <a href="#团队">团队</a> ·
+  <a href="#文档">文档</a>
 </p>
 
 ## <img src="docs/images/section-screens.svg" width="24" height="24" alt="" align="absmiddle"> 产品截图
@@ -74,7 +75,7 @@
 
 ## <img src="docs/images/section-flow.svg" width="24" height="24" alt="" align="absmiddle"> 完整用户流程
 
-1. 用本地测试钱包（或浏览器钱包）以 Owner 身份签名登录；登录不授权付款。
+1. 选择钱包插件并连接，再点击“以 Owner 签名登录”；本地默认部署也可使用“本地测试钱包”。登录不授权付款。
 2. 在总览读取运行钱包余额 B，将下限设为 B + 0.0005 ETH、目标值设为 B + 0.001 ETH。
 3. 准备 0.001 ETH 的补充建议，检查确认抽屉后明确确认，查看任务、交易回执与事件证据。
 4. 按初始 Mock 价格，0.002 ETH 的付款需要单独的 Owner 审批；0.004 ETH 超过单笔硬上限，将被阻止。Owner 审批不能绕过硬性限制。
@@ -150,7 +151,9 @@ npm run dev
 
 打开 [http://127.0.0.1:5173](http://127.0.0.1:5173)。API 监听 3001 端口，本地 RPC 监听 8545 端口，chain ID 为 31337。选择明确标注的本地测试钱包入口，使用公开的开发用 Owner 账户登录。这些开发账户与 ETH 没有现实价值，不得用于存放真实资金。
 
-连接浏览器钱包时，网络不一致会请求插件弹出切换确认；切换成功后仍须使用配置的 Owner 账户登录。钱包切换到 Sepolia 不会改变后端所连接的链。本地 `npm run dev` 会维护已核验 Mock Feed 的报价时间戳；测试网与自动 E2E 测试不会启用此维护器。
+“连接钱包”先打开选择器，展示已发现扩展的名称与图标，支持 EIP-6963 与旧式注入。明确选择插件后只读取账户和网络；账户匹配资金池 Owner 时，再点击“以 Owner 签名登录”。其他账户可保持只读连接。
+
+网络不一致会请求插件弹出切换确认。钱包切换到 Sepolia 不会改变后端或测试网合约的 Owner。本地个人钱包演示可在部署前设置公开地址 `AEGIS_LOCAL_OWNER_ADDRESS`，详见[钱包连接与 Owner 配置](docs/INTEGRATION.md#owner-登录)。本地 `npm run dev` 会维护已核验 Mock Feed 的报价时间戳；测试网与自动 E2E 测试不会启用此维护器。
 
 部署脚本向资金池注入 1 ETH，并设置无需单独 Owner 审批的 5 美元阈值、10 美元单笔硬上限及 15 美元共享 UTC 每日预算。本地 Mock Feed 的初始价格为每 ETH 3,000 美元。
 
@@ -163,11 +166,10 @@ npm run check
 npm run test:e2e
 ```
 
-配置好 `contracts/.env`（也可由已导出的 `AEGIS_*` 变量覆盖）
-中的 Sepolia HTTPS RPC 和专用 Agent 执行密钥后，可运行
-`npm run check:sepolia`。它只读取 chain ID、合约代码、
-绑定、角色、Feed 与余额，不签名、不发交易，也不会输出 RPC URL 或私钥；
-命令成功仅代表只读门槛通过，不等于网页付款已经验收。
+Sepolia operators can additionally run `npm run check:sepolia` after configuring
+`contracts/.env`. This is a fresh read-only deployment, Chainlink and funding
+check; it neither signs nor broadcasts a transaction and does not replace the
+browser payment acceptance flow.
 
 当前版本在 Node 24 环境下验证通过：类型检查与生产构建、**34 项合约测试**、**47 项后端测试（含嵌套测试）**、**38 个浏览器用例**（钱包、网络与服务状态组 31 个，储备组 7 个）。另有 **9 项离线 Mock 维护器测试**及 **7 项离线模型启动器测试**。浏览器用例覆盖本地真实付款、Owner 审批与取消、网络切换、登录时账户变化、报价过期时停止付款、断连和刷新恢复。
 
@@ -191,12 +193,30 @@ npm run test:e2e
 
 <img src="docs/images/eth-shenzhen-2026-poster.png" width="100%" alt="ETH Shenzhen 2026 Hackathon 活动海报。">
 
-## <img src="docs/images/section-team.svg" width="24" height="24" alt="" align="absmiddle"> 团队与文档
+## <img src="docs/images/section-team.svg" width="24" height="24" alt="" align="absmiddle"> 团队
 
-<a href="https://github.com/mia03ther"><img src="https://github.com/mia03ther.png?size=80" width="28" height="28" alt="mia03ther 的 GitHub 头像" align="absmiddle"> <b>MIA_Ether</b></a> — 产品 · 前端 · 集成<br>
-<a href="https://github.com/gitgdut"><img src="https://github.com/gitgdut.png?size=80" width="28" height="28" alt="gitgdut 的 GitHub 头像" align="absmiddle"> <b>purple sun</b></a> — 后端 · 合约<br>
-<a href="https://github.com/qiwei999"><img src="https://github.com/qiwei999.png?size=80" width="28" height="28" alt="qiwei999 的 GitHub 头像" align="absmiddle"> <b>qiwei999</b></a> — AI 意图解析 · 边界校验<br>
-<a href="https://github.com/mantianxingdou10086"><img src="https://github.com/mantianxingdou10086.png?size=80" width="28" height="28" alt="mantianxingdou10086 的 GitHub 头像" align="absmiddle"> <b>满天星斗烟火繁</b></a> — Agent 工程 · 意图评测
+<table width="100%">
+  <tr>
+    <td width="25%" align="center" valign="top">
+      <a href="https://github.com/mia03ther"><img src="https://github.com/mia03ther.png?size=144" width="64" height="64" alt="MIA_Ether 的 GitHub 头像"><br><b>MIA_Ether</b></a><br>
+      <sub>产品 · 前端<br>集成</sub>
+    </td>
+    <td width="25%" align="center" valign="top">
+      <a href="https://github.com/gitgdut"><img src="https://github.com/gitgdut.png?size=144" width="64" height="64" alt="purple sun 的 GitHub 头像"><br><b>purple sun</b></a><br>
+      <sub>后端<br>智能合约</sub>
+    </td>
+    <td width="25%" align="center" valign="top">
+      <a href="https://github.com/qiwei999"><img src="https://github.com/qiwei999.png?size=144" width="64" height="64" alt="qiwei999 的 GitHub 头像"><br><b>qiwei999</b></a><br>
+      <sub>AI 意图解析<br>边界校验</sub>
+    </td>
+    <td width="25%" align="center" valign="top">
+      <a href="https://github.com/mantianxingdou10086"><img src="https://github.com/mantianxingdou10086.png?size=144" width="64" height="64" alt="满天星斗烟火繁的 GitHub 头像"><br><b>满天星斗烟火繁</b></a><br>
+      <sub>Agent 工程<br>意图评测</sub>
+    </td>
+  </tr>
+</table>
+
+## <img src="docs/images/section-architecture.svg" width="24" height="24" alt="" align="absmiddle"> 文档
 
 | 文档 | 内容 |
 |---|---|
@@ -206,6 +226,7 @@ npm run test:e2e
 | [合约规则](contracts/README.md) | 链上授权规则与本地部署 |
 | [界面设计系统](frontend/DESIGN.md) | 布局、明暗主题、组件与可访问性 |
 | [真实 LLM 联调](docs/LLM-LIVE-LOCAL.md) | live 模式的环境变量、启动脚本与本地联调限制 |
+| [Sepolia 演示](docs/SEPOLIA-DEMO.md) | 测试网部署、Owner 与执行账户、启动和付款验收 |
 | [意图评测报告](eval/REPORT.md) | 40 条样本、三种解析器的结果与失败归因 |
 
 [贡献者](https://github.com/0xChainAegis/aegis-agent/graphs/contributors) · MIT 许可证，参见 [LICENSE](LICENSE)。

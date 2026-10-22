@@ -35,3 +35,4 @@ test-results/
 contracts/deployments/localhost.json
 contracts/deployments/hardhat.json
 contracts/deployments/sepolia.json
+contracts/deployments/sepolia/

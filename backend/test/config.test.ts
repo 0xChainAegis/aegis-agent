@@ -16,18 +16,19 @@ test('model timeout defaults to ten seconds and validates explicit overrides', (
   }
 });
 
-test('RPC tuning is validated and bounded by Zod', () => {
+test('RPC transport defaults to one bounded retry and validates external tuning', () => {
   const defaults = loadConfig({ AEGIS_MODE: 'mock' });
   assert.equal(defaults.rpcTimeoutMs, 8_000);
   assert.equal(defaults.rpcRetryCount, 1);
-  assert.equal(defaults.readinessTtlMs, 5_000);
-  const configured = loadConfig({ AEGIS_MODE: 'mock', AEGIS_RPC_TIMEOUT_MS: '30000', AEGIS_RPC_RETRY_COUNT: '0', AEGIS_READINESS_TTL_MS: '0' });
-  assert.equal(configured.rpcTimeoutMs, 30_000);
-  assert.equal(configured.rpcRetryCount, 0);
-  assert.equal(configured.readinessTtlMs, 0);
+  const empty = loadConfig({ AEGIS_MODE: 'mock', AEGIS_RPC_TIMEOUT_MS: '', AEGIS_RPC_RETRY_COUNT: '' });
+  assert.equal(empty.rpcTimeoutMs, 8_000);
+  assert.equal(empty.rpcRetryCount, 1);
+  const boundary = loadConfig({ AEGIS_MODE: 'mock', AEGIS_RPC_TIMEOUT_MS: '30000', AEGIS_RPC_RETRY_COUNT: '2' });
+  assert.equal(boundary.rpcTimeoutMs, 30_000);
+  assert.equal(boundary.rpcRetryCount, 2);
   assert.throws(() => loadConfig({ AEGIS_MODE: 'mock', AEGIS_RPC_TIMEOUT_MS: '999' }), /AEGIS_RPC_TIMEOUT_MS/);
-  assert.throws(() => loadConfig({ AEGIS_MODE: 'mock', AEGIS_RPC_RETRY_COUNT: '4' }), /AEGIS_RPC_RETRY_COUNT/);
-  assert.throws(() => loadConfig({ AEGIS_MODE: 'mock', AEGIS_READINESS_TTL_MS: '-1' }), /AEGIS_READINESS_TTL_MS/);
+  assert.throws(() => loadConfig({ AEGIS_MODE: 'mock', AEGIS_RPC_RETRY_COUNT: '3' }), /AEGIS_RPC_RETRY_COUNT/);
+  assert.throws(() => loadConfig({ AEGIS_MODE: 'mock', AEGIS_RPC_RETRY_COUNT: 'NaN' }), /AEGIS_RPC_RETRY_COUNT/);
 });
 
 function withDeployment(run: (path: string) => void) {

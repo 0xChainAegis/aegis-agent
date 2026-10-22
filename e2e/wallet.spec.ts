@@ -21,7 +21,9 @@ test('real local chain: auto payment, owner approval, cancel, hard block, eviden
  expect(evidence.verification.chainVerified).toBe(true);expect(evidence.verification.hashVerified).toBe(true);
  expect(evidence.policy).toMatchObject({engineAddress:config.policyEngineAddress,event:'BudgetConsumed',actionType:'NATIVE_TRANSFER',decision:'ALLOW',costUsd6:'3000000',verified:true,consumed:true,state:'VERIFIED'});
  expect(evidence.policy.requestHash.toLowerCase()).toBe(evidence.intent.requestHash.toLowerCase());
- expect(evidence.policy.oracleAddress.toLowerCase()).toBe(config.oracleAddress.toLowerCase());expect(evidence.policy.feedAddress.toLowerCase()).toBe(config.feedAddress.toLowerCase());expect(evidence.policy.roundId).toBeTruthy();
+ expect(evidence.configuredPriceSource).toMatchObject({verified:false,scope:'CURRENT_CONFIGURATION'});
+ expect(evidence.configuredPriceSource.oracleAddress.toLowerCase()).toBe(config.oracleAddress.toLowerCase());expect(evidence.configuredPriceSource.feedAddress.toLowerCase()).toBe(config.feedAddress.toLowerCase());
+ expect(evidence.policy).not.toHaveProperty('oracleAddress');expect(evidence.policy).not.toHaveProperty('feedAddress');expect(evidence.policy.roundId).toBeTruthy();
  await close(page);
  const approvalPreview=await preview(page,config.recipientAddress,'0.002');expect(approvalPreview.decision).toBe('OWNER_APPROVAL');
  const queued=await submit(page);await expect.poll(async()=>(await task(page,queued.taskId)).status).toBe('AWAITING_APPROVAL');

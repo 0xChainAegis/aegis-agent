@@ -11,7 +11,9 @@ import {
   type Hex,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import type { Task } from '@aegis/shared';
+import {
+  POLICY_EVIDENCE_VERIFICATION_SCOPE, POLICY_EVIDENCE_VERIFIED_FIELDS, type Task,
+} from '@aegis/shared';
 import { ViemGateway, policyEngineAbi, walletAbi } from '../src/chain.js';
 import { loadConfig, LOCAL_AGENT_KEY, type Config } from '../src/config.js';
 import { ApiError } from '../src/errors.js';
@@ -249,10 +251,11 @@ function harness(options: {
   from?: Address; to?: Address | null; input?: Hex; value?: bigint;
   receiptStatus?: 'success' | 'reverted'; logs?: Array<ReturnType<typeof executedLog> | ReturnType<typeof budgetLog> | ReturnType<typeof queuedLog>>;
   missingReceipt?: boolean; role?: 'request' | 'approve';
+  priceSource?: Pick<Config, 'oracleAddress' | 'feedAddress'>;
 } = {}) {
   const current = task();
   if (options.role === 'approve') current.attestationId = '1';
-  const gateway = new ViemGateway(gatewayConfig());
+  const gateway = new ViemGateway({ ...gatewayConfig(), ...options.priceSource });
   const client = gateway.publicClient as any;
   client.getChainId = async () => 31337;
   client.getTransactionReceipt = async () => {
@@ -287,11 +290,23 @@ test('ViemGateway outcome binds matching Wallet and PolicyEngine evidence', asyn
   assert.equal(outcome?.policyEvidence?.spentUsd6, '3000000');
   assert.equal(outcome?.policyEvidence?.engineAddress, policyEngine);
   assert.equal(outcome?.policyEvidence?.policyVersion, current.policyVersion);
-  assert.equal(outcome?.policyEvidence?.oracleAddress, oracle);
-  assert.equal(outcome?.policyEvidence?.feedAddress, feed);
   assert.equal(outcome?.policyEvidence?.roundId, '1');
   assert.equal(outcome?.policyEvidence?.updatedAtSeconds, '1999999999');
   assert.equal(outcome?.policyEvidence?.verified, true);
+  assert.equal(outcome?.policyEvidence?.verificationScope, POLICY_EVIDENCE_VERIFICATION_SCOPE);
+  assert.deepEqual(outcome?.policyEvidence?.verifiedFields, POLICY_EVIDENCE_VERIFIED_FIELDS);
+});
+
+test('recovering an old receipt under changed price-source configuration preserves only receipt facts', async () => {
+  const original = harness();
+  const changed = harness({ priceSource: { oracleAddress: otherContract, feedAddress: recipient } });
+  const originalOutcome = await original.gateway.outcome(original.current, transactionHash, 'request');
+  const recovered = await changed.gateway.outcome(changed.current, transactionHash, 'request');
+  assert.equal(recovered?.status, 'EXECUTED');
+  assert.ok(recovered?.policyEvidence);
+  assert.deepEqual(recovered.policyEvidence, originalOutcome?.policyEvidence);
+  assert.equal('oracleAddress' in recovered.policyEvidence, false);
+  assert.equal('feedAddress' in recovered.policyEvidence, false);
 });
 
 test('ViemGateway records REQUIRE_APPROVAL for an owner execution', async () => {

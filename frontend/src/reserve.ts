@@ -1,6 +1,7 @@
 // Gas-reserve recommendation helpers for the single configured operating wallet.
 // All payment quantities are integer wei (bigint). No Number/float arithmetic on amounts.
 import { isAddress, parseEther } from 'viem';
+import { z } from 'zod';
 
 type Data = Record<string, unknown>;
 
@@ -21,18 +22,28 @@ export type Suggestion = { kind: 'low'; topUpWei: bigint } | { kind: 'healthy'; 
 const ETH_TEXT = /^\d+(\.\d{1,18})?$/;
 const UINT = /^\d+$/;
 const HASH = /^0x[0-9a-fA-F]{64}$/;
+const amountInputSchema = z.string().trim();
+const amountDecimalSchema = z.string().max(96).regex(ETH_TEXT);
+const settingsTextSchema = z.string().max(96);
+const storedSettingsSchema = z.object({ threshold: settingsTextSchema.catch(''), target: settingsTextSchema.catch('') });
+const settingsWriteSchema = z.object({ threshold: settingsTextSchema, target: settingsTextSchema });
 
-export function parseEthAmount(text: string): ParsedAmount {
-  const value = text.trim();
+export function parseEthAmount(text: unknown): ParsedAmount {
+  const input = amountInputSchema.safeParse(text);
+  if (!input.success) return { ok: false, error: '请输入十进制 ETH 数量，最多 18 位小数。' };
+  const value = input.data;
   if (!value) return { ok: false, error: '请填写 ETH 数量。' };
-  if (!ETH_TEXT.test(value)) return { ok: false, error: '请输入十进制 ETH 数量，最多 18 位小数。' };
+  if (!amountDecimalSchema.safeParse(value).success) return { ok: false, error: '请输入十进制 ETH 数量，最多 18 位小数。' };
   const wei = parseEther(value);
   if (wei <= 0n) return { ok: false, error: 'ETH 数量必须大于 0。' };
+  if (wei >= 2n ** 256n) return { ok: false, error: 'ETH 数量超过合约允许范围。' };
   return { ok: true, wei };
 }
 
-export function parseSettings(thresholdText: string, targetText: string): ReserveSettings {
-  if (!thresholdText.trim() && !targetText.trim()) return { ok: false, empty: true, error: '设置准备金下限和目标余额后，才会给出补给建议。' };
+export function parseSettings(thresholdText: unknown, targetText: unknown): ReserveSettings {
+  const thresholdInput = amountInputSchema.safeParse(thresholdText);
+  const targetInput = amountInputSchema.safeParse(targetText);
+  if (thresholdInput.success && targetInput.success && !thresholdInput.data && !targetInput.data) return { ok: false, empty: true, error: '设置准备金下限和目标余额后，才会给出补给建议。' };
   const threshold = parseEthAmount(thresholdText);
   if (!threshold.ok) return { ok: false, empty: false, error: `下限：${threshold.error}` };
   const target = parseEthAmount(targetText);
@@ -99,11 +110,14 @@ export function storageKey(binding: ReserveBinding): string {
 /** Browser-local recommendation settings. Storage may be unavailable; never throws. */
 export function loadSettings(binding: ReserveBinding): { threshold: string; target: string } {
   try {
-    const raw = JSON.parse(localStorage.getItem(storageKey(binding)) || 'null') as Data | null;
-    return { threshold: typeof raw?.threshold === 'string' ? raw.threshold : '', target: typeof raw?.target === 'string' ? raw.target : '' };
+    const raw: unknown = JSON.parse(localStorage.getItem(storageKey(binding)) || 'null');
+    const parsed = storedSettingsSchema.safeParse(raw);
+    return parsed.success ? parsed.data : { threshold: '', target: '' };
   } catch { return { threshold: '', target: '' }; }
 }
 
-export function saveSettings(binding: ReserveBinding, threshold: string, target: string): void {
-  try { localStorage.setItem(storageKey(binding), JSON.stringify({ threshold, target })); } catch { /* Local convenience only. */ }
+export function saveSettings(binding: ReserveBinding, threshold: unknown, target: unknown): void {
+  const parsed = settingsWriteSchema.safeParse({ threshold, target });
+  if (!parsed.success) return;
+  try { localStorage.setItem(storageKey(binding), JSON.stringify(parsed.data)); } catch { /* Local convenience only. */ }
 }

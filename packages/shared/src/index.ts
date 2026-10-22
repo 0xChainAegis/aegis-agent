@@ -13,13 +13,25 @@ export interface TransactionEvidence {
   role: 'request' | 'approve' | 'cancel'; hash: Hex; receiptStatus?: number; blockNumber?: string;
   blockHash?: Hex; event?: string; senderNonce?: string; finality?: 'mined' | 'pending';
 }
+export const POLICY_EVIDENCE_VERIFICATION_SCOPE = 'MATCHED_WALLET_AND_POLICY_RECEIPT_EVENTS' as const;
+export const POLICY_EVIDENCE_VERIFIED_FIELDS = [
+  'engineAddress', 'event', 'actionType', 'decision', 'requestHash', 'actor',
+  'costUsd6', 'day', 'spentUsd6', 'transactionHash', 'policyVersion',
+  'roundId', 'updatedAtSeconds', 'blockNumber', 'blockHash', 'logIndex',
+] as const;
+export interface ConfiguredPriceSource {
+  oracleAddress: Hex; feedAddress: Hex;
+  verified: false; scope: 'CURRENT_CONFIGURATION';
+}
 export interface PolicyEvidence {
   engineAddress: Hex; event: 'BudgetConsumed'; actionType: 'NATIVE_TRANSFER';
   decision: 'ALLOW' | 'REQUIRE_APPROVAL'; requestHash: Hex; actor: Hex;
   costUsd6: string; day: string; spentUsd6: string; transactionHash: Hex;
-  policyVersion: string; oracleAddress: Hex; feedAddress: Hex;
+  policyVersion: string;
   roundId: string; updatedAtSeconds: string;
   blockNumber: string; blockHash: Hex; logIndex: number; verified: true;
+  verificationScope: typeof POLICY_EVIDENCE_VERIFICATION_SCOPE;
+  verifiedFields: typeof POLICY_EVIDENCE_VERIFIED_FIELDS;
 }
 export interface Task {
   taskId: string; draftId: string; intentId: string; draftVersion: number; stateVersion: number;

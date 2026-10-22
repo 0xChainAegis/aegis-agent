@@ -37,6 +37,8 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 
 当前只有配置 Owner 可以登录；不是多租户资金池，Agent 不能代替 Owner 登录或审批。
 
+点击“连接钱包”后，先在选择器中按扩展名称与图标选择实际使用的插件。选择器支持 EIP-6963 发现，并兼容旧式注入；插件提供的图标用于辨认钱包。连接只读取账户和网络；只有账户匹配资金池 Owner 时，才可继续点击“以 Owner 签名登录”。其他账户保持只读连接，不请求登录签名，也不能读取 Owner 的私有任务或付款。
+
 1. `POST /api/v1/auth/challenge`，输入 `{address,chainId}`，返回 `challengeId,message,expiresAt`。
 2. 钱包对完整 `message` 执行 `personal_sign`。消息绑定 domain、Owner、链、随机 nonce、签发和过期时间。
 3. `POST /api/v1/auth/verify`，输入 `{challengeId,address,signature}`，返回 `token,expiresAt`。有效挑战仅消费一次，实际密码学验签没有测试绕过。
@@ -44,9 +46,11 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 
 登录只创建 HTTP 会话，不批准付款。低风险由 Agent 在链上策略内付款；高风险需要 Owner 单独签链上 `approveAndExecute`。界面确认不是额外的低风险链上 Owner 许可，Owner 仍是可信策略管理员。
 
-“本地测试钱包”是用户明确选择的开发入口，使用 loopback 节点已解锁的配置 Owner，核对本机来源、RPC 和 31337 链。它不读取或保存私钥，不能用于公网资金。浏览器钱包则通过 EIP-1193 Provider 连接、签名和发送。
+“本地测试钱包”是用户明确选择的开发入口，仅用于默认的公开 Hardhat Owner 账户，并核对本机来源、loopback RPC 和 31337 链。它不读取或保存私钥，不能用于公网资金。浏览器钱包通过所选插件的 EIP-1193 Provider 连接、签名和发送。
 
-浏览器钱包网络不匹配时，连接按钮请求插件显示网络切换确认；只有批准切换并重新核对账户后才发起登录。未添加的本地网络可在严格的 loopback/31337 配置核验后请求添加；Sepolia 只请求切换已有网络。钱包中选择 Sepolia 不会改变后端所连接的链，测试网仍需显式配置部署与执行账户。当前资金池只允许配置的 Owner 登录，不会因为连接了个人地址就赋予其 Owner 权限。
+需要用个人浏览器钱包演示时，在运行 `npm run deploy:local` 的终端进程环境中设置 `AEGIS_LOCAL_OWNER_ADDRESS` 为该钱包的公开 EOA 地址，再部署。脚本将新资金池的 Owner 与管理角色交给该地址，并写入 `contracts/deployments/localhost.json`；无需提供 Owner 私钥。地址必须非零，且与 Agent、收款人及合约地址不同。个人 Owner 部署会关闭“本地测试钱包”入口，应在选择器中连接对应插件后签名登录。
+
+浏览器钱包网络不匹配时，连接会请求插件显示网络切换确认；批准切换并重新核对账户后，仍需主动点击 Owner 登录。未添加的本地网络可在严格的 loopback/31337 配置核验后请求添加；Sepolia 只请求切换已有网络。`AEGIS_LOCAL_OWNER_ADDRESS` 只影响新的 31337 本地部署，切换钱包至 Sepolia 也不会改变测试网合约的 Owner。测试网必须另行配置匹配其部署的 Owner、RPC 与执行账户。
 
 报价过期或资金不足时，服务会明确暂停付款；只有网络、合约绑定和角色均已核对的情况仍可登录查看。身份或网络校验失败时，连接和付款都停止。页面定期重新核对就绪状态。
 
@@ -56,8 +60,7 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 
 公共读取：
 
-- `GET /health` 或 `/api/v1/health` 只表示后端进程存活，固定返回 HTTP 200，不依赖 RPC。
-- `GET /api/v1/readiness` 返回链上 readiness；网络、部署、绑定、角色、Feed 或资金未就绪时返回 HTTP 503，不模拟成功。短时间内的并发检查会合并并缓存，降低公共 RPC 压力。
+- `GET /health` 或 `/api/v1/health` 返回 readiness；未就绪 HTTP 503，不模拟成功。
 - `GET /api/v1/config` 返回链、部署地址（含 `policyEngineAddress`）、`abiVersion,abi.wallet,abi.oracle`、readiness、实际 parser 与静态文档链接。`planner` 包含 `mode/provider/model/llmEnabled/timeoutMs`，但不返回 API key、完整提示词或凭据。模型等待默认 10 秒；浏览器按配置仅延长意图解析请求，付款与状态查询保留独立的 12 秒等待上限。含凭据的 RPC 不直接暴露。
 - `GET /api/v1/docs/:slug` 返回固定 allowlist 的 Markdown 和链接，没有 RAG。
 

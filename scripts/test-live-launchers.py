@@ -1,6 +1,7 @@
 """Offline launcher regression tests: no API requests, sockets, or web services."""
 from contextlib import redirect_stdout
 import io
+import json
 import os
 from pathlib import Path
 import runpy
@@ -24,6 +25,71 @@ def configured():
 
 
 class LauncherTests(unittest.TestCase):
+    def sepolia_source(self, directory):
+        path = Path(directory) / 'sepolia.json'
+        deployment = {'chainId': 11155111}
+        for index, name in enumerate(('walletAddress', 'aclAddress', 'attestationAddress', 'oracleAddress',
+                                      'policyEngineAddress', 'feedAddress', 'ownerAddress', 'agentAddress', 'recipientAddress'), 1):
+            deployment[name] = '0x' + format(index, '040x')
+        path.write_text(json.dumps(deployment), encoding='utf-8')
+        return {**configured(), 'AEGIS_MODE': 'testnet', 'AEGIS_CHAIN_ID': '11155111',
+                'AEGIS_DEPLOYMENT_FILE': str(path), 'AEGIS_RPC_URL': 'https://example.invalid/rpc',
+                'AEGIS_AGENT_PRIVATE_KEY': '0x' + 'ab' * 32}
+
+    def test_sepolia_selection_is_preserved_and_does_not_require_hardhat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vite = root / 'node_modules/vite/bin/vite.js'
+            vite.parent.mkdir(parents=True)
+            vite.touch()
+            source = self.sepolia_source(directory)
+            launcher = web['launch_plan'].__globals__['_launcher']
+            with patch.dict(launcher, {'prepare_environment': lambda source: ('node', dict(source))}):
+                env, commands = web['launch_plan'](source, root)
+                self.assertEqual(env['AEGIS_MODE'], 'testnet')
+                self.assertEqual(env['AEGIS_CHAIN_ID'], '11155111')
+                self.assertEqual(web['launch_plan'](source, root)[0]['AEGIS_DB_PATH'], env['AEGIS_DB_PATH'])
+                self.assertEqual(env['AEGIS_AGENT_PRIVATE_KEY'], source['AEGIS_AGENT_PRIVATE_KEY'])
+                self.assertTrue(all('hardhat' not in ' '.join(command) for command, _ in commands))
+                self.assertIn('sepolia', Path(env['AEGIS_DB_PATH']).name)
+                del source['AEGIS_MODE']
+                self.assertEqual(web['launch_plan'](source, root, network='sepolia')[0]['AEGIS_MODE'], 'testnet')
+            with patch.object(socket_module := web['check_local_chain'].__globals__['socket'], 'socket') as sockets:
+                sockets.return_value.__enter__.return_value.connect_ex.return_value = 1
+                web['check_local_chain'](env, root)
+                self.assertEqual(sockets.call_count, 2)
+                self.assertNotIn((('127.0.0.1', 8545),), [call.args for call in sockets.return_value.__enter__.return_value.connect_ex.call_args_list])
+
+    def test_sepolia_configuration_rejects_missing_wrong_chain_and_public_keys(self):
+        validate = web['validate_sepolia_environment']
+        with tempfile.TemporaryDirectory() as directory:
+            source = self.sepolia_source(directory)
+            validate(source)
+            for missing in ('AEGIS_DEPLOYMENT_FILE', 'AEGIS_RPC_URL', 'AEGIS_AGENT_PRIVATE_KEY'):
+                with self.subTest(missing=missing), self.assertRaisesRegex(ValueError, missing):
+                    validate({key: value for key, value in source.items() if key != missing})
+            for rpc in ('http://example.invalid', 'https://user:secret@example.invalid', 'not a URL'):
+                with self.subTest(rpc=rpc), self.assertRaisesRegex(ValueError, 'HTTPS'):
+                    validate({**source, 'AEGIS_RPC_URL': rpc})
+            with self.assertRaisesRegex(ValueError, 'public development key'):
+                validate({**source, 'AEGIS_AGENT_PRIVATE_KEY': '0x' + '0' * 63 + '1'})
+            path = Path(source['AEGIS_DEPLOYMENT_FILE'])
+            for document in ([], {'chainId': 31337}, {'chainId': 11155111}):
+                path.write_text(json.dumps(document), encoding='utf-8')
+                with self.subTest(document=document), self.assertRaises(ValueError):
+                    validate(source)
+            path.write_text('not json', encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, 'missing or invalid'):
+                validate(source)
+
+    def test_sepolia_check_is_offline_and_never_launches_or_pays(self):
+        with patch.dict(web['main'].__globals__, {'launch_plan': Mock(return_value=({'AEGIS_MODE': 'testnet'}, [])),
+                                                 'check_local_chain': Mock(side_effect=AssertionError('no sockets'))}), \
+                patch.object(subprocess, 'Popen') as start, redirect_stdout(io.StringIO()):
+            self.assertEqual(web['main'](['--network', 'sepolia', '--check']), 0)
+            web['main'].__globals__['launch_plan'].assert_called_once_with(network='sepolia')
+            start.assert_not_called()
+
     def test_missing_settings_fail_before_runtime_or_child_execution(self):
         with patch.object(subprocess, 'run') as run:
             with self.assertRaisesRegex(ValueError, 'AEGIS_LLM_API_KEY'):

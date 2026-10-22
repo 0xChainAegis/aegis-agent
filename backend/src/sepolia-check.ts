@@ -33,7 +33,9 @@ export async function runSepoliaCheck(config: Config, gateway: Gateway): Promise
   if (config.mode !== 'testnet' || config.chainId !== 11155111) {
     throw new Error('check:sepolia requires AEGIS_MODE=testnet and chainId 11155111');
   }
-  const readiness = readinessSchema.parse(await gateway.readiness(true));
+  // A dedicated gateway instance has no public display cache, so this is a
+  // fresh authoritative sweep without coupling the CLI to HTTP cache policy.
+  const readiness = readinessSchema.parse(await gateway.readiness());
   const snapshot = readiness.ready ? snapshotSchema.parse(await gateway.snapshot()) : undefined;
   return sepoliaCheckReportSchema.parse({
     ok: readiness.ready && snapshot?.chainId === 11155111,

@@ -73,4 +73,27 @@ describe('serviceReadiness', () => {
     const result = serviceReadiness({ ...config, readiness: { ...config.readiness, rpcChainId: 1 } });
     expect(result).toMatchObject({ code: 'CHAIN_MISMATCH', canConnect: false, canPay: false });
   });
+
+  it('keeps pending or timed-out Sepolia checks separate from API outages and blocks signing', () => {
+    expect(serviceReadiness({ ...config, readiness: { ready: false, code: 'READINESS_CHECKING', source: 'checking', checkedAt: null, cacheAgeMs: null } }))
+      .toMatchObject({ phase: 'loading', title: '正在核对 Sepolia', canConnect: false, canPay: false });
+    expect(serviceReadiness({ ...config, readiness: { ready: false, code: 'READINESS_TIMEOUT' } }))
+      .toMatchObject({ title: 'Sepolia 检查超时', canConnect: false, canPay: false });
+  });
+
+  it.each([
+    { checkedAt: 'yesterday' }, { cacheAgeMs: -1 }, { cacheAgeMs: '0' }, { source: 'trusted_forever' },
+  ])('rejects malformed readiness metadata instead of enabling payment: %j', metadata => {
+    expect(serviceReadiness({ ...config, readiness: { ...config.readiness, ...metadata } }))
+      .toMatchObject({ code: 'CONFIG_INVALID', canConnect: false, canPay: false });
+  });
+
+  it('rejects expired or incomplete cached proofs and accepts a bounded recent result', () => {
+    const proof = { ...config.readiness, source: 'cache', checkedAt: '2026-10-22T00:00:00.000Z', cacheAgeMs: 14_999, cacheTtlMs: 15_000 };
+    expect(serviceReadiness({ ...config, readiness: proof }).canPay).toBe(true);
+    for (const change of [{ cacheAgeMs: 15_000 }, { checkedAt: null }, { cacheAgeMs: null }, { source: 'checking' }]) {
+      expect(serviceReadiness({ ...config, readiness: { ...proof, ...change } }))
+        .toMatchObject({ code: 'CONFIG_INVALID', canConnect: false, canPay: false });
+    }
+  });
 });

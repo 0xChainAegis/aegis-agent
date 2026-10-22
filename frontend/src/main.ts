@@ -1,6 +1,8 @@
 import { decodeFunctionData, formatEther, formatUnits, isAddress, parseAbi, parseEther } from 'viem';
+import { z } from 'zod';
 import { api, ApiError, hasSession, setToken, type Data } from './api';
-import { connectWallet, disconnectProvider, localWalletAvailable, sendOwnerTransaction } from './wallet';
+import { authenticateOwner, connectBrowserWallet, connectWallet, disconnectProvider, getActiveProvider, localWalletAvailable, sendOwnerTransaction, type WalletConnection, type WalletProvider } from './wallet';
+import { createWalletDiscovery } from './providers';
 import { icon, mark } from './icons';
 import { currentTheme, initTheme, toggleTheme } from './theme';
 import { serviceReadiness } from './readiness';
@@ -10,7 +12,26 @@ import './style.css';
 type View = 'overview' | 'operations' | 'approvals' | 'verification' | 'settings';
 type Column = 'draft' | 'ready' | 'approval' | 'done' | 'blocked';
 initTheme();
-const app = document.querySelector<HTMLDivElement>('#app')!;
+const appElement = document.querySelector<HTMLDivElement>('#app');
+if (!appElement) throw new Error('Aegis 页面容器缺失。');
+const app = appElement;
+const addressInput = z.string().refine(value => isAddress(value));
+const storedKind = z.enum(['browser', 'local', '']);
+function stored<T>(key: string, schema: z.ZodType<T>, fallback: T): T { try { const parsed = schema.safeParse(sessionStorage.getItem(key)); return parsed.success ? parsed.data : fallback; } catch { return fallback; } }
+const discovery = createWalletDiscovery(window);
+let walletSessionRevision = 0;
+class SessionChangedError extends Error {}
+async function sessionApi(path: string, method = 'GET', body?: Data): Promise<Data> {
+  const revision = walletSessionRevision;
+  try {
+    const response = await api(path, method, body);
+    if (revision !== walletSessionRevision) throw new SessionChangedError('钱包会话已变更。');
+    return response;
+  } catch (error) {
+    if (revision !== walletSessionRevision) throw new SessionChangedError('钱包会话已变更。');
+    throw error;
+  }
+}
 const state = {
   view: 'overview' as View,
   settingsTab: 'account',
@@ -22,7 +43,7 @@ const state = {
   refreshing: false,
   serviceErrorCode: '',
   serviceErrorMessage: '',
-  address: sessionStorage.getItem('aegis.address') || '',
+  address: hasSession() ? stored('aegis.address', addressInput, '') : '',
   chainId: 0,
   busy: '',
   toast: '',
@@ -43,7 +64,10 @@ const state = {
   evidenceError: '',
   ownerReview: null as { tx: Data; task: Data; action: 'approve' | 'cancel' } | null,
   localWalletConfirm: false,
-  walletKind: sessionStorage.getItem('aegis.wallet-kind') || '',
+  walletKind: stored('aegis.wallet-kind', storedKind, ''),
+  connection: null as WalletConnection | null,
+  walletPicker: false,
+  providerName: '',
   walletError: '',
   reserve: {
     bindingKey: '', threshold: '', target: '', lastTaskId: '',
@@ -64,8 +88,8 @@ const columns: [Column, string, string][] = [
   ['draft', '待补信息', 'neutral'], ['ready', '准备执行', 'blue'], ['approval', '待审批', 'amber'], ['done', '已完成', 'green'], ['blocked', '未通过', 'red'],
 ];
 
-function esc(value: unknown): string { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!); }
-function object(value: unknown): Data { return value && typeof value === 'object' && !Array.isArray(value) ? value as Data : {}; }
+function esc(value: unknown): string { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c); }
+function object(value: unknown): Data { const parsed = z.record(z.string(), z.unknown()).safeParse(value); return parsed.success ? parsed.data : {}; }
 function get(obj: unknown, ...paths: string[]): unknown {
   for (const path of paths) {
     let result: unknown = obj;
@@ -97,7 +121,7 @@ const reasonLabels: Record<string, string> = { AUTO_THRESHOLD_EXCEEDED: '超过�
 function reasons(task: unknown): string { const codes = get(task, 'reasonCodes'); return Array.isArray(codes) ? codes.map(code => reasonLabels[String(code)] || String(code)).join('；') : ''; }
 function taskReason(task: unknown): string { return value(task, 'error.message', 'lastError.message', 'reason', 'blockReason', 'errorMessage') || reasons(task); }
 function broadcastKey(taskId: string): string { return `aegis.owner-broadcast.${expectedChain()}.${taskId}`; }
-function pendingBroadcast(taskId: string): { txHash: string; action: 'approve' | 'cancel' } | null { try { return JSON.parse(sessionStorage.getItem(broadcastKey(taskId)) || 'null'); } catch { return null; } }
+function pendingBroadcast(taskId: string): { txHash: string; action: 'approve' | 'cancel' } | null { try { const parsed = z.object({txHash:z.string().regex(/^0x[0-9a-fA-F]{64}$/),action:z.enum(['approve','cancel'])}).strict().safeParse(JSON.parse(sessionStorage.getItem(broadcastKey(taskId)) || 'null')); return parsed.success ? parsed.data : null; } catch { return null; } }
 function taskName(task: Data): string { return value(task, 'purpose', 'intent.purpose', 'description', 'message', 'title') || '原生 ETH 付款'; }
 function taskRecipient(task: Data): string { return value(task, 'recipient', 'intent.recipient', 'request.recipient', 'to'); }
 function taskAmount(task: Data): string { return value(task, 'amountWei', 'intent.amountWei', 'request.amountWei'); }
@@ -123,23 +147,26 @@ function validConfig(): boolean { return currentServiceStatus().canPay; }
 function canConnect(): boolean { return currentServiceStatus().canConnect; }
 function readinessMessage(): string { return currentServiceStatus().message; }
 function connected(): boolean { return Boolean(state.address && hasSession()); }
-function disabled(): boolean { return !state.online || !validConfig() || !connected() || state.refreshing || Boolean(state.busy); }
+function walletLinked(): boolean { return connected() || Boolean(state.address && state.connection); }
+function boundOwner(): boolean { return Boolean(connected() && state.connection?.role === 'owner' && getActiveProvider() && state.connection.address.toLowerCase() === value(state.config, 'ownerAddress').toLowerCase() && state.connection.chainId === expectedChain()); }
+function disabled(): boolean { return !state.online || !validConfig() || !boundOwner() || state.refreshing || Boolean(state.busy); }
 function mode(): string { return expectedChain() === 31337 ? 'Local' : value(state.config, 'mode') === 'mock' ? 'Mock' : expectedChain() === 11155111 ? 'Sepolia' : expectedChain() ? `Chain ${expectedChain()}` : '未连接'; }
 function dateTime(item: unknown): string { if (!item) return '—'; const n = Number(item); const d = new Date(Number.isFinite(n) ? n < 1e12 ? n * 1000 : n : String(item)); return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); }
 function explorer(hash: string): string { const base = value(state.config, 'explorerBaseUrl', 'explorerUrl', 'blockExplorerUrl', 'chain.blockExplorerUrl'); return /^https?:\/\//.test(base) && /^0x[0-9a-fA-F]{64}$/.test(hash) ? `${base.replace(/\/$/, '')}/tx/${hash}` : ''; }
-function allTasks(): Data[] { const list = [...state.tasks]; if (state.draft && !list.some(item => id(item) === id(state.draft!))) list.unshift({ ...state.draft, ...(state.quote ? { status: state.quote.status } : {}), _draft: true }); return list; }
+function allTasks(): Data[] { const list = [...state.tasks]; const draft = state.draft; if (draft && !list.some(item => id(item) === id(draft))) list.unshift({ ...draft, ...(state.quote ? { status: state.quote.status } : {}), _draft: true }); return list; }
 function notify(message: string, error = false) { state.toast = message; state.toastError = error; render(); window.setTimeout(() => { if (state.toast === message) { state.toast = ''; render(); } }, 7000); }
 function errorMessage(error: unknown): string { return Number(get(error, 'code')) === 4001 ? '你取消了钱包请求，尚未提交交易。' : error instanceof Error ? error.message : '操作未完成，请重试。'; }
 
 function render() {
-  const focused = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
-  const focusId = focused?.id;
+  const active = document.activeElement;
+  const focused = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement ? active : null;
+  const focusId = active instanceof HTMLElement ? active.id : '';
   const selection = focused?.selectionStart;
   const reserveDetailsOpen = document.querySelector<HTMLDetailsElement>('.reserve-technical')?.open || false;
   const contentScroll = document.querySelector('.content')?.scrollTop || 0;
   const drawerScroll = document.querySelector('.drawer-body')?.scrollTop || 0;
   const pendingCount = state.tasks.filter(t => column(t) === 'approval').length;
-  const activeNav = nav.find(item => item[0] === state.view)!;
+  const activeNav = nav.find(item => item[0] === state.view) ?? nav[0];
   const themeNow = currentTheme();
   const availability = displayedServiceStatus();
   const statusText = availability.phase === 'ready'
@@ -154,12 +181,13 @@ function render() {
       <div class="topbar-actions">
         <button class="icon-button ${state.refreshing ? 'is-loading' : ''}" data-action="refresh" aria-label="${state.refreshing ? '正在刷新服务状态' : '刷新服务状态'}" title="${state.refreshing ? '正在刷新服务状态' : '刷新服务状态'}" ${state.refreshing ? 'disabled' : ''}>${state.refreshing ? '<span class="spinner"></span>' : icon('refresh')}</button>
         <button class="icon-button" id="theme-toggle" data-action="toggle-theme" data-testid="theme-toggle" aria-label="${themeNow === 'dark' ? '切换到浅色模式' : '切换到深色模式'}" title="${themeNow === 'dark' ? '切换到浅色模式' : '切换到深色模式'}">${icon(themeNow === 'dark' ? 'sun' : 'moon')}</button>
-        ${localWalletAvailable(state.config) && !connected() ? `<button class="button subtle local-wallet-button" data-action="local-wallet" data-testid="local-wallet" ${!state.online || !canConnect() || state.refreshing || state.busy ? 'disabled' : ''}${connectDisabledReason}>本地测试钱包</button>` : ''}<button data-action="connect" data-testid="connect-wallet" class="button ${connected() ? 'connected-button' : 'primary'}" ${state.busy === 'connect' || !state.online || !canConnect() || state.refreshing ? 'disabled' : ''}${connectDisabledReason}>${icon('wallet')}<span>${state.busy === 'connect' ? '等待钱包确认…' : connected() ? short(state.address) : '连接钱包'}</span></button>
+        ${localWalletAvailable(state.config) && !boundOwner() ? `<button class="button subtle local-wallet-button" data-action="local-wallet" data-testid="local-wallet" ${!state.online || !canConnect() || state.refreshing || state.busy ? 'disabled' : ''}${connectDisabledReason}>本地测试钱包</button>` : ''}<button data-action="connect" data-testid="connect-wallet" class="button ${walletLinked() ? 'connected-button' : 'primary'}" ${state.busy || state.refreshing || !state.online || !canConnect() ? 'disabled' : ''}${connectDisabledReason}>${icon('wallet')}<span>${state.busy === 'connect' ? '等待钱包确认…' : walletLinked() ? short(state.address) : '连接钱包'}</span></button>
       </div>
     </header>
     <main class="main">
       <div class="content ${state.view === 'settings' ? 'settings-content' : ''}">
         ${availability.phase !== 'ready' ? `<div class="service-banner ${availability.tone}" role="${availability.phase === 'loading' ? 'status' : 'alert'}" data-testid="service-banner" aria-live="polite">${availability.phase === 'loading' ? '<span class="spinner"></span>' : icon('info')}<div class="service-banner-copy"><strong id="service-status-title">${esc(availability.title)}</strong><p>${esc(availability.message)}</p></div>${availability.actionLabel ? `<button class="text-button" data-action="refresh" ${state.refreshing ? 'disabled' : ''}>${esc(availability.actionLabel)}</button>` : ''}</div>` : ''}
+        ${connected() && !boundOwner() ? '<div class="info-panel" data-testid="reconnect-owner-note">已恢复登录会话和任务。付款或审批前，请重新选择钱包并以 Owner 签名登录；本地演示可重新选择“本地测试钱包”。</div>' : ''}
         ${state.view === 'settings' ? settingsView() : state.view === 'verification' ? verificationView() : operationsView()}
         ${connected() && ['overview', 'operations'].includes(state.view) ? composer() : ''}
       </div>
@@ -167,12 +195,13 @@ function render() {
     ${state.drawer ? drawer() : ''}
     ${state.ownerReview ? ownerModal() : ''}
     ${state.localWalletConfirm ? localWalletModal() : ''}
+    ${state.walletPicker ? walletPickerModal() : ''}
     ${state.toast ? `<div class="toast ${state.toastError ? 'error' : 'success'}" role="${state.toastError ? 'alert' : 'status'}">${icon(state.toastError ? 'info' : 'check')}<span>${esc(state.toast)}</span><button class="icon-button" data-action="dismiss-toast" aria-label="关闭通知">${icon('close')}</button></div>` : ''}
   </div>`;
   const reserveDetails = document.querySelector<HTMLDetailsElement>('.reserve-technical'); if (reserveDetails) reserveDetails.open = reserveDetailsOpen;
   const content = document.querySelector('.content'); if (content) content.scrollTop = contentScroll;
   const drawerBody = document.querySelector('.drawer-body'); if (drawerBody) drawerBody.scrollTop = drawerScroll;
-  if (focusId) { const next = document.getElementById(focusId) as HTMLInputElement | HTMLTextAreaElement | null; next?.focus({ preventScroll: true }); if (selection !== null && selection !== undefined && next && ['text', 'textarea', 'search'].includes(next.type)) { try { next.setSelectionRange(selection, selection); } catch { /* Non-text controls do not have a caret. */ } } }
+  if (focusId) { const next = document.getElementById(focusId); next?.focus({ preventScroll: true }); if (selection !== null && selection !== undefined && (next instanceof HTMLInputElement || next instanceof HTMLTextAreaElement) && ['text', 'textarea', 'search'].includes(next.type)) { try { next.setSelectionRange(selection, selection); } catch { /* Non-text controls do not have a caret. */ } } }
 }
 
 function operationsView(): string {
@@ -181,6 +210,7 @@ function operationsView(): string {
   const title = isApproval ? '需要你的批准' : isOverview ? '钱包总览' : '操作工作台';
   const description = isApproval ? '逐项核对收款地址与金额，使用 Owner 钱包签名。' : isOverview ? '' : '草稿需先预览，经你明确确认后才会提交。';
   const heading = `<section class="page-heading"><div><h1>${title}</h1>${description ? `<p>${description}</p>` : ''}</div><button class="button subtle" data-action="refresh">${icon('refresh')}刷新状态</button></section>`;
+  if (!connected() && walletLinked()) return walletConnectionPanel();
   if (isOverview) return connected() ? reserveCard() + summary() + recentTasks() : intro();
   let list = allTasks();
   if (isApproval) list = list.filter(t => column(t) === 'approval');
@@ -220,7 +250,7 @@ function summary(): string {
 function taskRow(t: Data): string {
   const c = column(t);
   const tag = t._draft ? '草稿' : `AEG-${id(t).slice(-6).toUpperCase()}`;
-  return `<button class="task-row" data-open-task="${esc(id(t))}" data-task-id="${esc(id(t))}"><span class="cell time">${dateTime(get(t, 'updatedAt', 'createdAt'))}</span><span class="cell name"><span class="task-mark ${c}">${icon(c === 'done' ? 'check' : c === 'approval' ? 'clock' : c === 'blocked' ? 'info' : 'arrow')}</span><span class="name-text">${esc(taskName(t))}</span></span><span class="cell amount">${taskAmount(t) ? eth(taskAmount(t)) : '—'} <small>ETH</small></span><span class="cell state task-status ${c}"><span class="status-dot ${columns.find(col => col[0] === c)![2]}"></span>${statusLabel(t)}</span><span class="cell ref mono">${tag}</span></button>`;
+  return `<button class="task-row" data-open-task="${esc(id(t))}" data-task-id="${esc(id(t))}"><span class="cell time">${dateTime(get(t, 'updatedAt', 'createdAt'))}</span><span class="cell name"><span class="task-mark ${c}">${icon(c === 'done' ? 'check' : c === 'approval' ? 'clock' : c === 'blocked' ? 'info' : 'arrow')}</span><span class="name-text">${esc(taskName(t))}</span></span><span class="cell amount">${taskAmount(t) ? eth(taskAmount(t)) : '—'} <small>ETH</small></span><span class="cell state task-status ${c}"><span class="status-dot ${columns.find(col => col[0] === c)?.[2] ?? 'neutral'}"></span>${statusLabel(t)}</span><span class="cell ref mono">${tag}</span></button>`;
 }
 function recentTasks(): string {
   const stamp = (t: Data) => String(get(t, 'updatedAt', 'createdAt') ?? '');
@@ -301,9 +331,9 @@ function reserveCard(): string {
   else if (m.kind === 'unavailable') result = `<p class="reserve-message error-text" data-testid="reserve-error">${icon('info')}${esc(m.error)}</p><p class="reserve-caveat">余额未知时不按 0 处理，也不会提示准备金不足或准备付款。</p>`;
   else if (m.kind === 'unset' || m.kind === 'invalid') result = `<p class="reserve-message ${m.kind === 'invalid' ? 'error-text' : ''}" data-testid="reserve-error">${icon('info')}${esc(m.error)}</p>`;
   else if (m.kind === 'healthy') result = `<p class="reserve-message" data-testid="reserve-healthy">${icon('check')}当前余额未低于你设置的下限 ${esc(ethExact(m.thresholdWei))} ETH，暂无补给建议。</p>`;
-  else if (m.kind === 'low' && m.suggestion) {
+  else if (m.kind === 'low' && m.suggestion && o) {
     const blocked = Boolean(m.inflight) || disabled();
-    result = `<div class="reserve-suggestion"><span>建议补给</span><strong data-testid="reserve-suggestion">${esc(ethExact(m.suggestion.topUpWei))}<small> ETH</small></strong><span class="mono">= 目标 ${esc(ethExact(m.targetWei))} − 当前 ${esc(ethExact(o!.balanceWei))}</span></div>
+    result = `<div class="reserve-suggestion"><span>建议补给</span><strong data-testid="reserve-suggestion">${esc(ethExact(m.suggestion.topUpWei))}<small> ETH</small></strong><span class="mono">= 目标 ${esc(ethExact(m.targetWei))} − 当前 ${esc(ethExact(o.balanceWei))}</span></div>
       ${notice ? `<div class="missing-note" role="alert" data-testid="reserve-review-note">${icon('info')}${esc(notice)}</div>` : ''}
       ${m.inflight ? `<div class="missing-note" data-testid="reserve-inflight">${icon('clock')}已有进行中的付款 AEG-${esc(id(m.inflight).slice(-6).toUpperCase())}（${esc(statusLabel(m.inflight))}）。请先查看原任务，不要再建一笔。<button class="text-button" data-open-task="${esc(id(m.inflight))}">查看原任务</button></div>` : ''}
       <button class="button primary" data-action="reserve-prepare" data-testid="reserve-prepare" data-reserve-key="${esc(m.key)}" ${blocked ? 'disabled' : ''}>${state.busy === 'reserve' ? '<span class="spinner"></span>正在重新读取…' : `${icon('arrow')}${notice ? '已核对新金额，准备预览' : '重新读取并准备预览'}`}</button>
@@ -353,13 +383,13 @@ async function prepareReserve(shownKey: string) {
   await run('reserve', async () => {
     state.reserve.notice = null;
     const shownBinding = bindingFromConfig(state.config);
-    const freshConfig = await api('/config');
+    const freshConfig = await sessionApi('/config');
     const binding = bindingFromConfig(freshConfig);
     state.config = freshConfig;
     if (!binding || !serviceReadiness(freshConfig).canPay) throw new Error(readinessMessage() || '服务尚未就绪，已停止准备补给。');
     if (!sameBinding(shownBinding, binding)) { state.wallet = null; syncReserveSettings(); throw new Error('网络、金库或运行钱包配置已变化。请等待重新读取余额并核对设置。'); }
     let snapshot: Data; let taskList: unknown;
-    try { [snapshot, taskList] = await Promise.all([api('/wallets/current'), api<unknown>('/tasks')]); }
+    try { [snapshot, taskList] = await Promise.all([sessionApi('/wallets/current'), sessionApi('/tasks')]); }
     catch (error) { state.wallet = null; state.walletError = errorMessage(error); throw error; }
     const tasks = get(taskList, 'tasks');
     if (Array.isArray(tasks)) state.tasks = tasks as Data[];
@@ -378,10 +408,10 @@ async function prepareReserve(shownKey: string) {
     const recipient = String(freshConfig.recipientAddress);
     const amountWei = suggestion.topUpWei.toString();
     // Always a new draft: never PATCH whichever draft happens to be open.
-    const draft = await api('/intents', 'POST', { recipient, amountWei, purpose: `Gas 准备金补给：补到目标 ${ethExact(settings.targetWei)} ETH` });
+    const draft = await sessionApi('/intents', 'POST', { recipient, amountWei, purpose: `Gas 准备金补给：补到目标 ${ethExact(settings.targetWei)} ETH` });
     const missing = get(draft, 'missingFields');
     if (taskRecipient(draft).toLowerCase() !== binding.recipient || taskAmount(draft) !== amountWei || (Array.isArray(missing) && missing.length)) throw new Error('服务返回的草稿与补给建议不一致，已停止。');
-    const quote = await api(`/intents/${encodeURIComponent(id(draft))}/preview`, 'POST', { expectedRevision: get(draft, 'revision', 'version', 'draftVersion') });
+    const quote = await sessionApi(`/intents/${encodeURIComponent(id(draft))}/preview`, 'POST', { expectedRevision: get(draft, 'revision', 'version', 'draftVersion') });
     state.draft = draft; state.quote = quote;
     state.message = ''; state.recipient = recipient; state.amount = formatEther(suggestion.topUpWei); state.purpose = value(draft, 'purpose');
     state.reserve.draft = { draftId: id(draft), recipient: binding.recipient, topUpWei: amountWei, balanceWei: balanceWei.toString(), thresholdWei: settings.thresholdWei.toString(), targetWei: settings.targetWei.toString(), blockNumber, observedAt };
@@ -393,7 +423,7 @@ async function prepareReserve(shownKey: string) {
 function taskCard(task: Data): string {
   const key = column(task);
   const taskId = id(task);
-  return `<button class="task-card" data-task-id="${esc(taskId)}" data-open-task="${esc(taskId)}"><div class="task-card-top"><span class="task-kind">${task._draft ? '草稿' : `AEG-${taskId.slice(-6).toUpperCase()}`}</span></div><h3>${esc(taskName(task))}</h3><div class="task-amount">${taskAmount(task) ? eth(taskAmount(task)) : '待填写'} <span>${taskAmount(task) ? 'ETH' : ''}</span></div><div class="task-recipient mono">${esc(short(taskRecipient(task), 8))}</div>${taskReason(task) ? `<p class="card-reason">${esc(taskReason(task))}</p>` : ''}<div class="task-card-bottom"><span class="task-status ${key}"><span class="status-dot ${columns.find(c => c[0] === key)![2]}"></span>${statusLabel(task)}</span><span>${dateTime(get(task, 'updatedAt', 'createdAt'))}</span></div></button>`;
+  return `<button class="task-card" data-task-id="${esc(taskId)}" data-open-task="${esc(taskId)}"><div class="task-card-top"><span class="task-kind">${task._draft ? '草稿' : `AEG-${taskId.slice(-6).toUpperCase()}`}</span></div><h3>${esc(taskName(task))}</h3><div class="task-amount">${taskAmount(task) ? eth(taskAmount(task)) : '待填写'} <span>${taskAmount(task) ? 'ETH' : ''}</span></div><div class="task-recipient mono">${esc(short(taskRecipient(task), 8))}</div>${taskReason(task) ? `<p class="card-reason">${esc(taskReason(task))}</p>` : ''}<div class="task-card-bottom"><span class="task-status ${key}"><span class="status-dot ${columns.find(c => c[0] === key)?.[2] ?? 'neutral'}"></span>${statusLabel(task)}</span><span>${dateTime(get(task, 'updatedAt', 'createdAt'))}</span></div></button>`;
 }
 
 function composer(): string {
@@ -470,23 +500,52 @@ function evidenceView(): string {
 }
 
 function ownerModal(): string {
-  const review = state.ownerReview!;
+  const review = state.ownerReview;
+  if (!review) return '';
   return `<div class="modal-backdrop"><section class="owner-modal" role="dialog" aria-modal="true" aria-labelledby="owner-review-title"><div class="modal-symbol">${icon('shield')}</div><h2 id="owner-review-title">${review.action === 'approve' ? '确认 Owner 批准' : '确认取消这笔请求'}</h2><p>${review.action === 'approve' ? '此签名将批准并执行付款。请再次核对收款地址和金额。' : '此签名将取消链上的待审批请求。'}</p><div class="modal-details">${detailRow('金额', `${eth(taskAmount(review.task))} ETH`)}${detailRow('收款地址', taskRecipient(review.task), true)}${detailRow('网络', `${mode()} · Chain ${expectedChain()}`)}${detailRow('签名账户', value(review.tx, 'from'), true)}${detailRow('目标合约', value(review.tx, 'to'), true)}</div><div class="review-note">${icon('verify')}<p>已核对合约、方法与待审批记录 ID。钱包打开后，请继续检查交易详情。</p></div><div class="modal-actions"><button class="button subtle" data-action="dismiss-owner">返回</button><button class="button primary" data-action="sign-owner" data-testid="sign-owner-transaction" ${disabled() ? 'disabled' : ''}>${icon('wallet')}${state.busy ? '等待钱包…' : review.action === 'approve' ? '打开钱包批准' : '打开钱包取消'}</button></div></section></div>`;
 }
 function localWalletModal(): string {
   return `<div class="modal-backdrop"><section class="owner-modal" role="dialog" aria-modal="true" aria-labelledby="local-wallet-title"><div class="modal-symbol">${icon('wallet')}</div><h2 id="local-wallet-title">使用本地测试钱包</h2><p>使用本机节点已解锁的公开开发 Owner 账户。仅限 Chain 31337，测试 ETH 没有真实价值。此入口不会读取或保存私钥，也不能用于 Sepolia 或公网资金。</p><div class="modal-details">${detailRow('网络', 'Local · 真实本地链')}${detailRow('价格', '本地 Mock Feed，非公网 Chainlink 行情')}${detailRow('公开开发账户', value(state.config, 'ownerAddress'), true)}${detailRow('RPC', value(state.config, 'rpcUrl'))}</div><div class="modal-actions"><button class="button subtle" data-action="dismiss-local-wallet">返回</button><button class="button primary" data-action="confirm-local-wallet" data-testid="confirm-local-wallet" ${!state.online || !canConnect() || state.refreshing || state.busy ? 'disabled' : ''}>${state.busy ? '正在签名登录…' : '确认使用公开开发账户'}</button></div></section></div>`;
 }
 
+function walletPickerModal(): string {
+  const options = discovery.list();
+  return `<div class="modal-backdrop"><section class="owner-modal wallet-picker" role="dialog" aria-modal="true" aria-labelledby="wallet-picker-title"><div class="modal-symbol">${icon('wallet')}</div><h2 id="wallet-picker-title">选择你的钱包</h2><p>选择你安装的钱包。连接只读取账户和网络，Owner 签名登录是下一步。</p><div class="wallet-options">${options.map(option => `<button class="wallet-option" data-action="choose-wallet" data-wallet-id="${esc(option.id)}" data-testid="wallet-option-${esc(option.id)}"><span class="wallet-option-symbol">${option.icon ? `<img src="${esc(option.icon)}" alt="${esc(option.name)} Logo" width="36" height="36">` : icon('wallet')}</span><span><strong>${esc(option.name)}</strong><small>${option.rdns ? esc(option.rdns) : '浏览器提供的兼容入口'}</small></span>${icon('arrow')}</button>`).join('') || '<p class="settings-caption" data-testid="wallet-not-detected">未检测到可用钱包插件。请在安装并启用了 MetaMask 的 Chrome 或 Edge 中打开本页面，然后重新检测。</p>'}</div><p class="wallet-support-note">支持 MetaMask、Trust Wallet、Rabby、OKX、Coinbase 等浏览器钱包。未检测到的钱包请先在浏览器中安装或启用，再重新检测。</p><div class="modal-actions"><button class="button subtle" data-action="dismiss-wallet-picker">返回</button><button class="button" data-action="rescan-wallets">重新检测钱包</button></div></section></div>`;
+}
+
+function walletConnectionPanel(): string {
+  const isOwner = state.connection?.role === 'owner';
+  return `<section class="connection-panel" data-testid="wallet-connection"><div class="section-head"><div><p class="eyebrow">${esc(state.providerName || '浏览器钱包')}</p><h1>钱包已连接</h1></div><span class="badge ${isOwner ? 'amber' : ''}" data-testid="connection-role">${isOwner ? '待签名登录' : '只读连接'}</span></div><p>${isOwner ? '这是资金池配置的 Owner 地址。确认登录消息后，才能读取私有任务并使用付款操作。' : '你的钱包已连接，但不是这个资金池的 Owner。当前不会请求登录签名，也不能付款、审批或读取私有任务。'}</p><div class="modal-details">${detailRow('当前账户', state.address, true)}${detailRow('钱包网络', `${mode()} · Chain ${state.connection?.chainId || '—'}`)}${detailRow('资金池 Owner', value(state.config, 'ownerAddress'), true)}${detailRow('补给资金池合约', walletAddress(), true)}</div><div class="connection-actions">${isOwner ? '<button class="button primary" data-action="owner-login" data-testid="owner-login">以 Owner 签名登录</button>' : ''}<button class="button" data-action="connect">更换钱包</button>${localWalletAvailable(state.config) ? '<button class="button subtle" data-action="local-wallet">体验本地测试钱包</button>' : ''}<button class="text-button" data-action="disconnect">断开连接</button></div><p class="settings-caption">${expectedChain() === 31337 ? '当前页面连接 Local 开发链。现场使用个人钱包付款前，需要把演示部署的 Owner 与实际签名账户配置一致。' : '当前资金池采用单 Owner 授权。连接个人地址不会授予这个资金池的管理权限。'}</p></section>`;
+}
+
+function clearWalletSession() {
+  walletSessionRevision++;
+  setToken(''); disconnectProvider();
+  try { sessionStorage.removeItem('aegis.address'); sessionStorage.removeItem('aegis.wallet-kind'); } catch { /* Clear in-memory private state even when browser storage is blocked. */ }
+  state.address = ''; state.connection = null; state.walletKind = ''; state.providerName = '';
+  state.wallet = null; state.tasks = []; state.draft = null; state.quote = null;
+  state.ownerReview = null; state.drawer = ''; state.detail = null; state.evidence = null; state.evidenceLoading = false;
+  state.reserve.draft = null; state.localWalletConfirm = false;
+  registerWalletListeners();
+}
+
+function rememberWalletIdentity(kind: 'browser' | 'local', address: string) {
+  try { sessionStorage.setItem('aegis.wallet-kind', kind); sessionStorage.setItem('aegis.address', address); }
+  catch { /* A blocked browser store must not prevent the current in-memory connection. */ }
+}
+
 async function refresh(initial = false) {
+  const revision = walletSessionRevision;
   try {
-    state.config = await api('/config');
+    state.config = await sessionApi('/config');
     state.chainId = expectedChain();
     state.online = true;
     state.serviceErrorCode = '';
     state.serviceErrorMessage = '';
     if (!canConnect()) { state.wallet = null; state.walletError = readinessMessage(); state.tasks = []; state.ownerReview = null; state.drawer = ''; }
     if (hasSession() && canConnect()) {
-      const results = await Promise.allSettled([api('/wallets/current'), api<unknown>('/tasks')]);
+      const results = await Promise.allSettled([sessionApi('/wallets/current'), sessionApi('/tasks')]);
+      if (revision !== walletSessionRevision) return;
       for (let index = 0; index < results.length; index++) {
         const result = results[index];
         if (result.status === 'fulfilled') {
@@ -495,7 +554,7 @@ async function refresh(initial = false) {
         } else {
           // A failed snapshot is "unavailable", never a stale or zero balance.
           if (index === 0) { state.wallet = null; state.walletError = errorMessage(result.reason); }
-          if (result.reason instanceof ApiError && result.reason.status === 401) { state.address = ''; state.wallet = null; state.tasks = []; state.ownerReview = null; state.drawer = ''; sessionStorage.removeItem('aegis.address'); }
+          if (result.reason instanceof ApiError && result.reason.status === 401) { clearWalletSession(); return; }
           else if (result.reason instanceof ApiError && result.reason.status === 0) {
             state.online = false;
             state.serviceErrorCode = result.reason.code;
@@ -503,9 +562,10 @@ async function refresh(initial = false) {
           }
         }
       }
-      if (state.drawer && state.drawer !== 'draft') { try { state.detail = await api(`/tasks/${encodeURIComponent(state.drawer)}`); } catch { /* Retain the last server response while the network recovers. */ } }
+      if (state.drawer && state.drawer !== 'draft') { try { state.detail = await sessionApi(`/tasks/${encodeURIComponent(state.drawer)}`); } catch { /* Retain the last server response while the network recovers. */ } }
     }
   } catch (error) {
+    if (error instanceof SessionChangedError) return;
     state.config = null;
     state.online = error instanceof ApiError && error.status !== 0;
     state.serviceErrorCode = error instanceof ApiError ? error.code : 'OFFLINE';
@@ -527,7 +587,7 @@ async function run(name: string, operation: () => Promise<void>) {
   if (state.busy) return;
   state.busy = name; render();
   try { await operation(); }
-  catch (error) { notify(errorMessage(error), true); }
+  catch (error) { if (!(error instanceof SessionChangedError)) notify(errorMessage(error), true); }
   finally { state.busy = ''; render(); }
 }
 
@@ -536,15 +596,18 @@ async function createIntent() {
   await run('intent', async () => {
     let body: Data;
     if (state.composerMode === 'natural') {
-      if (!state.message.trim()) throw new Error('先写下你的操作意图。');
-      body = { message: state.message.trim() };
+      const message = z.string().trim().min(1).max(4000).safeParse(state.message);
+      if (!message.success) throw new Error('请填写 1–4000 字符的操作意图。');
+      body = { message: message.data };
     } else {
-      if (!isAddress(state.recipient)) throw new Error('请输入完整、有效的收款地址。');
-      if (!/^\d+(\.\d{1,18})?$/.test(state.amount) || parseEther(state.amount) <= 0n) throw new Error('请输入大于零的 ETH 金额，最多保留 18 位小数。');
-      body = { recipient: state.recipient, amountWei: parseEther(state.amount).toString(), purpose: state.purpose.trim() || '原生 ETH 付款' };
+      const fields = z.object({recipient:addressInput,amount:z.string().max(96).regex(/^\d+(\.\d{1,18})?$/),purpose:z.string().trim().max(500)}).safeParse({recipient:state.recipient,amount:state.amount,purpose:state.purpose});
+      if (!fields.success) throw new Error('请填写有效地址、最多 18 位小数的 ETH 金额和不超过 500 字符的用途。');
+      const amount = parseEther(fields.data.amount);
+      if (amount <= 0n || amount >= 2n ** 256n) throw new Error('ETH 金额必须大于零且不超过合约范围。');
+      body = { recipient: fields.data.recipient, amountWei: amount.toString(), purpose: fields.data.purpose || '原生 ETH 付款' };
     }
     const draftId = state.composerMode === 'manual' && state.draft ? id(state.draft) : '';
-    const draft = draftId ? await api(`/intents/${encodeURIComponent(draftId)}`, 'PATCH', { ...body, expectedRevision: get(state.draft, 'revision', 'version', 'draftVersion') }) : await api('/intents', 'POST', body);
+    const draft = draftId ? await sessionApi(`/intents/${encodeURIComponent(draftId)}`, 'PATCH', { ...body, expectedRevision: get(state.draft, 'revision', 'version', 'draftVersion') }) : await sessionApi('/intents', 'POST', body);
     state.draft = draft; state.quote = null;
     state.recipient = taskRecipient(draft);
     state.amount = taskAmount(draft) ? formatEther(BigInt(taskAmount(draft))) : '';
@@ -552,7 +615,7 @@ async function createIntent() {
     const missing = get(draft, 'missingFields');
     if (Array.isArray(missing) && missing.length) { state.composerMode = 'manual'; notify('已整理意图，请补齐金额和收款地址。'); return; }
     if (!taskRecipient(draft) || !taskAmount(draft)) { state.composerMode = 'manual'; notify('请补齐收款地址与 ETH 金额，再预览操作。'); return; }
-    state.quote = await api(`/intents/${encodeURIComponent(id(draft))}/preview`, 'POST', { expectedRevision: get(draft, 'revision', 'version', 'draftVersion') });
+    state.quote = await sessionApi(`/intents/${encodeURIComponent(id(draft))}/preview`, 'POST', { expectedRevision: get(draft, 'revision', 'version', 'draftVersion') });
     state.drawer = 'draft';
     if (value(state.quote, 'status') === 'BLOCKED') notify(value(state.quote, 'message', 'reason', 'blockReason') || reasons(state.quote) || '这笔操作未通过规则检查，尚未发起付款。', true);
   });
@@ -560,9 +623,11 @@ async function createIntent() {
 
 async function submitIntent() {
   if (!state.draft || !state.quote || disabled()) return;
+  const draft = state.draft;
+  const quote = state.quote;
   await run('submit', async () => {
     const reserveContext = reserveDraftFor(state.draft);
-    const result = await api(`/intents/${encodeURIComponent(id(state.draft!))}/submit`, 'POST', { expectedRevision: get(state.draft, 'revision', 'version', 'draftVersion'), quoteId: get(state.quote, 'quoteId', 'id') });
+    const result = await sessionApi(`/intents/${encodeURIComponent(id(draft))}/submit`, 'POST', { expectedRevision: get(draft, 'revision', 'version', 'draftVersion'), quoteId: get(quote, 'quoteId', 'id') });
     const taskId = value(result, 'taskId', 'id');
     if (!taskId) throw new Error('服务没有返回任务 ID。请查看操作列表，不要重复提交。');
     const binding = bindingFromConfig(state.config);
@@ -579,7 +644,7 @@ async function submitIntent() {
 async function openTask(taskId: string) {
   if (state.draft && id(state.draft) === taskId) { state.drawer = 'draft'; render(); return; }
   state.drawer = taskId; state.detail = state.tasks.find(t => id(t) === taskId) || null; state.evidence = null; state.evidenceError = ''; render();
-  try { state.detail = await api(`/tasks/${encodeURIComponent(taskId)}`); render(); await loadEvidence(); }
+  try { state.detail = await sessionApi(`/tasks/${encodeURIComponent(taskId)}`); render(); await loadEvidence(); }
   catch (error) { notify(errorMessage(error), true); }
 }
 
@@ -587,7 +652,7 @@ async function loadEvidence() {
   const taskId = state.drawer;
   if (!taskId || taskId === 'draft' || state.evidenceLoading) return;
   state.evidenceLoading = true; state.evidenceError = ''; render();
-  try { const response = await api(`/tasks/${encodeURIComponent(taskId)}/evidence`); if (state.drawer === taskId) state.evidence = response; }
+  try { const response = await sessionApi(`/tasks/${encodeURIComponent(taskId)}/evidence`); if (state.drawer === taskId) state.evidence = response; }
   catch (error) { if (state.drawer === taskId) state.evidenceError = errorMessage(error); }
   finally { state.evidenceLoading = false; render(); }
 }
@@ -598,8 +663,8 @@ async function reviewOwner(action: 'approve' | 'cancel') {
   if (!state.detail || disabled()) return;
   if (pendingBroadcast(state.drawer)) { notify('这笔任务已有已广播交易，请先核对原交易，不要重复签名。', true); return; }
   await run('owner-review', async () => {
-    const task = await api(`/tasks/${encodeURIComponent(state.drawer)}`);
-    const tx = await api(`/tasks/${encodeURIComponent(state.drawer)}/owner-tx?action=${action}`);
+    const task = await sessionApi(`/tasks/${encodeURIComponent(state.drawer)}`);
+    const tx = await sessionApi(`/tasks/${encodeURIComponent(state.drawer)}/owner-tx?action=${action}`);
     if (!isAddress(String(tx.to)) || String(tx.to).toLowerCase() !== walletAddress().toLowerCase() || Number(tx.chainId) !== expectedChain()) throw new Error('审批交易的网络或合约与当前钱包不一致，已停止签名。');
     if (tx.chainBindingVerified !== true || value(tx, 'taskId') !== id(task) || value(tx, 'requestHash').toLowerCase() !== value(task, 'requestHash').toLowerCase() || value(tx, 'attestationId') !== value(task, 'attestationId') || value(tx, 'recipient').toLowerCase() !== taskRecipient(task).toLowerCase() || value(tx, 'amountWei') !== taskAmount(task)) throw new Error('链上待审批内容与任务记录不一致，已停止签名。');
     if (BigInt(String(tx.value || '0')) !== 0n) throw new Error('审批交易携带了额外 ETH，已停止签名。');
@@ -615,12 +680,13 @@ async function reviewOwner(action: 'approve' | 'cancel') {
 async function signOwner() {
   if (!state.ownerReview || disabled()) return;
   await run('owner-sign', async () => {
-    const review = state.ownerReview!;
+    const review = state.ownerReview;
+    if (!review) return;
     const hash = await sendOwnerTransaction(review.tx, state.address, state.walletKind === 'local' && state.config ? state.config : undefined);
     if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new Error('钱包未返回有效交易哈希。请先在钱包中核对，不要重复签名。');
     sessionStorage.setItem(broadcastKey(id(review.task)), JSON.stringify({ txHash: hash, action: review.action }));
     state.ownerReview = null;
-    try { await api(`/tasks/${encodeURIComponent(id(review.task))}/observed-tx`, 'POST', { txHash: hash, action: review.action }); }
+    try { await sessionApi(`/tasks/${encodeURIComponent(id(review.task))}/observed-tx`, 'POST', { txHash: hash, action: review.action }); }
     catch { notify(`交易已广播 ${short(hash, 10)}。服务尚未确认，请刷新核对；不要重复签名。`, true); return; }
     sessionStorage.removeItem(broadcastKey(id(review.task)));
     await refresh(); await loadEvidence();
@@ -631,42 +697,72 @@ async function observeOwner() {
   const pending = pendingBroadcast(state.drawer);
   if (!pending) return;
   await run('observe-owner', async () => {
-    await api(`/tasks/${encodeURIComponent(state.drawer)}/observed-tx`, 'POST', pending);
+    await sessionApi(`/tasks/${encodeURIComponent(state.drawer)}/observed-tx`, 'POST', pending);
     sessionStorage.removeItem(broadcastKey(state.drawer));
     await refresh(); await loadEvidence();
     notify('已核对原交易结果。');
   });
 }
 
+app.addEventListener('error', event => {
+  const image = event.target;
+  if (!(image instanceof HTMLImageElement) || !image.parentElement?.classList.contains('wallet-option-symbol')) return;
+  image.parentElement.innerHTML = icon('wallet');
+}, true);
+
 app.addEventListener('input', event => {
-  const input = event.target as HTMLInputElement;
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement)) return;
+  const text = z.string().safeParse(input.value);
+  if (!text.success) return;
   const fields: Record<string, 'message' | 'recipient' | 'amount' | 'purpose' | 'query'> = { 'intent-message': 'message', recipient: 'recipient', amount: 'amount', purpose: 'purpose', 'task-search': 'query' };
-  if (fields[input.id]) { state[fields[input.id]] = input.value; if (input.id === 'task-search') render(); }
+  if (fields[input.id]) { state[fields[input.id]] = text.data; if (input.id === 'task-search') render(); }
   if (input.id === 'reserve-threshold' || input.id === 'reserve-target') {
-    state.reserve[input.id === 'reserve-threshold' ? 'threshold' : 'target'] = input.value;
+    state.reserve[input.id === 'reserve-threshold' ? 'threshold' : 'target'] = text.data;
     state.reserve.notice = null;
     const binding = bindingFromConfig(state.config);
     if (binding) saveSettings(binding, state.reserve.threshold, state.reserve.target);
     render();
   }
 });
-app.addEventListener('keydown', event => { if (event.key === 'Escape' && !state.busy) { state.ownerReview = null; state.localWalletConfirm = false; state.drawer = ''; render(); } if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && (event.target as HTMLElement).id === 'intent-message') { event.preventDefault(); void createIntent(); } });
+app.addEventListener('keydown', event => { if (event.key === 'Escape' && !state.busy) { state.ownerReview = null; state.localWalletConfirm = false; state.walletPicker = false; state.drawer = ''; render(); } if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && event.target instanceof HTMLElement && event.target.id === 'intent-message') { event.preventDefault(); void createIntent(); } });
 app.addEventListener('click', event => {
-  const button = (event.target as HTMLElement).closest<HTMLElement>('button, [data-action]');
+  if (!(event.target instanceof Element)) return;
+  const button = event.target.closest<HTMLElement>('button, [data-action]');
   if (!button || button.hasAttribute('disabled')) return;
-  if (button.dataset.nav) { state.view = button.dataset.nav as View; state.filter = 'all'; state.drawer = ''; render(); return; }
-  if (button.dataset.settings) { state.settingsTab = button.dataset.settings; render(); return; }
-  if (button.dataset.filter) { state.filter = button.dataset.filter; render(); return; }
-  if (button.dataset.composer) { state.composerMode = button.dataset.composer; render(); return; }
+  if (button.dataset.nav) { const parsed=z.enum(['overview','operations','approvals','verification','settings']).safeParse(button.dataset.nav); if (!parsed.success) return; state.view = parsed.data; state.filter = 'all'; state.drawer = ''; render(); return; }
+  if (button.dataset.settings) { const parsed=z.enum(['account','policy','network','developer']).safeParse(button.dataset.settings); if (!parsed.success) return; state.settingsTab = parsed.data; render(); return; }
+  if (button.dataset.filter) { const parsed=z.enum(['all','active','completed']).safeParse(button.dataset.filter); if (!parsed.success) return; state.filter = parsed.data; render(); return; }
+  if (button.dataset.composer) { const parsed=z.enum(['natural','manual']).safeParse(button.dataset.composer); if (!parsed.success) return; state.composerMode = parsed.data; render(); return; }
   if (button.dataset.openTask) { void openTask(button.dataset.openTask); return; }
   if (button.dataset.copy) { void navigator.clipboard.writeText(button.dataset.copy).then(() => notify('已复制')).catch(() => notify('无法访问剪贴板，请手动复制。', true)); return; }
   switch (button.dataset.action) {
     case 'refresh': void refreshWithFeedback(); break;
-    case 'connect': void run('connect', async () => { if (connected()) { state.view = 'settings'; state.settingsTab = 'account'; return; } const config = state.config; if (!state.online || !canConnect() || !config) throw new Error(readinessMessage() || '服务尚未提供有效钱包配置。'); const session = await connectWallet(expectedChain(), undefined, config); state.address = session.address; state.chainId = session.chainId; state.walletKind = 'browser'; sessionStorage.setItem('aegis.wallet-kind', 'browser'); sessionStorage.setItem('aegis.address', session.address); registerWalletListeners(); await refresh(); notify('钱包已连接，签名登录成功。'); }); break;
+    case 'connect': if (state.online && canConnect() && !state.refreshing) { state.walletPicker = true; discovery.refresh(); render(); } break;
+    case 'dismiss-wallet-picker': state.walletPicker = false; render(); break;
+    case 'rescan-wallets': discovery.refresh(); render(); break;
+    case 'choose-wallet': void run('connect', async () => {
+      const option = discovery.select(button.dataset.walletId);
+      if (!option || !state.config || !state.online || !canConnect() || state.refreshing) throw new Error('钱包或服务状态已变化，请重新检测后选择。');
+      const config = state.config;
+      clearWalletSession();
+      const connection = await connectBrowserWallet(expectedChain(), config, option.provider);
+      state.connection = connection; state.address = connection.address; state.chainId = connection.chainId;
+      state.providerName = option.name; state.walletKind = 'browser'; state.walletPicker = false; state.view = 'overview';
+      registerWalletListeners();
+      notify(connection.role === 'owner' ? '钱包已连接，请以 Owner 签名登录。' : '钱包已连接，当前为只读连接。');
+    }); break;
+    case 'owner-login': void run('connect', async () => {
+      const connection = state.connection;
+      if (!connection || !state.config || !state.online || !canConnect() || state.refreshing) throw new Error('请先重新连接钱包。');
+      await authenticateOwner(connection, state.config);
+      rememberWalletIdentity('browser', connection.address);
+      await refresh(); notify('Owner 签名登录成功。');
+    }); break;
     case 'local-wallet': state.localWalletConfirm = true; render(); break;
     case 'dismiss-local-wallet': if (!state.busy) { state.localWalletConfirm = false; render(); } break;
-    case 'confirm-local-wallet': void run('connect', async () => { const config = state.config; if (!state.online || !canConnect() || !config || !localWalletAvailable(config)) throw new Error('当前环境不允许本地测试钱包。'); const session = await connectWallet(31337, config); state.address = session.address; state.chainId = session.chainId; state.walletKind = 'local'; sessionStorage.setItem('aegis.wallet-kind', 'local'); sessionStorage.setItem('aegis.address', session.address); state.localWalletConfirm = false; await refresh(); notify('已登录本地公开开发账户，仅用于 Local 测试。'); }); break;
-    case 'disconnect': setToken(''); disconnectProvider(); sessionStorage.removeItem('aegis.address'); sessionStorage.removeItem('aegis.wallet-kind'); state.walletKind = ''; state.address = ''; state.wallet = null; state.tasks = []; state.drawer = ''; notify('本次会话已断开。'); break;
+    case 'confirm-local-wallet': void run('connect', async () => { const config = state.config; if (!config || state.refreshing || !state.online || !canConnect() || !localWalletAvailable(config)) throw new Error('当前环境不允许本地测试钱包。'); clearWalletSession(); const session = await connectWallet(31337, config); state.address = session.address; state.chainId = session.chainId; state.walletKind = 'local'; state.connection = session; rememberWalletIdentity('local', session.address); await refresh(); notify('已登录本地公开开发账户，仅用于 Local 测试。'); }); break;
+    case 'disconnect': clearWalletSession(); notify('本次会话已断开。'); break;
     case 'send-intent': void createIntent(); break;
     case 'reserve-prepare': void prepareReserve(button.dataset.reserveKey || ''); break;
     case 'confirm-transfer': void submitIntent(); break;
@@ -685,10 +781,17 @@ app.addEventListener('click', event => {
   }
 });
 
-function invalidateWallet() { if (!connected() || state.walletKind !== 'browser') return; setToken(''); disconnectProvider(); sessionStorage.removeItem('aegis.address'); sessionStorage.removeItem('aegis.wallet-kind'); state.walletKind = ''; state.address = ''; state.wallet = null; state.tasks = []; state.ownerReview = null; state.drawer = ''; notify('钱包账户或网络已变更，请重新连接并签名登录。', true); }
-let observedProvider: unknown;
-function registerWalletListeners() { if (window.ethereum && window.ethereum !== observedProvider) { window.ethereum.on?.('accountsChanged', invalidateWallet); window.ethereum.on?.('chainChanged', invalidateWallet); window.ethereum.on?.('disconnect', invalidateWallet); observedProvider = window.ethereum; } }
-registerWalletListeners();
+function invalidateWallet() { if (!walletLinked() || state.walletKind !== 'browser') return; clearWalletSession(); notify('钱包账户或网络已变更，请重新连接并签名登录。', true); }
+let observedProvider: WalletProvider | undefined;
+function registerWalletListeners() {
+  const active = getActiveProvider();
+  if (active === observedProvider) return;
+  for (const event of ['accountsChanged', 'chainChanged', 'disconnect']) observedProvider?.removeListener?.(event, invalidateWallet);
+  observedProvider = active;
+  for (const event of ['accountsChanged', 'chainChanged', 'disconnect']) active?.on?.(event, invalidateWallet);
+}
+discovery.subscribe(() => { if (state.walletPicker) render(); });
+discovery.start();
 render();
 void refresh(true);
 window.setInterval(() => { if (!document.hidden && !state.busy) void refresh(); }, 5000);

@@ -33,23 +33,22 @@ export interface Config {
   abiVersion: string; deploymentReady: boolean; agentKey?: Hex; origins: string[];
   authDomain: string; sessionSeconds: number; quoteSeconds: number; requestSeconds: number;
   maxAgeSeconds: number; configuredModel: string | null; llm: LlmConfig;
-  rpcTimeoutMs: number; rpcRetryCount: number; readinessTtlMs: number;
+  rpcTimeoutMs: number; rpcRetryCount: number;
 }
-const tuningSchema = z.object({
-  AEGIS_RPC_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(30_000).default(8_000),
-  AEGIS_RPC_RETRY_COUNT: z.coerce.number().int().min(0).max(3).default(1),
-  AEGIS_READINESS_TTL_MS: z.coerce.number().int().min(0).max(60_000).default(5_000),
+const optionalNumber = (schema: z.ZodType<number>) => z.preprocess(value => value === '' ? undefined : value, schema);
+const rpcTuningSchema = z.object({
+  AEGIS_RPC_TIMEOUT_MS: optionalNumber(z.coerce.number().int().min(1_000).max(30_000).default(8_000)),
+  AEGIS_RPC_RETRY_COUNT: optionalNumber(z.coerce.number().int().min(0).max(2).default(1)),
 }).passthrough();
 
-function runtimeTuning(env: NodeJS.ProcessEnv) {
-  const values = Object.fromEntries(Object.entries(env).filter(([, value]) => value !== ''));
-  const result = tuningSchema.safeParse(values);
-  if (result.success) return result.data;
-  const issue = result.error.issues[0];
-  throw new Error(`${issue?.path.join('.') || 'runtime tuning'}: ${issue?.message ?? 'invalid value'}`);
+function parseRpcTuning(env: NodeJS.ProcessEnv) {
+  const parsed = rpcTuningSchema.safeParse(env);
+  if (parsed.success) return parsed.data;
+  const issue = parsed.error.issues[0];
+  throw new Error(`${issue?.path.join('.') || 'RPC configuration'}: ${issue?.message ?? 'invalid value'}`);
 }
 export function loadConfig(env = process.env): Config {
-  const tuning = runtimeTuning(env);
+  const rpcTuning = parseRpcTuning(env);
   const mode = env.AEGIS_MODE ?? 'local_chain';
   if (!['local_chain', 'testnet', 'mock'].includes(mode)) throw new Error('AEGIS_MODE must be local_chain, testnet, or mock');
   if (mode === 'testnet' && !env.AEGIS_DEPLOYMENT_FILE) throw new Error('AEGIS_MODE=testnet requires AEGIS_DEPLOYMENT_FILE');
@@ -102,7 +101,6 @@ export function loadConfig(env = process.env): Config {
     origins: ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:4173', 'http://127.0.0.1:4173'],
     authDomain: 'localhost', sessionSeconds: 3600, quoteSeconds: 60, requestSeconds: 600,
     maxAgeSeconds: 3600, configuredModel: llmModel ?? env.OPENAI_MODEL ?? null, llm,
-    rpcTimeoutMs: tuning.AEGIS_RPC_TIMEOUT_MS, rpcRetryCount: tuning.AEGIS_RPC_RETRY_COUNT,
-    readinessTtlMs: tuning.AEGIS_READINESS_TTL_MS,
+    rpcTimeoutMs: rpcTuning.AEGIS_RPC_TIMEOUT_MS, rpcRetryCount: rpcTuning.AEGIS_RPC_RETRY_COUNT,
   };
 }

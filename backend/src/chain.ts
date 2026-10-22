@@ -6,11 +6,11 @@ import {
 import { privateKeyToAccount } from 'viem/accounts';
 import {
   walletAbiSignatures, oracleAbiSignatures, policyEngineAbiSignatures,
+  POLICY_EVIDENCE_VERIFICATION_SCOPE, POLICY_EVIDENCE_VERIFIED_FIELDS,
   type PolicyEvidence, type Task, type TransactionEvidence,
 } from '@aegis/shared';
 import type { Config } from './config.js';
 import { ApiError, errorMessage } from './errors.js';
-import { ReadinessCache } from './readiness-cache.js';
 
 export const walletAbi = parseAbi(walletAbiSignatures);
 export const oracleAbi = parseAbi(oracleAbiSignatures);
@@ -74,7 +74,7 @@ export interface Outcome {
   eventData?: Record<string, string>; policyEvidence?: PolicyEvidence;
 }
 export interface Gateway {
-  readiness(force?: boolean): Promise<Record<string, unknown>>;
+  readiness(): Promise<Record<string, unknown>>;
   snapshot(): Promise<Snapshot>;
   preview(recipient: Address, amountWei: string, maxUsdCost6?: string): Promise<Omit<Quote, 'quoteId' | 'draftId' | 'draftVersion'>>;
   prepare(task: Task): Promise<Prepared>;
@@ -110,24 +110,19 @@ export class ViemGateway implements Gateway {
   readonly publicClient;
   readonly account;
   readonly walletClient;
-  private readonly readinessCache: ReadinessCache<Record<string, unknown>>;
   constructor(readonly config: Config) {
     const chain = defineChain({ id: config.chainId, name: config.mode === 'local_chain' ? 'Hardhat local' : 'Sepolia', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: { default: { http: [config.rpcUrl] } } });
     this.publicClient = createPublicClient({ chain, transport: http(config.rpcUrl, { timeout: config.rpcTimeoutMs, retryCount: config.rpcRetryCount }) });
     try { this.account = config.agentKey ? privateKeyToAccount(config.agentKey) : undefined; }
     catch { throw new Error('AEGIS_AGENT_PRIVATE_KEY is invalid'); }
     this.walletClient = this.account ? createWalletClient({ chain, account: this.account, transport: http(config.rpcUrl, { timeout: config.rpcTimeoutMs, retryCount: config.rpcRetryCount }) }) : undefined;
-    this.readinessCache = new ReadinessCache(config.readinessTtlMs);
   }
   private async requireChain() {
     if (this.config.mode === 'mock') throw new ApiError(422, 'MOCK_EXECUTION_DISABLED', 'Mock 模式没有链上执行或真实交易证据');
     if (!this.config.deploymentReady || this.config.walletAddress === zeroAddress) throw new ApiError(503, 'DEPLOYMENT_MISSING', '请先部署合约并启动后端');
     if (await this.publicClient.getChainId() !== this.config.chainId) throw new ApiError(503, 'CHAIN_MISMATCH', 'RPC chainId 与配置不一致');
   }
-  async readiness(force = false) {
-    return this.readinessCache.get(() => this.inspectReadiness(), force);
-  }
-  private async inspectReadiness(): Promise<Record<string, unknown>> {
+  async readiness() {
     let verifiedStructure: Record<string, unknown> = {};
     try {
       await this.requireChain();
@@ -360,10 +355,11 @@ export class ViemGateway implements Gateway {
       engineAddress: this.config.policyEngineAddress, event: 'BudgetConsumed', actionType: 'NATIVE_TRANSFER', decision,
       requestHash: String(policyEvent.args.requestHash) as Hex, actor: String(policyEvent.args.actor) as Hex,
       costUsd6: policyCost, day: String(policyEvent.args.day), spentUsd6: String(policyEvent.args.spentUsd6),
-      policyVersion: String(walletEvent.args.policyVersion), oracleAddress: this.config.oracleAddress, feedAddress: this.config.feedAddress,
+      policyVersion: String(walletEvent.args.policyVersion),
       roundId: String(walletEvent.args.roundId), updatedAtSeconds: String(walletEvent.args.updatedAt),
       transactionHash: hash, blockNumber: receipt.blockNumber.toString(), blockHash: receipt.blockHash,
       logIndex: policyEvent.logIndex, verified: true,
+      verificationScope: POLICY_EVIDENCE_VERIFICATION_SCOPE, verifiedFields: POLICY_EVIDENCE_VERIFIED_FIELDS,
     };
     return { status: 'EXECUTED', attestationId: String(walletEvent.args.attestationId), transaction: boundTransaction, eventData, policyEvidence };
   }

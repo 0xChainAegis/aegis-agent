@@ -6,6 +6,7 @@ import { SCHEMA_VERSION } from '@aegis/shared';
 import { AegisService } from './service.js';
 import { walletAbi, oracleAbi, policyEngineAbi } from './chain.js';
 import { ApiError } from './errors.js';
+import { PublicReadinessCache, readinessIdentity } from './readiness-cache.js';
 
 const address = z.string().refine(value => isAddress(value), 'Invalid Ethereum address');
 const integer = z.string().regex(/^[1-9]\d*$/).max(78).refine(value => /^[1-9]\d*$/.test(value) && BigInt(value) < 2n ** 256n, 'Amount exceeds uint256');
@@ -38,6 +39,8 @@ function publicRpc(rpcUrl: string) {
   return url.username || url.password || url.search || (url.pathname !== '/' && url.pathname !== '') ? null : rpcUrl;
 }
 export function createApiServer(service: AegisService) {
+  const readinessCache = new PublicReadinessCache(() => service.chain.readiness(), () => readinessIdentity(service.config));
+  const publicReadiness = () => service.config.mode === 'testnet' ? readinessCache.read() : service.chain.readiness();
   const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
     const requestId = randomUUID();
     const base = { schemaVersion: SCHEMA_VERSION, mode: service.config.mode, requestId, serverTime: new Date().toISOString() };
@@ -58,21 +61,19 @@ export function createApiServer(service: AegisService) {
       const url = new URL(request.url ?? '/', `http://127.0.0.1:${service.config.port}`);
       const path = url.pathname;
       if (request.method === 'GET' && (path === '/health' || path === '/api/v1/health')) {
-        send(200, { status: 'ok' }); return;
-      }
-      if (request.method === 'GET' && path === '/api/v1/readiness') {
-        const readiness = await service.chain.readiness();
-        send(readiness.ready ? 200 : 503, { status: readiness.ready ? 'ready' : 'not_ready', readiness }); return;
+        const readiness = await publicReadiness();
+        send(readiness.ready ? 200 : 503, { status: readiness.ready ? 'ok' : 'not_ready', readiness }); return;
       }
       if (request.method === 'GET' && path === '/api/v1/config') {
         const config = service.config;
         send(200, {
           chainId: config.chainId, rpcUrl: publicRpc(config.rpcUrl), abiVersion: config.abiVersion,
+          localTestWalletAvailable: config.mode === 'local_chain' && config.chainId === 31337 && config.ownerAddress.toLowerCase() === '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266',
           walletAddress: config.walletAddress, aclAddress: config.aclAddress, attestationAddress: config.attestationAddress,
           oracleAddress: config.oracleAddress, policyEngineAddress: config.policyEngineAddress, feedAddress: config.feedAddress, ownerAddress: config.ownerAddress, agentAddress: config.agentAddress, recipientAddress: config.recipientAddress,
           addresses: { wallet: config.walletAddress, acl: config.aclAddress, attestation: config.attestationAddress, oracle: config.oracleAddress, policyEngine: config.policyEngineAddress, feed: config.feedAddress, owner: config.ownerAddress, agent: config.agentAddress, recipient: config.recipientAddress },
           abi: { wallet: walletAbi, oracle: oracleAbi, policyEngine: policyEngineAbi }, walletAbi, oracleAbi, policyEngineAbi,
-          readiness: await service.chain.readiness(), explorerBaseUrl: config.mode === 'testnet' ? 'https://sepolia.etherscan.io' : null,
+          readiness: await publicReadiness(), explorerBaseUrl: config.mode === 'testnet' ? 'https://sepolia.etherscan.io' : null,
           planner: {
             kind: config.llm.mode === 'off' ? 'rule_parser' : 'llm',
             mode: config.llm.mode,
@@ -156,5 +157,6 @@ export function createApiServer(service: AegisService) {
   });
   server.requestTimeout = 15_000;
   server.headersTimeout = 10_000;
+  server.once('close', () => readinessCache.close());
   return server;
 }
