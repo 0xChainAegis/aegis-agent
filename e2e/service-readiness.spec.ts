@@ -174,7 +174,8 @@ test('background readiness checking stays responsive, blocks wallet actions, and
   await expect(page.getByTestId('service-banner')).toContainText('正在后台读取');
   await expect(page.getByTestId('connect-wallet')).toBeDisabled();
   state.setReadiness(ready);
-  await page.getByRole('button', { name: '刷新服务状态', exact: true }).click();
+  // Pending readiness is polled automatically instead of forcing the user to
+  // click retry or wait for the normal thirty-second refresh interval.
   await expect(page.getByTestId('service-banner')).toHaveCount(0);
   await expect(page.getByTestId('connect-wallet')).toBeEnabled();
   expect(state.writes).toEqual([]);

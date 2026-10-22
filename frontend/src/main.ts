@@ -6,6 +6,7 @@ import { createWalletDiscovery } from './providers';
 import { icon, mark } from './icons';
 import { currentTheme, initTheme, toggleTheme } from './theme';
 import { serviceReadiness } from './readiness';
+import { nextRefreshDelay } from './polling';
 import { bindingFromConfig, loadSettings, observationFromSnapshot, parseSettings, sameBinding, saveSettings, storageKey, suggestTopUp, suggestionKey, type ReserveBinding, type ReserveObservation, type Suggestion } from './reserve';
 import './style.css';
 
@@ -580,7 +581,18 @@ async function refreshWithFeedback() {
   state.refreshing = true;
   render();
   try { await refresh(true); }
-  finally { state.refreshing = false; render(); }
+  finally { state.refreshing = false; render(); scheduleNextRefresh(); }
+}
+
+let refreshTimer: number | undefined;
+function scheduleNextRefresh() {
+  if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+  const active = !document.hidden && !state.busy && !state.refreshing;
+  refreshTimer = window.setTimeout(async () => {
+    refreshTimer = undefined;
+    if (!document.hidden && !state.busy && !state.refreshing) await refresh();
+    scheduleNextRefresh();
+  }, nextRefreshDelay(state.config, active));
 }
 
 async function run(name: string, operation: () => Promise<void>) {
@@ -793,5 +805,4 @@ function registerWalletListeners() {
 discovery.subscribe(() => { if (state.walletPicker) render(); });
 discovery.start();
 render();
-void refresh(true);
-window.setInterval(() => { if (!document.hidden && !state.busy) void refresh(); }, 30_000);
+void refresh(true).finally(scheduleNextRefresh);
