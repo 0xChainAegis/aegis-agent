@@ -13,8 +13,13 @@ async function validateDeploymentOwner({ provider, deployerAddress, ownerAddress
   if ([ZeroAddress, agentAddress, recipientAddress].some(address => same(address, owner))) {
     throw new Error("OWNER_ADDRESS must be nonzero and distinct from the agent and recipient");
   }
-  if (await provider.getCode(owner) !== "0x") {
-    throw new Error("OWNER_ADDRESS must be an externally owned wallet supported by Owner login");
+  const code = await provider.getCode(owner);
+  // EIP-7702 delegated EOAs retain normal signatures and transaction origination.
+  // A zero delegation target clears code in the protocol, rather than storing a marker.
+  const delegation = /^0xef0100([0-9a-f]{40})$/i.exec(code);
+  const delegatedEoa = delegation !== null && BigInt(`0x${delegation[1]}`) !== 0n;
+  if (code !== "0x" && !delegatedEoa) {
+    throw new Error("OWNER_ADDRESS must have empty code or an exact nonzero EIP-7702 delegation supported by Owner login");
   }
   // The five Sepolia CREATE transactions precede all configuration transactions.
   const firstNonce = await provider.getTransactionCount(deployerAddress, "pending");
