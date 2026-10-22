@@ -60,6 +60,40 @@ class LauncherTests(unittest.TestCase):
                 self.assertEqual(sockets.call_count, 2)
                 self.assertNotIn((('127.0.0.1', 8545),), [call.args for call in sockets.return_value.__enter__.return_value.connect_ex.call_args_list])
 
+    def test_web_plan_can_disable_llm_without_model_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vite = root / 'node_modules/vite/bin/vite.js'
+            vite.parent.mkdir(parents=True)
+            vite.touch()
+            source = self.sepolia_source(directory)
+            for name in ('AEGIS_LLM_PROVIDER', 'AEGIS_LLM_MODEL', 'AEGIS_LLM_BASE_URL', 'AEGIS_LLM_API_KEY'):
+                del source[name]
+            launcher = web['launch_plan'].__globals__['_launcher']
+            prepare_node = Mock(return_value=('node', dict(source)))
+            with patch.dict(launcher, {
+                'prepare_node_environment': prepare_node,
+                'prepare_environment': Mock(side_effect=AssertionError('live LLM validation must not run')),
+            }):
+                env, commands = web['launch_plan'](source, root, network='sepolia', llm_mode='off')
+            self.assertEqual(env['AEGIS_LLM_MODE'], 'off')
+            self.assertEqual(env['AEGIS_MODE'], 'testnet')
+            self.assertEqual(len(commands), 2)
+            prepare_node.assert_called_once_with(source)
+
+    def test_web_plan_honors_off_mode_from_environment_and_rejects_stub(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vite = root / 'node_modules/vite/bin/vite.js'
+            vite.parent.mkdir(parents=True)
+            vite.touch()
+            source = {**self.sepolia_source(directory), 'AEGIS_LLM_MODE': 'off'}
+            launcher = web['launch_plan'].__globals__['_launcher']
+            with patch.dict(launcher, {'prepare_node_environment': lambda source: ('node', dict(source))}):
+                self.assertEqual(web['launch_plan'](source, root)[0]['AEGIS_LLM_MODE'], 'off')
+            with self.assertRaisesRegex(ValueError, '--llm off or --llm live'):
+                web['launch_plan']({**source, 'AEGIS_LLM_MODE': 'stub'}, root)
+
     def test_sepolia_configuration_rejects_missing_wrong_chain_and_public_keys(self):
         validate = web['validate_sepolia_environment']
         with tempfile.TemporaryDirectory() as directory:
@@ -87,8 +121,14 @@ class LauncherTests(unittest.TestCase):
                                                  'check_local_chain': Mock(side_effect=AssertionError('no sockets'))}), \
                 patch.object(subprocess, 'Popen') as start, redirect_stdout(io.StringIO()):
             self.assertEqual(web['main'](['--network', 'sepolia', '--check']), 0)
-            web['main'].__globals__['launch_plan'].assert_called_once_with(network='sepolia')
+            web['main'].__globals__['launch_plan'].assert_called_once_with(network='sepolia', llm_mode=None)
             start.assert_not_called()
+
+    def test_sepolia_check_passes_explicit_off_mode_to_plan(self):
+        plan = Mock(return_value=({'AEGIS_MODE': 'testnet', 'AEGIS_LLM_MODE': 'off'}, []))
+        with patch.dict(web['main'].__globals__, {'launch_plan': plan}), redirect_stdout(io.StringIO()):
+            self.assertEqual(web['main'](['--network', 'sepolia', '--llm', 'off', '--check']), 0)
+        plan.assert_called_once_with(network='sepolia', llm_mode='off')
 
     def test_missing_settings_fail_before_runtime_or_child_execution(self):
         with patch.object(subprocess, 'run') as run:
@@ -125,6 +165,14 @@ class LauncherTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'Node 24'):
                     live['prepare_environment'](source)
 
+    def test_node_environment_does_not_require_llm_settings(self):
+        source = {'PATH': 'original-path'}
+        with patch('shutil.which', return_value='/tools/node'), patch.object(
+                subprocess, 'run', return_value=Mock(returncode=0, stdout='v24.1.0\n')):
+            _, env = live['prepare_node_environment'](source)
+        self.assertEqual(env['PATH'], '/tools' + os.pathsep + 'original-path')
+        self.assertNotIn('AEGIS_LLM_MODE', env)
+
     def test_web_plan_uses_fresh_db_preserves_override_and_resolves_workspace_vite(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -151,7 +199,7 @@ class LauncherTests(unittest.TestCase):
         with patch.dict(live['main'].__globals__, {'prepare_environment': lambda: ('node', configured())}), patch.object(subprocess, 'run') as run, redirect_stdout(io.StringIO()):
             self.assertEqual(live['main'](['--check']), 0)
             run.assert_not_called()
-        with patch.dict(web['main'].__globals__, {'launch_plan': lambda: (configured(), []), 'check_local_chain': Mock(side_effect=AssertionError('must not probe ports'))}), patch.object(subprocess, 'Popen') as start, redirect_stdout(io.StringIO()):
+        with patch.dict(web['main'].__globals__, {'launch_plan': lambda **kwargs: (configured(), []), 'check_local_chain': Mock(side_effect=AssertionError('must not probe ports'))}), patch.object(subprocess, 'Popen') as start, redirect_stdout(io.StringIO()):
             self.assertEqual(web['main'](['--check']), 0)
             start.assert_not_called()
 

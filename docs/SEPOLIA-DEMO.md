@@ -37,7 +37,13 @@ py scripts/start-live-web.py --network sepolia --check
 py scripts/start-live-web.py --network sepolia
 ```
 
-`--check` validates local configuration only. It does not contact the RPC or model, prove deployed bytecode, or send payment. Sepolia startup does not start or require Hardhat on port 8545, and never falls back to Local. It reuses a deployment-specific SQLite path by default, preserving task recovery across restarts. An explicit `AEGIS_DB_PATH` overrides this; keep it private and stable for the same deployment. For deterministic parsing without a model, set `AEGIS_LLM_MODE=off` and use `npm run dev` with the same testnet variables; the UI must identify rule parsing accurately. Stop an existing app on 3001/5173 before starting another.
+To test the Sepolia wallet and UI before configuring a model, use deterministic rule parsing:
+
+```bash
+python3 scripts/start-live-web.py --network sepolia --llm off
+```
+
+`AEGIS_LLM_MODE=off` in the environment has the same effect, so the shorter command also works after exporting it. `--check` validates local configuration only. It does not contact the RPC or model, prove deployed bytecode, or send payment. Sepolia startup does not start or require Hardhat on port 8545, and never falls back to Local. It reuses a deployment-specific SQLite path by default, preserving task recovery across restarts. An explicit `AEGIS_DB_PATH` overrides this; keep it private and stable for the same deployment. Stop an existing app on 3001/5173 before starting another.
 
 On Linux/macOS, when the current deployment settings are in `contracts/.env`,
 run the live read-only gate before starting the UI:
