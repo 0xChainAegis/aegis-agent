@@ -55,6 +55,14 @@ export function serviceReadiness(config: unknown, context: ServiceContext = {}):
   const { chainId, mode, readiness } = parsed.data;
   const network = chainId === 11155111 ? 'Sepolia' : chainId === 31337 ? '本地链' : `Chain ${chainId}`;
   const code = readiness.code || '';
+  if (code === 'READINESS_CHECKING') return status({
+    phase: 'loading', tone: 'neutral', code, title: `正在核对 ${network}`,
+    message: '正在后台读取网络、部署和价格源。检查完成前不会请求付款；页面会自动更新。',
+    actionLabel: '重新检查状态', canConnect: false, canPay: false,
+  });
+  if (code === 'READINESS_TIMEOUT') return stopped(
+    code, `${network} 检查超时`, '节点检查未在限定时间内完成，付款已暂停。请检查 RPC；完成中的检查结束后可重试。', 'amber',
+  );
   if (code === 'CHAIN_MISMATCH' || (readiness.rpcChainId !== undefined && readiness.rpcChainId !== chainId)) {
     return stopped('CHAIN_MISMATCH', '网络配置不一致', `RPC 返回的网络与 ${network} 配置不一致。请修正节点配置后重试。`);
   }
@@ -65,7 +73,7 @@ export function serviceReadiness(config: unknown, context: ServiceContext = {}):
   if (readiness.ready && verified && !code) return status({
     phase: 'ready', tone: 'green', code: 'READY',
     title: mode === 'local_chain' ? '本地演示可用' : `${network} 已就绪`,
-    message: 'API、网络、合约和价格源均已核对，可以连接钱包并准备操作。',
+    message: mode === 'testnet' ? '最近一次网络、合约和价格源检查通过，可以连接钱包。付款前仍会重新校验链上规则。' : 'API、网络、合约和价格源均已核对，可以连接钱包并准备操作。',
     actionLabel: '', canConnect: true, canPay: true,
   });
   if (code === 'FEED_STALE') return status({

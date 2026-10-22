@@ -152,3 +152,15 @@ test('topbar and retry communicate the current service phase', async ({ page }) 
   await expect(page.getByTestId('service-banner')).toContainText('API 正在运行');
   await expect(page.getByTestId('connect-wallet')).toHaveAttribute('title', /RPC 暂不可用/);
 });
+
+test('background readiness checking stays responsive, blocks wallet actions, and recovers', async ({ page }) => {
+  const state = await fixture(page, { ready: false, code: 'READINESS_CHECKING', source: 'checking', checkedAt: null, cacheAgeMs: null });
+  await expect(page.getByTestId('service-status')).toContainText('正在核对 本地链');
+  await expect(page.getByTestId('service-banner')).toContainText('正在后台读取');
+  await expect(page.getByTestId('connect-wallet')).toBeDisabled();
+  state.setReadiness(ready);
+  await page.getByRole('button', { name: '刷新服务状态', exact: true }).click();
+  await expect(page.getByTestId('service-banner')).toHaveCount(0);
+  await expect(page.getByTestId('connect-wallet')).toBeEnabled();
+  expect(state.writes).toEqual([]);
+});
