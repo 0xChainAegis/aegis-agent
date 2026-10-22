@@ -1,0 +1,45 @@
+# Sepolia demo
+
+The stage demo uses Ethereum Sepolia (chain ID **11155111**) and the real Chainlink ETH/USD Feed. A Hardhat receipt, Mock Feed, successful build or LLM-only parsing report is not Sepolia payment evidence.
+
+## Deployment and signing identities
+
+Deploy the current contracts using `contracts/scripts/deploy.js` and the configuration documented in [the contract guide](../contracts/README.md). The script verifies the network, Feed, roles, bindings and funding before writing `contracts/deployments/sepolia.json`. A pre-PolicyEngine Wallet is not compatible with the current backend: its missing `policyEngine()` interface cannot be repaired by editing JSON.
+
+The deployment JSON contains public addresses. It must include Wallet, ACL, Attestation, Oracle, PolicyEngine, Feed, Owner, executor and recipient. The Owner is the account configured by this deployment, not whichever browser wallet connects first. Use that Owner account in the presenting browser. The executor is a separate restricted signer held only by the backend. The Wallet contract holds the top-up funds; the recipient is the operating wallet receiving ETH.
+
+Use dedicated testnet accounts and Sepolia ETH. Keep Owner keys out of the backend and out of the repository. Never reuse Hardhat's published development keys on Sepolia. Follow the current deployment script's signer requirements; do not change a public Owner field without matching on-chain ownership and administration.
+
+## Start the web demo
+
+Install the locked dependencies with Node 24 or newer. Set these variables in the same PowerShell window used to start the services. Replace the RPC URL with the team's endpoint; the deployment file must come from the actual current deployment.
+
+```powershell
+$env:AEGIS_MODE = 'testnet'
+$env:AEGIS_CHAIN_ID = '11155111'
+$env:AEGIS_DEPLOYMENT_FILE = (Resolve-Path 'contracts/deployments/sepolia.json').Path
+$env:AEGIS_RPC_URL = 'https://YOUR_SEPOLIA_RPC'
+$env:AEGIS_AGENT_PRIVATE_KEY = [System.Net.NetworkCredential]::new('', (Read-Host 'Executor key (not Owner key)' -AsSecureString)).Password
+```
+
+For a live model, set `AEGIS_LLM_PROVIDER`, `AEGIS_LLM_BASE_URL`, `AEGIS_LLM_MODEL` and `AEGIS_LLM_API_KEY` using the team's tested provider. Enter keys privately; never copy them into frontend code, screenshots or chat. The existing launcher supports an explicit Sepolia selection:
+
+```powershell
+py scripts/start-live-web.py --network sepolia --check
+py scripts/start-live-web.py --network sepolia
+```
+
+`--check` validates local configuration only. It does not contact the RPC or model, prove deployed bytecode, or send payment. Sepolia startup does not start or require Hardhat on port 8545, and never falls back to Local. It reuses a deployment-specific SQLite path by default, preserving task recovery across restarts. An explicit `AEGIS_DB_PATH` overrides this; keep it private and stable for the same deployment. For deterministic parsing without a model, set `AEGIS_LLM_MODE=off` and use `npm run dev` with the same testnet variables; the UI must identify rule parsing accurately. Stop an existing app on 3001/5173 before starting another.
+
+Public `/api/v1/config` and `/health` share a bounded readiness check on Sepolia. Initial or expired checks return a non-ready status, disabling wallet actions. A completed result remains a display proof for at most fifteen seconds; after five seconds, the next read starts one background refresh without delaying the still-valid result. Failure replaces readiness immediately; results are never served ready past the hard expiry. Responses include check completion time and cache age, which are not a claim of current block finality. These display checks never replace fresh preview, execution or Owner-approval checks.
+
+## Acceptance on the actual presenting computer
+
+1. Read `/api/v1/config`: require `mode=testnet`, chain ID 11155111, the intended Owner and current contract addresses. `/health` must become ready after real RPC, Feed, authorization and funding checks.
+2. Select the intended wallet extension explicitly, switch it to Sepolia and connect the deployed Owner. Sign only the displayed login message. Login is not a payment authorization.
+3. If demonstrating AI, submit one complete natural-language intent and verify `parser.kind=llm` and `parser.fallback=false` in the response. Rule fallback must be labelled as such.
+4. Use a tiny allowlisted ETH amount within the configured budget. Review the recipient, chain and maximum USD cost, then explicitly confirm. Record the actual transaction hash.
+5. Open `https://sepolia.etherscan.io/tx/ACTUAL_HASH`. Confirm the matching Wallet payment and PolicyEngine budget events, amount and recipient. Save code revision, network, public deployment addresses and transaction link; exclude secrets.
+6. Reload the app. The same task remains and no second payment appears. Demonstrate rejection with an injected instruction or a blocked preview, without deliberately sending an unsafe transaction.
+
+Record a short backup video of this same Sepolia flow before the event. An offline recording is a contingency, not proof that the current live connection is healthy. Follow the organizer's on-site demonstration requirements.

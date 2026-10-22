@@ -221,6 +221,7 @@ npm run test:e2e
 | [合约规则](contracts/README.md) | 链上授权规则与本地部署 |
 | [界面设计系统](frontend/DESIGN.md) | 布局、明暗主题、组件与可访问性 |
 | [真实 LLM 联调](docs/LLM-LIVE-LOCAL.md) | live 模式的环境变量、启动脚本与本地联调限制 |
+| [Sepolia 演示](docs/SEPOLIA-DEMO.md) | 测试网部署、Owner 与执行账户、启动和付款验收 |
 | [意图评测报告](eval/REPORT.md) | 40 条样本、三种解析器的结果与失败归因 |
 
 [贡献者](https://github.com/0xChainAegis/aegis-agent/graphs/contributors) · MIT 许可证，参见 [LICENSE](LICENSE)。

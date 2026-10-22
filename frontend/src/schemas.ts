@@ -18,7 +18,20 @@ export const ReadinessSchema = z.object({
   feedFresh: z.boolean().optional(),
   walletFunded: z.boolean().optional(),
   executorFunded: z.boolean().optional(),
-}).passthrough();
+  checkedAt: z.iso.datetime().nullable().optional(),
+  cacheAgeMs: z.number().int().nonnegative().nullable().optional(),
+  cacheTtlMs: z.number().int().nonnegative().optional(),
+  source: z.enum(['fresh', 'cache', 'checking', 'error']).optional(),
+}).passthrough().superRefine((value, context) => {
+  if (value.source === undefined) return;
+  if (!value.ready) return;
+  if (!['fresh', 'cache'].includes(value.source) || !value.checkedAt
+      || value.cacheAgeMs === undefined || value.cacheAgeMs === null
+      || value.cacheTtlMs === undefined || value.cacheTtlMs <= 0 || value.cacheTtlMs > 15_000
+      || value.cacheAgeMs >= value.cacheTtlMs) {
+    context.addIssue({ code: 'custom', message: 'Ready display proof must be complete and within its hard expiry' });
+  }
+});
 
 export const ConfigResponseSchema = z.object({
   mode: z.enum(['local_chain', 'testnet', 'mock']),

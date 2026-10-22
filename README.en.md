@@ -221,6 +221,7 @@ Built at the ETH Shenzhen 2026 Hackathon.
 | [Contract rules](contracts/README.md) | On-chain authorization rules and local deployment |
 | [Interface design system](frontend/DESIGN.md) | Layout, themes, components and accessibility |
 | [Live LLM integration](docs/LLM-LIVE-LOCAL.md) | Environment variables, launchers and local limits for live mode |
+| [Sepolia demo](docs/SEPOLIA-DEMO.md) | Testnet deployment, Owner and executor setup, startup and payment acceptance |
 | [Intent evaluation report](eval/REPORT.md) | 40 cases, results for three parsers and failure attribution |
 
 [Contributors](https://github.com/0xChainAegis/aegis-agent/graphs/contributors) · MIT — see [LICENSE](LICENSE).
