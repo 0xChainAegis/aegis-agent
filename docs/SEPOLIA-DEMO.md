@@ -59,6 +59,14 @@ python3 scripts/start-live-web.py --network sepolia --llm live
 
 The checked-in `contracts/.env.llm.example` contains no secret and documents the expected `deepseek-flash` configuration. Never commit or screenshot the populated `.env.llm` file.
 
+After those two private environment files are configured, the normal startup command is simply:
+
+```bash
+npm run start:sepolia
+```
+
+For chain and wallet testing without an AI key, use `npm run start:sepolia:no-ai`. Add `-- --check` to either npm command to validate configuration without starting services or contacting the RPC/model.
+
 `AEGIS_LLM_MODE=off` in the environment has the same effect, so the shorter command also works after exporting it. `--check` validates local configuration only. It does not contact the RPC or model, prove deployed bytecode, or send payment. Sepolia startup does not start or require Hardhat on port 8545, and never falls back to Local. It reuses a deployment-specific SQLite path by default, preserving task recovery across restarts. An explicit `AEGIS_DB_PATH` overrides this; keep it private and stable for the same deployment. Stop an existing app on 3001/5173 before starting another.
 
 On Linux/macOS, when the current deployment settings are in `contracts/.env`,
