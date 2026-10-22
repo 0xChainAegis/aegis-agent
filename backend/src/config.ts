@@ -37,7 +37,7 @@ export interface Config {
 }
 const optionalNumber = (schema: z.ZodType<number>) => z.preprocess(value => value === '' ? undefined : value, schema);
 const rpcTuningSchema = z.object({
-  AEGIS_RPC_TIMEOUT_MS: optionalNumber(z.coerce.number().int().min(1_000).max(30_000).default(8_000)),
+  AEGIS_RPC_TIMEOUT_MS: optionalNumber(z.coerce.number().int().min(1_000).max(30_000).default(15_000)),
   AEGIS_RPC_RETRY_COUNT: optionalNumber(z.coerce.number().int().min(0).max(2).default(1)),
 }).passthrough();
 

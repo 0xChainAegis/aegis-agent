@@ -20,11 +20,11 @@ export class ConcurrencyGate {
   }
 }
 
-export function boundedHttp(url: string, config: HttpTransportConfig, concurrency = 4): HttpTransport {
-  // Readiness performs many independent reads at one observed block. Allow a
-  // bounded group to overlap, while retaining one JSON-RPC object per HTTP
-  // request because not every configured provider accepts batch payloads.
-  const base = http(url, config);
+export function boundedHttp(url: string, config: HttpTransportConfig, concurrency = 20): HttpTransport {
+  // Readiness performs groups of independent reads at one observed block.
+  // Admit one bounded batch at a time and let viem collapse it into a small
+  // number of HTTP round trips instead of exhausting a hosted RPC with dozens.
+  const base = http(url, { ...config, batch: config.batch ?? { batchSize: 20, wait: 10 } });
   const gate = new ConcurrencyGate(concurrency);
   return parameters => {
     const transport = base(parameters);

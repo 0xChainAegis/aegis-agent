@@ -18,10 +18,10 @@ test('model timeout defaults to ten seconds and validates explicit overrides', (
 
 test('RPC transport defaults to one bounded retry and validates external tuning', () => {
   const defaults = loadConfig({ AEGIS_MODE: 'mock' });
-  assert.equal(defaults.rpcTimeoutMs, 8_000);
+  assert.equal(defaults.rpcTimeoutMs, 15_000);
   assert.equal(defaults.rpcRetryCount, 1);
   const empty = loadConfig({ AEGIS_MODE: 'mock', AEGIS_RPC_TIMEOUT_MS: '', AEGIS_RPC_RETRY_COUNT: '' });
-  assert.equal(empty.rpcTimeoutMs, 8_000);
+  assert.equal(empty.rpcTimeoutMs, 15_000);
   assert.equal(empty.rpcRetryCount, 1);
   const boundary = loadConfig({ AEGIS_MODE: 'mock', AEGIS_RPC_TIMEOUT_MS: '30000', AEGIS_RPC_RETRY_COUNT: '2' });
   assert.equal(boundary.rpcTimeoutMs, 30_000);

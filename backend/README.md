@@ -20,12 +20,13 @@ The command reads `contracts/.env`, maps its deployment `RPC_URL` to the backend
 performs a fresh read-only sweep, and validates the result with Zod. It checks
 the network, bytecode, bindings, roles, Feed freshness and balances without
 signing or broadcasting a transaction, and never prints the RPC URL or key.
-RPC calls default to an 8-second attempt with one bounded retry. Operators may
+RPC calls default to a 15-second attempt with one bounded retry. Operators may
 set `AEGIS_RPC_TIMEOUT_MS` (1000–30000) and `AEGIS_RPC_RETRY_COUNT` (0–2); invalid
 external values stop startup instead of silently changing transport behavior.
-Concurrent public reads are admitted through a bounded four-request gate to
-avoid mostly sequential HTTP round trips while retaining compatibility with
-Sepolia endpoints that reject JSON-RPC batch payloads. The wallet
+Concurrent public reads are admitted through a bounded twenty-request gate and
+collapsed into JSON-RPC batches of at most twenty calls. This keeps the full
+readiness sweep to a small number of HTTP round trips instead of exhausting a
+hosted Sepolia endpoint with dozens of sequential requests. The wallet
 transport used to broadcast signed transactions is not affected by this gate.
 
 `GET /health` returns 200 only after checking all six bytecode addresses: Wallet,
