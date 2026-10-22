@@ -58,6 +58,7 @@ const state = {
   purpose: '',
   draft: null as Data | null,
   quote: null as Data | null,
+  previewError: '',
   drawer: '' as string,
   detail: null as Data | null,
   evidence: null as Data | null,
@@ -474,13 +475,14 @@ function drawer(): string {
   const transactions = Array.isArray(task.transactions) ? task.transactions as Data[] : [];
   return `<div class="drawer-backdrop" data-action="close-drawer"></div><aside class="drawer" aria-label="操作详情" role="dialog" aria-modal="true"><div class="drawer-header"><span>${icon(isDraft ? 'layers' : 'activity')} ${isDraft ? '确认操作' : '操作详情'}</span><button class="icon-button" data-action="close-drawer" aria-label="关闭详情">${icon('close')}</button></div><div class="drawer-body"><div class="drawer-title"><div class="eyebrow">${isDraft ? '提交前确认' : `AEG-${esc(taskId.slice(-6).toUpperCase())}`}</div><h2>${esc(taskName(task))}</h2><span class="badge ${c}">${isDraft && !quote ? '等待预览' : statusLabel({ status: s })}</span></div><div class="transfer-hero"><span>付款金额</span><strong>${eth(taskAmount(task))}<small> ETH</small></strong>${get(quote, 'costUsd6') !== undefined ? `<span>预计 ${usd(get(quote, 'costUsd6'))} · 执行时重新计价</span>` : ''}</div>${isDraft ? reserveDraftSection(task) : ''}<div class="detail-section"><h3>付款信息</h3>${detailRow('收款地址', taskRecipient(task), true)}${detailRow('所在网络', `${mode()} · Chain ${expectedChain() || '—'}`)}${detailRow('资金池合约', walletAddress(), true)}${detailRow('任务 ID', taskId, true)}${detailRow('策略版本', value(quote, 'policyVersion') || value(task, 'policyVersion'))}</div>
     ${quote && Object.keys(quote).length ? `<div class="detail-section"><h3>规则预检</h3>${detailRow('状态', s === 'READY' ? '已通过预检，提交时仍会重新检查' : value(quote, 'reason', 'message', 'blockReason') || reasons(quote) || s)}${detailRow('美元最高成本', get(quote, 'maxUsdCost6') !== undefined ? usd(get(quote, 'maxUsdCost6')) : '')}${detailRow('报价有效至', dateTime(get(quote, 'quoteExpiresAtSeconds', 'expiresAt')))}${detailRow('授权路径', get(quote, 'requiresApproval') === true || /APPROVAL/.test(value(quote, 'decision', 'path')) ? '需要 Owner 审批' : value(quote, 'decision', 'path') || '以提交后链上结果为准')}</div>` : ''}
-    ${taskReason(task) ? `<div class="info-panel error-panel">${icon('info')}<p>${esc(taskReason(task))}</p></div>` : ''}
+    ${isDraft && state.previewError ? `<div class="info-panel error-panel">${icon('info')}<p>${esc(state.previewError)} 草稿已保留，可重新预览。</p></div>` : taskReason(task) ? `<div class="info-panel error-panel">${icon('info')}<p>${esc(taskReason(task))}</p></div>` : ''}
     ${transactions.length ? `<div class="detail-section"><h3>交易记录</h3>${transactions.map(tx => { const hash = value(tx, 'txHash', 'hash', 'transactionHash'); const link = explorer(hash); return `<div class="transaction-item"><div><span>${esc(value(tx, 'action', 'kind', 'type') || '链上交易')}</span><span>${esc(value(tx, 'status') || '待核对')}</span></div>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener noreferrer" class="mono">${esc(short(hash, 12))}${icon('external')}</a>` : `<span class="mono">${esc(hash || '尚未取得交易哈希')}</span>`}</div>`; }).join('')}</div>` : ''}
     ${!isDraft ? `<div class="detail-section"><div class="section-title-row"><h3>结果验证</h3><button class="text-button" data-action="load-evidence">${icon('refresh')}重新核验</button></div>${evidenceView()}</div>` : `<div class="review-note">${icon('info')}<p>请核对完整地址与金额。确认后由服务发起链上请求；若需要审批，Owner 仍需在钱包中签名。</p></div>`}</div>
     <div class="drawer-footer">${drawerActions(task, isDraft, quote, c)}</div></aside>`;
 }
 function drawerActions(task: Data, isDraft: boolean, quote: Data | null, c: Column): string {
-  if (isDraft) return `<button class="button subtle" data-action="edit-draft">返回修改</button><button class="button primary" data-action="confirm-transfer" data-testid="confirm-transfer" ${disabled() || !quote || value(quote, 'status') !== 'READY' ? 'disabled' : ''}>${state.busy === 'submit' ? '<span class="spinner"></span>提交中…' : `${icon('arrow')}确认并提交`}</button>`;
+  if (isDraft && !quote) return `<button class="button subtle" data-action="edit-draft">返回修改</button><button class="button primary" data-action="retry-preview" data-testid="retry-preview" ${disabled() ? 'disabled' : ''}>${state.busy === 'preview' || state.busy === 'intent' ? '<span class="spinner"></span>正在预览…' : `${icon('refresh')}重新预览`}</button>`;
+  if (isDraft) return `<button class="button subtle" data-action="edit-draft">返回修改</button><button class="button primary" data-action="confirm-transfer" data-testid="confirm-transfer" ${disabled() || value(quote, 'status') !== 'READY' ? 'disabled' : ''}>${state.busy === 'submit' ? '<span class="spinner"></span>提交中…' : `${icon('arrow')}确认并提交`}</button>`;
   if (c === 'approval' && pendingBroadcast(id(task))) return `<span class="muted">已广播原交易，请勿重复签名</span><button class="button subtle" data-action="observe-owner" ${state.busy ? 'disabled' : ''}>${icon('refresh')}核对原交易</button>`;
   if (c === 'approval') return `<button class="button subtle" data-action="cancel-task" data-testid="cancel-task" ${disabled() ? 'disabled' : ''}>取消请求</button><button class="button primary" data-action="approve-task" data-testid="approve-task" ${disabled() ? 'disabled' : ''}>${icon('approve')}批准并付款</button>`;
   return `<span class="muted">${c === 'done' ? '最终结果以链上回执为准' : '任务状态由服务读取'}</span><button class="button subtle" data-action="close-drawer">关闭</button>`;
@@ -556,11 +558,8 @@ async function refresh(initial = false) {
           // A failed snapshot is "unavailable", never a stale or zero balance.
           if (index === 0) { state.wallet = null; state.walletError = errorMessage(result.reason); }
           if (result.reason instanceof ApiError && result.reason.status === 401) { clearWalletSession(); return; }
-          else if (result.reason instanceof ApiError && result.reason.status === 0) {
-            state.online = false;
-            state.serviceErrorCode = result.reason.code;
-            state.serviceErrorMessage = result.reason.message;
-          }
+          // /config already proved that the API is online. A slower optional
+          // chain snapshot is unavailable data, not an offline backend.
         }
       }
       if (state.drawer && state.drawer !== 'draft') { try { state.detail = await sessionApi(`/tasks/${encodeURIComponent(state.drawer)}`); } catch { /* Retain the last server response while the network recovers. */ } }
@@ -620,16 +619,32 @@ async function createIntent() {
     }
     const draftId = state.composerMode === 'manual' && state.draft ? id(state.draft) : '';
     const draft = draftId ? await sessionApi(`/intents/${encodeURIComponent(draftId)}`, 'PATCH', { ...body, expectedRevision: get(state.draft, 'revision', 'version', 'draftVersion') }) : await sessionApi('/intents', 'POST', body);
-    state.draft = draft; state.quote = null;
+    state.draft = draft; state.quote = null; state.previewError = '';
     state.recipient = taskRecipient(draft);
     state.amount = taskAmount(draft) ? formatEther(BigInt(taskAmount(draft))) : '';
     state.purpose = value(draft, 'purpose');
     const missing = get(draft, 'missingFields');
     if (Array.isArray(missing) && missing.length) { state.composerMode = 'manual'; notify('已整理意图，请补齐金额和收款地址。'); return; }
     if (!taskRecipient(draft) || !taskAmount(draft)) { state.composerMode = 'manual'; notify('请补齐收款地址与 ETH 金额，再预览操作。'); return; }
-    state.quote = await sessionApi(`/intents/${encodeURIComponent(id(draft))}/preview`, 'POST', { expectedRevision: get(draft, 'revision', 'version', 'draftVersion') });
     state.drawer = 'draft';
+    render();
+    try { state.quote = await previewDraft(draft); }
+    catch (error) { state.previewError = errorMessage(error); throw error; }
     if (value(state.quote, 'status') === 'BLOCKED') notify(value(state.quote, 'message', 'reason', 'blockReason') || reasons(state.quote) || '这笔操作未通过规则检查，尚未发起付款。', true);
+  });
+}
+
+function previewDraft(draft: Data): Promise<Data> {
+  return sessionApi(`/intents/${encodeURIComponent(id(draft))}/preview`, 'POST', { expectedRevision: get(draft, 'revision', 'version', 'draftVersion') });
+}
+
+async function retryPreview() {
+  if (!state.draft || disabled()) return;
+  const draft = state.draft;
+  await run('preview', async () => {
+    state.previewError = '';
+    try { state.quote = await previewDraft(draft); }
+    catch (error) { state.previewError = errorMessage(error); throw error; }
   });
 }
 
@@ -776,6 +791,7 @@ app.addEventListener('click', event => {
     case 'confirm-local-wallet': void run('connect', async () => { const config = state.config; if (!config || state.refreshing || !state.online || !canConnect() || !localWalletAvailable(config)) throw new Error('当前环境不允许本地测试钱包。'); clearWalletSession(); const session = await connectWallet(31337, config); state.address = session.address; state.chainId = session.chainId; state.walletKind = 'local'; state.connection = session; rememberWalletIdentity('local', session.address); await refresh(); notify('已登录本地公开开发账户，仅用于 Local 测试。'); }); break;
     case 'disconnect': clearWalletSession(); notify('本次会话已断开。'); break;
     case 'send-intent': void createIntent(); break;
+    case 'retry-preview': void retryPreview(); break;
     case 'reserve-prepare': void prepareReserve(button.dataset.reserveKey || ''); break;
     case 'confirm-transfer': void submitIntent(); break;
     case 'close-drawer': state.drawer = ''; state.ownerReview = null; render(); break;

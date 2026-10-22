@@ -13,10 +13,12 @@ test('intent deadlines follow the live model budget without extending payment de
   const agent = '0x4444444444444444444444444444444444444444';
   const config = {mode:'local_chain',chainId:31337,ownerAddress:owner,walletAddress:wallet,recipientAddress:recipient,agentAddress:agent,readiness:{ready:true,rpcChainId:31337,contractsDeployed:true,deploymentBindingsVerified:true,feedFresh:true}};
   const draft = {draftId:'draft-1',status:'READY',revision:1,recipient,amountWei:'1',purpose:'Timeout fixture'};
+  const quote = {quoteId:'quote-1',draftId:'draft-1',draftVersion:1,status:'READY',chainId:31337,walletAddress:wallet,recipient,amountWei:'1',maxUsdCost6:'2',decision:'AUTO',quoteExpiresAtSeconds:1_900_000_000};
   const task = {taskId:'task-1',status:'SUBMITTING',chainId:31337,ownerAddress:owner,walletAddress:wallet,recipient,agentAddress:agent,amountWei:'1',maxUsdCost6:'2'};
   await page.route('**/api/v1/**', route => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('/config')) return route.fulfill({json:{...config,planner}});
+    if (path.endsWith('/preview')) return route.fulfill({json:quote});
     if (path.endsWith('/submit')) return route.fulfill({json:task});
     return route.fulfill({json:draft});
   });
@@ -29,11 +31,12 @@ test('intent deadlines follow the live model budget without extending payment de
       await api('/config');
       await api('/intents','POST',{message:'test'});
       await api('/intents/draft-1','PATCH',{message:'test correction',expectedRevision:1});
+      await api('/intents/draft-1/preview','POST',{expectedRevision:1});
       await api('/intents/draft-1/submit','POST',{quoteId:'fixture-only',expectedRevision:1});
       return observed;
     } finally { window.setTimeout = original; }
   }, '/src/api.ts');
-  expect(result).toEqual([12_000,35_000,35_000,12_000]);
+  expect(result).toEqual([12_000,35_000,35_000,45_000,12_000]);
   planner = {mode:'off',timeoutMs:30_000};
   expect(await page.evaluate(async(moduleUrl)=>{
     const {api}: typeof import('../frontend/src/api')=await import(moduleUrl);const observed:number[]=[];const original=window.setTimeout.bind(window);
