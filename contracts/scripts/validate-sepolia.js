@@ -3,6 +3,7 @@ const { readSepoliaDeploymentConfig } = require("./sepolia-config");
 try {
   const config = readSepoliaDeploymentConfig();
   const safeSummary = {
+    deployerAddress: config.deployerAddress,
     ownerAddress: config.ownerAddress,
     agentAddress: config.agentAddress,
     recipientAddress: config.recipientAddress,
