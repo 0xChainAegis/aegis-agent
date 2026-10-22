@@ -81,6 +81,30 @@ verifies chain ID, deployed bytecode, bindings, roles, Chainlink freshness and
 funding. It never signs or broadcasts a transaction. A successful result proves
 readiness at the reported block, not that a web payment has been accepted.
 
+Run the read-only policy regression against the same deployment with:
+
+```bash
+npm run test:sepolia:policy
+```
+
+This command reads one observed Sepolia block and calls `PolicyEngine.evaluate`
+with dynamically priced boundary requests. It verifies the configured Feed
+binding and freshness, daily-budget accounting, the exact automatic/approval
+boundary, unauthorized agents, non-allowlisted recipients, zero amounts,
+expired requests, policy-version changes, quote caps, the hard per-transaction
+limit, and the explicit rejection of subscription and CCIP actions that are not
+implemented yet. The report contains only public addresses and chain evidence;
+it never reads a signer key, signs, broadcasts or spends Sepolia ETH.
+
+The public Chainlink Feed cannot safely be forced to publish a negative, zero,
+future or stale round. Those fault-injection cases remain deterministic Hardhat
+tests using `MockV3Aggregator`; the Sepolia command verifies the real Feed's
+current round and age without misrepresenting a local fault as public-testnet
+evidence. A daily-limit rejection can only be exercised on the shared Sepolia
+deployment after its remaining daily budget falls below the per-transaction
+cap, so the read-only command always verifies the on-chain spent/remaining
+accounting and leaves destructive budget exhaustion out of the default run.
+
 Public `/api/v1/config` and `/health` share a bounded readiness check on Sepolia. Initial or expired checks return a non-ready status, disabling wallet actions. A completed result remains a display proof for at most fifteen seconds; after five seconds, the next read starts one background refresh without delaying the still-valid result. Failure replaces readiness immediately; results are never served ready past the hard expiry. Responses include check completion time and cache age, which are not a claim of current block finality. These display checks never replace fresh preview, execution or Owner-approval checks.
 
 ## Acceptance on the actual presenting computer
