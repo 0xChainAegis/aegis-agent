@@ -105,9 +105,16 @@ configuration, allowlist, tier, vault balance, final ownership and administratio
 transactions. Optional `OWNER_ADDRESS` is the public address of the final Owner's
 externally owned wallet; it does not require that Owner's private key. When omitted,
 the deployer remains Owner, preserving the existing default. Explicit blank, zero,
-invalid or conflicting Owner addresses fail before deployment. Existing contract
-wallets and addresses of the five contracts about to be deployed are rejected,
-because the current Owner login supports externally owned wallets.
+invalid or conflicting Owner addresses fail before deployment. Owner preflight
+accepts empty account code or an exact 23-byte [EIP-7702 delegation indicator](https://eips.ethereum.org/EIPS/eip-7702)
+(`0xef0100` followed by a nonzero 20-byte target). Delegated EOAs retain normal
+ECDSA signing and transaction origination; nonempty code alone does not make them
+ordinary contract wallets. A zero-target authorization clears code to empty; a
+stored zero-target marker or any malformed indicator is rejected. Ordinary contract
+wallets and addresses of the five contracts about to be deployed remain rejected.
+This format check does not audit the delegated implementation. Owner login still
+requires a normal EOA message signature; ERC-1271-only or relayed account-abstraction
+wallet flows are not implemented, and the presenting browser must support that flow.
 
 Setup completes under the deployer before handing Wallet, PolicyEngine and Oracle
 ownership to the final Owner. The final Owner also receives ACL `DEFAULT_ADMIN_ROLE`,

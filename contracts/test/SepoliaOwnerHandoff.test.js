@@ -119,6 +119,79 @@ describe("Sepolia Owner handoff on real local contracts", function () {
     )).to.be.revertedWith("PER_TX_LIMIT");
   });
 
+  it("accepts an exact EIP-7702 delegated EOA with normal ECDSA signatures and Owner permissions", async function () {
+    const f = await fixture();
+    const delegation = `0xef0100${f.deployment.oracleAddress.slice(2)}`;
+    await network.provider.send("hardhat_setCode", [f.owner.address, delegation]);
+    expect(await ethers.provider.getCode(f.owner.address)).to.equal(delegation.toLowerCase());
+    const nonce = await ethers.provider.getTransactionCount(f.deployer.address);
+    await validateDeploymentOwner({
+      provider: ethers.provider, deployerAddress: f.deployer.address, ownerAddress: f.owner.address,
+      agentAddress: f.agent.address, recipientAddress: f.recipient.address,
+    });
+    expect(await ethers.provider.getTransactionCount(f.deployer.address)).to.equal(nonce);
+    const message = `Aegis Owner login\nChain ID: 31337\nOwner: ${f.owner.address}\nNonce: delegated-owner-test`;
+    const signature = await f.owner.signMessage(message);
+    expect(ethers.verifyMessage(message, signature)).to.equal(f.owner.address);
+    expect(ethers.verifyMessage(`${message}-changed`, signature)).not.to.equal(f.owner.address);
+    await handoffOwnerAdministration(f.contracts, { deployerAddress: f.deployer.address, ownerAddress: f.owner.address });
+    await f.acl.connect(f.owner).setTier(f.agent.address, 3, 0);
+    const id = await queue(f);
+    await expect(f.wallet.connect(f.deployer).approveAndExecute(id))
+      .to.be.revertedWithCustomError(f.wallet, "OwnableUnauthorizedAccount");
+    await expect(f.wallet.connect(f.owner).approveAndExecute(id)).to.emit(f.wallet, "NativeTransferExecuted");
+    expect((await f.wallet.spendingToday()).spentUsd6).to.equal(6_000_000n);
+    await verifyOwnerAdministration({ ...f.contracts, deployerAddress: f.deployer.address, ownerAddress: f.owner.address });
+  });
+
+  it("rejects malformed delegation markers and a zero-target marker before any deployment transaction", async function () {
+    const [deployer, agent, recipient, owner] = await ethers.getSigners();
+    const target = agent.address.slice(2);
+    const malformed = [
+      "0xef0100",
+      `0xef0100${target.slice(2)}`,
+      `0xef0100${target}00`,
+      `0xef0101${target}`,
+      `0xef0000${target}`,
+      `0xef0100${"00".repeat(20)}`,
+      "0x60006000",
+    ];
+    const nonce = await ethers.provider.getTransactionCount(deployer.address);
+    for (const code of malformed) {
+      // These impossible marker encodings cannot be installed by the protocol;
+      // emulate an invalid RPC response without injecting invalid EDR bytecode.
+      const malformedProvider = {
+        getCode: async () => code,
+        getTransactionCount: (address, tag) => ethers.provider.getTransactionCount(address, tag),
+      };
+      let failure;
+      try {
+        await validateDeploymentOwner({ provider: malformedProvider, deployerAddress: deployer.address, ownerAddress: owner.address, agentAddress: agent.address, recipientAddress: recipient.address });
+      } catch (error) { failure = error; }
+      expect(failure, `should reject ${code}`).to.be.instanceOf(Error);
+      expect(failure.message).to.include("OWNER_ADDRESS");
+      expect(await ethers.provider.getTransactionCount(deployer.address)).to.equal(nonce);
+    }
+    // EIP-7702 authorization to the zero target clears the marker to empty code.
+    await network.provider.send("hardhat_setCode", [owner.address, "0x"]);
+    await validateDeploymentOwner({ provider: ethers.provider, deployerAddress: deployer.address, ownerAddress: owner.address, agentAddress: agent.address, recipientAddress: recipient.address });
+    expect(await ethers.provider.getTransactionCount(deployer.address)).to.equal(nonce);
+  });
+
+  it("still rejects a predicted deployment address even when it carries a valid delegation marker", async function () {
+    const [deployer, agent, recipient] = await ethers.getSigners();
+    const nonce = await ethers.provider.getTransactionCount(deployer.address);
+    const futureWallet = ethers.getCreateAddress({ from: deployer.address, nonce: nonce + 4 });
+    await network.provider.send("hardhat_setCode", [futureWallet, `0xef0100${agent.address.slice(2)}`]);
+    let failure;
+    try {
+      await validateDeploymentOwner({ provider: ethers.provider, deployerAddress: deployer.address, ownerAddress: futureWallet, agentAddress: agent.address, recipientAddress: recipient.address });
+    } catch (error) { failure = error; }
+    expect(failure).to.be.instanceOf(Error);
+    expect(failure.message).to.include("this deployment's contracts");
+    expect(await ethers.provider.getTransactionCount(deployer.address)).to.equal(nonce);
+  });
+
   it("rejects invalid, conflicting, contract and future contract Owners before any deployment transaction", async function () {
     const [deployer, agent, recipient] = await ethers.getSigners();
     const existing = await ethers.deployContract("MockV3Aggregator", [8, 300_000_000_000n]);
