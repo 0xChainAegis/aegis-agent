@@ -10,9 +10,10 @@ import { singleFlightByRevision } from './single-flight';
 import { nextRefreshDelay } from './polling';
 import { formatPolicyReasons } from './policy-reasons';
 import { bindingFromConfig, loadSettings, observationFromSnapshot, parseSettings, sameBinding, saveSettings, storageKey, suggestTopUp, suggestionKey, type ReserveBinding, type ReserveObservation, type Suggestion } from './reserve';
+import { createSubscriptionPanel } from './subscription-panel';
 import './style.css';
 
-type View = 'overview' | 'operations' | 'approvals' | 'verification' | 'settings';
+type View = 'overview' | 'operations' | 'approvals' | 'verification' | 'settings' | 'subscriptions';
 type Column = 'draft' | 'ready' | 'approval' | 'done' | 'blocked';
 initTheme();
 const appElement = document.querySelector<HTMLDivElement>('#app');
@@ -79,11 +80,18 @@ const state = {
     draft: null as ReserveDraft | null,
   },
 };
+const subscriptionPanel = createSubscriptionPanel({
+  api: sessionApi, config: () => state.config, disabled, render,
+  controlDisabled: () => !state.online || !canConnect() || !boundOwner() || state.refreshing || Boolean(state.busy),
+  sign: tx => sendOwnerTransaction(tx, state.address, state.walletKind === 'local' && state.config ? state.config : undefined),
+  payment: (draft, quote) => { state.draft = draft; state.quote = quote; state.previewError = ''; state.drawer = 'draft'; state.reserve.draft = null; },
+});
 interface ReserveDraft { draftId: string; recipient: string; topUpWei: string; balanceWei: string; thresholdWei: string; targetWei: string; blockNumber: string; observedAt: string }
 
 const nav: [View, string, string, string][] = [
   ['overview', 'grid', '总览', 'Overview'],
   ['operations', 'layers', '操作', 'Operations'],
+  ['subscriptions', 'clock', '订阅', 'Subscriptions'],
   ['approvals', 'approve', '待审批', 'Approvals'],
   ['verification', 'verify', '验证记录', 'Verification'],
   ['settings', 'settings', '设置', 'Settings'],
@@ -191,7 +199,7 @@ function render() {
       <div class="content ${state.view === 'settings' ? 'settings-content' : ''}">
         ${availability.phase !== 'ready' ? `<div class="service-banner ${availability.tone}" role="${availability.phase === 'loading' ? 'status' : 'alert'}" data-testid="service-banner" aria-live="polite">${availability.phase === 'loading' ? '<span class="spinner"></span>' : icon('info')}<div class="service-banner-copy"><strong id="service-status-title">${esc(availability.title)}</strong><p>${esc(availability.message)}</p></div>${availability.actionLabel ? `<button class="text-button" data-action="refresh" ${state.refreshing ? 'disabled' : ''}>${esc(availability.actionLabel)}</button>` : ''}</div>` : ''}
         ${connected() && !boundOwner() ? '<div class="info-panel" data-testid="reconnect-owner-note">已恢复登录会话和任务。付款或审批前，请重新选择钱包并以 Owner 签名登录；本地演示可重新选择“本地测试钱包”。</div>' : ''}
-        ${state.view === 'settings' ? settingsView() : state.view === 'verification' ? verificationView() : operationsView()}
+        ${state.view === 'subscriptions' ? subscriptionPanel.render() : state.view === 'settings' ? settingsView() : state.view === 'verification' ? verificationView() : operationsView()}
         ${connected() && ['overview', 'operations'].includes(state.view) ? composer() : ''}
       </div>
     </main>
@@ -474,7 +482,7 @@ function drawer(): string {
   const s = isDraft && quote ? value(quote, 'status') : status(task);
   const c = isDraft && quote ? column({ status: s }) : column(task);
   const transactions = Array.isArray(task.transactions) ? task.transactions as Data[] : [];
-  return `<div class="drawer-backdrop" data-action="close-drawer"></div><aside class="drawer" aria-label="操作详情" role="dialog" aria-modal="true"><div class="drawer-header"><span>${icon(isDraft ? 'layers' : 'activity')} ${isDraft ? '确认操作' : '操作详情'}</span><button class="icon-button" data-action="close-drawer" aria-label="关闭详情">${icon('close')}</button></div><div class="drawer-body"><div class="drawer-title"><div class="eyebrow">${isDraft ? '提交前确认' : `AEG-${esc(taskId.slice(-6).toUpperCase())}`}</div><h2>${esc(taskName(task))}</h2><span class="badge ${c}">${isDraft && !quote ? '等待预览' : statusLabel({ status: s })}</span></div><div class="transfer-hero"><span>付款金额</span><strong>${eth(taskAmount(task))}<small> ETH</small></strong>${get(quote, 'costUsd6') !== undefined ? `<span>预计 ${usd(get(quote, 'costUsd6'))} · 执行时重新计价</span>` : ''}</div>${isDraft ? reserveDraftSection(task) : ''}<div class="detail-section"><h3>付款信息</h3>${detailRow('收款地址', taskRecipient(task), true)}${detailRow('所在网络', `${mode()} · Chain ${expectedChain() || '—'}`)}${detailRow('资金池合约', walletAddress(), true)}${detailRow('任务 ID', taskId, true)}${detailRow('策略版本', value(quote, 'policyVersion') || value(task, 'policyVersion'))}</div>
+  return `<div class="drawer-backdrop" data-action="close-drawer"></div><aside class="drawer" aria-label="操作详情" role="dialog" aria-modal="true"><div class="drawer-header"><span>${icon(isDraft ? 'layers' : 'activity')} ${isDraft ? '确认操作' : '操作详情'}</span><button class="icon-button" data-action="close-drawer" aria-label="关闭详情">${icon('close')}</button></div><div class="drawer-body"><div class="drawer-title"><div class="eyebrow">${isDraft ? '提交前确认' : `AEG-${esc(taskId.slice(-6).toUpperCase())}`}</div><h2>${esc(taskName(task))}</h2><span class="badge ${c}">${isDraft && !quote ? '等待预览' : statusLabel({ status: s })}</span></div><div class="transfer-hero"><span>付款金额</span><strong>${eth(taskAmount(task))}<small> ETH</small></strong>${get(quote, 'costUsd6') !== undefined ? `<span>预计 ${usd(get(quote, 'costUsd6'))} · 执行时重新计价</span>` : ''}</div>${isDraft ? reserveDraftSection(task) : ''}${subscriptionPaymentSection(task, quote)}<div class="detail-section"><h3>付款信息</h3>${detailRow('收款地址', taskRecipient(task), true)}${detailRow('所在网络', `${mode()} · Chain ${expectedChain() || '—'}`)}${detailRow('资金池合约', walletAddress(), true)}${detailRow('任务 ID', taskId, true)}${detailRow('策略版本', value(quote, 'policyVersion') || value(task, 'policyVersion'))}</div>
     ${quote && Object.keys(quote).length ? `<div class="detail-section"><h3>规则预检</h3>${detailRow('状态', s === 'READY' ? '已通过预检，提交时仍会重新检查' : value(quote, 'reason', 'message', 'blockReason') || reasons(quote) || s)}${detailRow('美元最高成本', get(quote, 'maxUsdCost6') !== undefined ? usd(get(quote, 'maxUsdCost6')) : '')}${detailRow('报价有效至', dateTime(get(quote, 'quoteExpiresAtSeconds', 'expiresAt')))}${detailRow('授权路径', get(quote, 'requiresApproval') === true || /APPROVAL/.test(value(quote, 'decision', 'path')) ? '需要 Owner 审批' : value(quote, 'decision', 'path') || '以提交后链上结果为准')}</div>` : ''}
     ${isDraft && state.previewError ? `<div class="info-panel error-panel">${icon('info')}<p>${esc(state.previewError)} 草稿已保留，可重新预览。</p></div>` : taskReason(task) ? `<div class="info-panel error-panel">${icon('info')}<p>${esc(taskReason(task))}</p></div>` : ''}
     ${transactions.length ? `<div class="detail-section"><h3>交易记录</h3>${transactions.map(tx => { const hash = value(tx, 'txHash', 'hash', 'transactionHash'); const link = explorer(hash); return `<div class="transaction-item"><div><span>${esc(value(tx, 'action', 'kind', 'type') || '链上交易')}</span><span>${esc(value(tx, 'status') || '待核对')}</span></div>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener noreferrer" class="mono">${esc(short(hash, 12))}${icon('external')}</a>` : `<span class="mono">${esc(hash || '尚未取得交易哈希')}</span>`}</div>`; }).join('')}</div>` : ''}
@@ -487,6 +495,11 @@ function drawerActions(task: Data, isDraft: boolean, quote: Data | null, c: Colu
   if (c === 'approval' && pendingBroadcast(id(task))) return `<span class="muted">已广播原交易，请勿重复签名</span><button class="button subtle" data-action="observe-owner" ${state.busy ? 'disabled' : ''}>${icon('refresh')}核对原交易</button>`;
   if (c === 'approval') return `<button class="button subtle" data-action="cancel-task" data-testid="cancel-task" ${disabled() ? 'disabled' : ''}>取消请求</button><button class="button primary" data-action="approve-task" data-testid="approve-task" ${disabled() ? 'disabled' : ''}>${icon('approve')}批准并付款</button>`;
   return `<span class="muted">${c === 'done' ? '最终结果以链上回执为准' : '任务状态由服务读取'}</span><button class="button subtle" data-action="close-drawer">关闭</button>`;
+}
+function subscriptionPaymentSection(task: Data, quote: Data | null): string {
+  if (task.actionKind !== 'SUBSCRIPTION') return '';
+  const plan = object(task.subscription);
+  return `<div class="detail-section" data-testid="subscription-payment-context"><h3>本期有限订阅付款</h3>${detailRow('订阅 / 当期索引', `${task.subscriptionId} / ${task.occurrenceIndex}`)}${detailRow('父计划哈希', value(plan, 'parentPlanHash'), true)}${detailRow('本期独立计划哈希', value(quote, 'planHash') || value(task, 'planHash'), true)}${detailRow('周期 / 最多成功次数', `${plan.periodSeconds} 秒 / ${plan.maxPayments}`)}${detailRow('每期本金硬上限', usd(plan.periodCapUsd6))}<p class="settings-caption">只确认这一期，不授权后续扣款。下一期必须新建草稿、重新报价并再次人工确认。ETH 本金美元预算不含另付的 Gas。</p></div>`;
 }
 function detailRow(label: string, content: unknown, mono = false): string { return `<div class="detail-row"><span>${label}</span><div class="${mono ? 'mono break-all' : ''}">${esc(content || '尚未取得')}${mono && content ? `<button class="icon-button small" data-copy="${esc(content)}" aria-label="复制${label}">${icon('copy')}</button>` : ''}</div></div>`; }
 function evidenceView(): string {
@@ -529,7 +542,7 @@ function clearWalletSession() {
   state.address = ''; state.connection = null; state.walletKind = ''; state.providerName = '';
   state.wallet = null; state.tasks = []; state.draft = null; state.quote = null;
   state.ownerReview = null; state.drawer = ''; state.detail = null; state.evidence = null; state.evidenceLoading = false;
-  state.reserve.draft = null; state.localWalletConfirm = false;
+  state.reserve.draft = null; state.localWalletConfirm = false; subscriptionPanel.clear();
   registerWalletListeners();
 }
 
@@ -572,6 +585,7 @@ async function refreshSnapshot(revision: number, initial: boolean) {
           // chain snapshot is unavailable data, not an offline backend.
         }
       }
+      if (subscriptionPanel.enabled()) await subscriptionPanel.refresh();
       if (state.drawer && state.drawer !== 'draft') {
         const drawer = state.drawer;
         try {
@@ -640,7 +654,7 @@ async function createIntent() {
       if (amount <= 0n || amount >= 2n ** 256n) throw new Error('ETH 金额必须大于零且不超过合约范围。');
       body = { recipient: fields.data.recipient, amountWei: amount.toString(), purpose: fields.data.purpose || '原生 ETH 付款' };
     }
-    const draftId = state.composerMode === 'manual' && state.draft ? id(state.draft) : '';
+    const draftId = state.composerMode === 'manual' && state.draft && state.draft.actionKind !== 'SUBSCRIPTION' ? id(state.draft) : '';
     const draft = draftId ? await sessionApi(`/intents/${encodeURIComponent(draftId)}`, 'PATCH', { ...body, expectedRevision: get(state.draft, 'revision', 'version', 'draftVersion') }) : await sessionApi('/intents', 'POST', body);
     state.draft = draft; state.quote = null; state.previewError = '';
     state.recipient = taskRecipient(draft);
@@ -677,7 +691,7 @@ async function submitIntent() {
   const quote = state.quote;
   await run('submit', async () => {
     const reserveContext = reserveDraftFor(state.draft);
-    const result = await sessionApi(`/intents/${encodeURIComponent(id(draft))}/submit`, 'POST', { expectedRevision: get(draft, 'revision', 'version', 'draftVersion'), quoteId: get(quote, 'quoteId', 'id') });
+    const result = await sessionApi(`/intents/${encodeURIComponent(id(draft))}/submit`, 'POST', { expectedRevision: get(draft, 'revision', 'version', 'draftVersion'), quoteId: get(quote, 'quoteId', 'id'), ...(draft.actionKind === 'SUBSCRIPTION' ? { planHash: quote.planHash } : {}) });
     const taskId = value(result, 'taskId', 'id');
     if (!taskId) throw new Error('服务没有返回任务 ID。请查看操作列表，不要重复提交。');
     const binding = bindingFromConfig(state.config);
@@ -769,6 +783,7 @@ app.addEventListener('input', event => {
   const text = z.string().safeParse(input.value);
   if (!text.success) return;
   const fields: Record<string, 'message' | 'recipient' | 'amount' | 'purpose' | 'query'> = { 'intent-message': 'message', recipient: 'recipient', amount: 'amount', purpose: 'purpose', 'task-search': 'query' };
+  if (input instanceof HTMLInputElement && input.dataset.subscriptionField) subscriptionPanel.input(input);
   if (fields[input.id]) { state[fields[input.id]] = text.data; if (input.id === 'task-search') render(); }
   if (input.id === 'reserve-threshold' || input.id === 'reserve-target') {
     state.reserve[input.id === 'reserve-threshold' ? 'threshold' : 'target'] = text.data;
@@ -783,12 +798,22 @@ app.addEventListener('click', event => {
   if (!(event.target instanceof Element)) return;
   const button = event.target.closest<HTMLElement>('button, [data-action]');
   if (!button || button.hasAttribute('disabled')) return;
-  if (button.dataset.nav) { const parsed=z.enum(['overview','operations','approvals','verification','settings']).safeParse(button.dataset.nav); if (!parsed.success) return; state.view = parsed.data; state.filter = 'all'; state.drawer = ''; render(); return; }
+  if (button.dataset.nav) { const parsed=z.enum(['overview','operations','approvals','verification','settings','subscriptions']).safeParse(button.dataset.nav); if (!parsed.success) return; state.view = parsed.data; state.filter = 'all'; state.drawer = ''; render(); return; }
   if (button.dataset.settings) { const parsed=z.enum(['account','policy','network','developer']).safeParse(button.dataset.settings); if (!parsed.success) return; state.settingsTab = parsed.data; render(); return; }
   if (button.dataset.filter) { const parsed=z.enum(['all','active','completed']).safeParse(button.dataset.filter); if (!parsed.success) return; state.filter = parsed.data; render(); return; }
   if (button.dataset.composer) { const parsed=z.enum(['natural','manual']).safeParse(button.dataset.composer); if (!parsed.success) return; state.composerMode = parsed.data; render(); return; }
   if (button.dataset.openTask) { void openTask(button.dataset.openTask); return; }
   if (button.dataset.copy) { void navigator.clipboard.writeText(button.dataset.copy).then(() => notify('已复制')).catch(() => notify('无法访问剪贴板，请手动复制。', true)); return; }
+  const subscriptionAction = button.dataset.action;
+  if (subscriptionAction?.startsWith('subscription-')) {
+    const actionDisabled = subscriptionAction === 'subscription-preview' || subscriptionAction === 'subscription-pay'
+      ? disabled()
+      : !state.online || !canConnect() || !boundOwner() || state.refreshing || Boolean(state.busy);
+    if (!actionDisabled || subscriptionAction === 'subscription-dismiss') {
+      void run('subscription', () => subscriptionPanel.action(subscriptionAction, button.dataset.subscriptionId));
+    }
+    return;
+  }
   switch (button.dataset.action) {
     case 'refresh': void refreshWithFeedback(); break;
     case 'connect': if (state.online && canConnect() && !state.refreshing) { state.walletPicker = true; discovery.refresh(); render(); } break;
@@ -821,7 +846,7 @@ app.addEventListener('click', event => {
     case 'reserve-prepare': void prepareReserve(button.dataset.reserveKey || ''); break;
     case 'confirm-transfer': void submitIntent(); break;
     case 'close-drawer': state.drawer = ''; state.ownerReview = null; render(); break;
-    case 'edit-draft': state.drawer = ''; state.composerMode = 'manual'; render(); document.getElementById('recipient')?.focus(); break;
+    case 'edit-draft': state.drawer = ''; if (state.draft?.actionKind === 'SUBSCRIPTION') { state.draft = null; state.quote = null; state.view = 'subscriptions'; render(); break; } state.composerMode = 'manual'; render(); document.getElementById('recipient')?.focus(); break;
     case 'fill-example': if (isAddress(exampleRecipient())) { state.recipient = exampleRecipient(); render(); notify('已填入测试地址，请核对后再预览。'); } break;
     case 'new-operation': state.view = 'operations'; state.drawer = ''; render(); document.getElementById(state.composerMode === 'natural' ? 'intent-message' : 'recipient')?.focus(); break;
     case 'load-evidence': void loadEvidence(); break;

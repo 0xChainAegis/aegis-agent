@@ -53,6 +53,10 @@ afterEach(() => {
 });
 
 describe('validated API responses', () => {
+  it('rejects subscription payment responses missing occurrence/parent binding', async () => {
+    fetchMock.mockResolvedValue(json({ ...draft, actionKind: 'SUBSCRIPTION' }));
+    await expect(client.api('/intents', 'POST', { actionKind: 'SUBSCRIPTION', subscriptionId: '1', occurrenceIndex: '0' })).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+  });
   it('preserves validated data and server metadata and sends the session header', async () => {
     client.setToken('fixture-token');
     fetchMock.mockResolvedValue(json({ ...config, schemaVersion: 'aegis.v1', requestId: 'fixture-request' }));

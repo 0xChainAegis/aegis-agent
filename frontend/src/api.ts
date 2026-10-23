@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ConfigResponseSchema } from './schemas';
+import { subscriptionFieldsSchema, subscriptionListSchema, subscriptionRecordSchema, subscriptionPreviewSchema, subscriptionControlPreviewSchema } from './subscriptions';
 
 export type Data = Record<string, unknown>;
 
@@ -100,7 +101,8 @@ export function requestDeadlineMs(path: string, method: string, plannerTimeoutMs
   const isChainRead = method === 'GET' && path === '/wallets/current'
     || method === 'POST' && /^\/intents\/[^/]+\/preview$/.test(path)
     || method === 'GET' && /^\/tasks\/[^/]+\/owner-tx\?/.test(path)
-    || method === 'POST' && /^\/tasks\/[^/]+\/observed-tx$/.test(path);
+    || method === 'POST' && /^\/tasks\/[^/]+\/observed-tx$/.test(path)
+    || /^\/subscriptions(?:\/|$)/.test(path);
   return isChainRead ? chainReadTimeoutMs : 12_000;
 }
 
@@ -124,6 +126,10 @@ function responseSchema(path: string, method: string): z.ZodType<Data> {
   if (pathname === '/auth/challenge') return authChallengeResponseSchema;
   if (pathname === '/auth/verify') return authSessionResponseSchema;
   if (pathname === '/wallets/current') return walletSnapshotResponseSchema;
+  if (pathname === '/subscriptions') return subscriptionListSchema;
+  if (pathname === '/subscriptions/preview') return subscriptionPreviewSchema;
+  if (/^\/subscriptions\/[^/]+\/control-preview$/.test(pathname)) return subscriptionControlPreviewSchema;
+  if (pathname === '/subscriptions/observed' || /^\/subscriptions\/[^/]+\/control-observed$/.test(pathname)) return subscriptionRecordSchema;
   if (pathname === '/tasks') return tasksResponseSchema;
   if (/^\/tasks\/[^/]+\/owner-tx$/.test(pathname)) return ownerTransactionResponseSchema;
   if (/^\/tasks\/[^/]+\/evidence$/.test(pathname)) return evidenceResponseSchema;
@@ -185,6 +191,10 @@ export async function api(path: string, method = 'GET', body?: Data): Promise<Da
     }
     const parsed = responseSchema(path, method).safeParse(json.data);
     if (!parsed.success) throw invalidResponse(response.status, path, parsed.error.issues.map(issue => String(issue.path[0] ?? '')));
+    if (parsed.data.actionKind === 'SUBSCRIPTION' && /^\/(intents|tasks)(?:\/|$)/.test(path) && !path.endsWith('/evidence')) {
+      const binding = z.looseObject({ subscriptionId: uintSchema, occurrenceIndex: uintSchema, subscription: subscriptionFieldsSchema });
+      if (!binding.safeParse(parsed.data).success || (/\/(preview|submit)$/.test(path) && !hashSchema.safeParse(parsed.data.planHash).success)) throw invalidResponse(response.status, path);
+    }
     if (fingerprint) pendingMutationKeys.delete(fingerprint);
     if (method === 'GET' && path === '/config') {
       const config = configResponseSchema.parse(parsed.data);
