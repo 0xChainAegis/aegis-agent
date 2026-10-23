@@ -2,7 +2,7 @@ import { getAddress, isAddress, parseEther, zeroAddress, type Address } from 'vi
 import type { Intent, ParserInfo } from '@aegis/shared';
 import { ApiError } from './errors.js';
 
-export interface DraftInput { message?: string; recipient?: string | null; amountWei?: string | null; purpose?: string }
+export interface DraftInput { actionKind?: 'NATIVE_TRANSFER' | 'SUBSCRIPTION'; subscriptionId?:string; occurrenceIndex?:string; message?: string; recipient?: string | null; amountWei?: string | null; purpose?: string }
 
 export interface ParsedDraft {
   message: string;
@@ -89,6 +89,15 @@ export function parseDraft(input: DraftInput, configuredModel: string | null, pr
   const purpose = input.purpose ?? previous?.purpose ?? message;
   const parser: ParserInfo = parserOverride ?? { kind: 'rule_parser', model: null, configuredModel, fallback: !!configuredModel, reason: configuredModel ? 'LLM_NOT_ENABLED_RULE_PARSER_ONLY' : 'RULE_PARSER_ONLY' };
   if (scanPrompt(message).blocked || scanPrompt(purpose).blocked) return rejectedDraft(message, purpose, parser);
+  const scopeText = `${message}\n${purpose}`;
+  const crossChain = /跨链|桥接|\b(?:ccip|bridge|cross[- ]?chain)\b/i.test(scopeText);
+  const recurring = /订阅|定期|每月|每周|每天|每年|每隔|自动扣款|\b(?:subscription|subscribe|recurring|monthly|weekly|daily|every\s+\d+)\b/i.test(scopeText);
+  if (crossChain || recurring) return {
+    message, purpose: purpose.slice(0, 500), recipient: null, to: null, amountWei: null,
+    status: 'NEEDS_INPUT', missingFields: [crossChain ? 'unsupported' : 'subscriptionId'],
+    question: crossChain ? '跨链尚未启用，不能改为本地 ETH 转账。' : '请先创建有限订阅，再选择本期付款；需要明确周期、起止、次数和每期上限。',
+    parser: { ...parser, reason: 'ACTION_SCOPE_REQUIRED' },
+  };
 
   let recipient: Address | null = (previous?.recipient as Address | null) ?? null;
   let amountWei: string | null = previous?.amountWei ?? null;

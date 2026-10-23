@@ -3,7 +3,17 @@ export type RuntimeMode = 'local_chain' | 'testnet' | 'mock';
 export type TaskStatus = 'DRAFT' | 'NEEDS_INPUT' | 'READY' | 'SUBMITTING' | 'BROADCAST' | 'UNKNOWN' | 'AWAITING_APPROVAL' | 'EXECUTED' | 'BLOCKED' | 'REQUOTE_REQUIRED' | 'CANCELLED' | 'EXPIRED' | 'FAILED';
 export type Hex = `0x${string}`;
 export interface ParserInfo { kind: 'rule_parser' | 'llm'; model: string | null; configuredModel: string | null; fallback: boolean; reason: string }
-export interface Intent {
+export interface SubscriptionConfig {
+  subscriptionId: string; agentAddress: Hex; recipient: Hex; amountWei: string;
+  periodSeconds: string; startAtSeconds: string; endAtSeconds: string; maxPayments: string;
+  periodCapUsd6: string; parentPlanHash: Hex; paidCount: string; paused: boolean; cancelled: boolean;
+  currentOccurrenceIndex: string | null; status: string;
+}
+export interface SubscriptionAction {
+  actionKind?: 'NATIVE_TRANSFER' | 'SUBSCRIPTION'; subscriptionId?: string; occurrenceIndex?: string;
+  subscription?: SubscriptionConfig; planHash?: Hex;
+}
+export interface Intent extends SubscriptionAction {
   draftId: string; intentId: string; version: number; revision: number; status: TaskStatus;
   message: string; recipient: Hex | null; to: Hex | null; amountWei: string | null; purpose: string;
   missingFields: string[]; question: string | null; parser: ParserInfo;
@@ -24,7 +34,7 @@ export interface ConfiguredPriceSource {
   verified: false; scope: 'CURRENT_CONFIGURATION';
 }
 export interface PolicyEvidence {
-  engineAddress: Hex; event: 'BudgetConsumed'; actionType: 'NATIVE_TRANSFER';
+  engineAddress: Hex; event: 'BudgetConsumed'; actionType: 'NATIVE_TRANSFER' | 'SUBSCRIPTION';
   decision: 'ALLOW' | 'REQUIRE_APPROVAL'; requestHash: Hex; actor: Hex;
   costUsd6: string; day: string; spentUsd6: string; transactionHash: Hex;
   policyVersion: string;
@@ -33,7 +43,7 @@ export interface PolicyEvidence {
   verificationScope: typeof POLICY_EVIDENCE_VERIFICATION_SCOPE;
   verifiedFields: typeof POLICY_EVIDENCE_VERIFIED_FIELDS;
 }
-export interface Task {
+export interface Task extends SubscriptionAction {
   taskId: string; draftId: string; intentId: string; draftVersion: number; stateVersion: number;
   status: TaskStatus; chainId: number; walletAddress: Hex; ownerAddress: Hex; agentAddress: Hex;
   recipient: Hex; to: Hex; amountWei: string; maxUsdCost6: string; previewCostUsd6: string;
@@ -43,7 +53,24 @@ export interface Task {
   availableActions: string[]; createdAt: string; updatedAt: string; parser: ParserInfo;
   verification: { kind: 'chain' | 'mock'; chainVerified: boolean; hashVerified: boolean };
 }
+export const subscriptionAbiSignatures = [
+  'function configureSubscriptionPolicy(uint256 maxPeriodCapUsd6,uint64 maxDurationSeconds,uint64 maxPayments)',
+  'function createFiniteSubscription(address agent,address to,uint256 amountWei,uint64 periodSeconds,uint64 startAt,uint64 endAt,uint64 maxPayments,uint256 periodCapUsd6,bytes32 parentPlanHash) returns (uint64 subscriptionId)',
+  'function subscriptions(uint64 subscriptionId) view returns ((address agent,address to,uint256 amountWei,uint64 periodSeconds,uint64 startAt,uint64 endAt,uint64 maxPayments,uint256 periodCapUsd6,bytes32 parentPlanHash,uint64 paidCount,uint64 lastPaidOccurrence,bool hasPaid,bool paused,bool cancelled,bool exists))',
+  'function pauseFiniteSubscription(uint64 subscriptionId,bool paused)',
+  'function cancelFiniteSubscription(uint64 subscriptionId)',
+  'function previewSubscriptionPayment(address requester,uint64 subscriptionId,uint64 occurrenceIndex,uint256 maxUsdCost6,uint64 deadline,uint64 version) view returns (uint256 costUsd6,bool requiresApproval)',
+  'function requestSubscriptionPayment(uint64 subscriptionId,uint64 occurrenceIndex,uint256 maxUsdCost6,uint256 nonce,uint64 deadline,uint64 version,bytes32 planHash) returns (uint64 attId)',
+  'function hashSubscriptionRequest(address agent,uint64 subscriptionId,uint64 occurrenceIndex,uint256 maxUsdCost6,uint256 nonce,uint64 deadline,uint64 version,bytes32 planHash) view returns (bytes32)',
+  'function subscriptionPending(uint64 attId) view returns (uint64 subscriptionId,uint64 occurrenceIndex,bytes32 planHash)',
+  'event FiniteSubscriptionCreated(uint64 indexed subscriptionId,address indexed agent,address indexed to,bytes32 parentPlanHash)',
+  'event FiniteSubscriptionPaused(uint64 indexed subscriptionId,bool paused)',
+  'event FiniteSubscriptionCancelled(uint64 indexed subscriptionId)',
+  'event SubscriptionPaymentExecuted(bytes32 indexed requestHash,uint64 indexed attestationId,address indexed agent,address to,uint256 amountWei,uint256 costUsd6,uint80 roundId,uint256 updatedAt,uint64 policyVersion,uint64 subscriptionId,uint64 occurrenceIndex,bytes32 planHash)',
+  'event SubscriptionPaymentQueued(bytes32 indexed requestHash,uint64 indexed attestationId,address indexed agent,address to,uint256 amountWei,uint256 maxUsdCost6,uint64 deadline,uint64 policyVersion,uint64 subscriptionId,uint64 occurrenceIndex,bytes32 planHash)',
+] as const;
 export const walletAbiSignatures = [
+  ...subscriptionAbiSignatures,
   'function owner() view returns (address)',
   'function depositETH() payable',
   'function oracle() view returns (address)',
