@@ -165,3 +165,8 @@ npm run test:e2e
 [架构](docs/ARCHITECTURE.md) · [API](docs/INTEGRATION.md) · [Chainlink 集成](docs/CHAINLINK.md) · [测试网证据](docs/EVIDENCE.md) · [安全边界](docs/SECURITY.md) · [合约](contracts/README.md) · [设计系统](frontend/DESIGN.md) · [Sepolia](docs/SEPOLIA-DEMO.md) · [实时模型](docs/LLM-LIVE-LOCAL.md)
 
 [贡献者](https://github.com/0xChainAegis/aegis-agent/graphs/contributors) · MIT，参见 [LICENSE](LICENSE)。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/aegis-footer-dark.svg">
+  <img src="docs/images/aegis-footer-light.svg" width="100%" alt="Aegis · 陶瓷白、石墨与渐变纹理">
+</picture>

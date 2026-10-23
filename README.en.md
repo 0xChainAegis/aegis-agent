@@ -160,3 +160,8 @@ Newly developed during **ETH Shenzhen 2026**, focusing on constrained agent-paym
 [Architecture](docs/ARCHITECTURE.md) · [API](docs/INTEGRATION.md) · [Chainlink](docs/CHAINLINK.md) · [Testnet evidence](docs/EVIDENCE.md) · [Security](docs/SECURITY.md) · [Contracts](contracts/README.md) · [Design system](frontend/DESIGN.md) · [Sepolia](docs/SEPOLIA-DEMO.md) · [Live models](docs/LLM-LIVE-LOCAL.md)
 
 [Contributors](https://github.com/0xChainAegis/aegis-agent/graphs/contributors) · MIT. See [LICENSE](LICENSE).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/aegis-footer-dark.svg">
+  <img src="docs/images/aegis-footer-light.svg" width="100%" alt="Aegis · Porcelain, graphite and a quiet gradient ribbon">
+</picture>
