@@ -7,7 +7,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import {
   walletAbiSignatures, oracleAbiSignatures, policyEngineAbiSignatures,
   POLICY_EVIDENCE_VERIFICATION_SCOPE, POLICY_EVIDENCE_VERIFIED_FIELDS,
-  type PolicyEvidence, type Task, type TransactionEvidence,
+  type PolicyEvidence, type Task, type TransactionEvidence, type SubscriptionAction,
 } from '@aegis/shared';
 import type { Config } from './config.js';
 import { ApiError, errorMessage } from './errors.js';
@@ -55,7 +55,7 @@ export interface Snapshot {
   observedAt: string; dataSource: 'chain';
   observedBlockTimestamp?: string;
 }
-export interface Quote {
+export interface Quote extends SubscriptionAction {
   quoteId: string; draftId: string; draftVersion: number; status: 'READY' | 'BLOCKED';
   chainId: number; walletAddress: Address; agentAddress: Address; recipient: Address; to: Address;
   amountWei: string; costUsd6: string; maxUsdCost6: string; policyVersion: string;
@@ -78,6 +78,7 @@ export interface Gateway {
   readiness(): Promise<Record<string, unknown>>;
   snapshot(): Promise<Snapshot>;
   preview(recipient: Address, amountWei: string, maxUsdCost6?: string): Promise<Omit<Quote, 'quoteId' | 'draftId' | 'draftVersion'>>;
+  previewSubscription?(action: SubscriptionAction, maxUsdCost6?: string): Promise<Omit<Quote, 'quoteId' | 'draftId' | 'draftVersion'>>;
   prepare(task: Task): Promise<Prepared>;
   broadcast(raw: Hex): Promise<Hex>;
   outcome(task: Task, hash: Hex, role: 'request' | 'approve' | 'cancel'): Promise<Outcome | null>;
@@ -90,6 +91,7 @@ export function chainError(error: unknown): ApiError {
   if (error instanceof ApiError) return error;
   const message = errorMessage(error);
   const mapping: [RegExp, string, number][] = [
+    [/SUBSCRIPTION_[A-Z_]+|PERIOD_[A-Z_]+|PAYMENT_COUNT_REACHED|NOT_DUE/i, (message.match(/SUBSCRIPTION_[A-Z_]+|PERIOD_[A-Z_]+|PAYMENT_COUNT_REACHED|NOT_DUE/i)?.[0] ?? 'SUBSCRIPTION_BLOCKED').toUpperCase(), 422],
     [/TIER_BLOCKED/i, 'AGENT_FROZEN', 422],
     [/NO_PENDING/i, 'NOT_PENDING', 409],
     [/stale|fresh|future timestamp|OracleStale/i, 'FEED_STALE', 503],
@@ -258,18 +260,46 @@ export class ViemGateway implements Gateway {
       };
     } catch (error) { throw chainError(error); }
   }
+  private subscriptionArgs(task: Task, nonce: bigint) {
+    if (this.config.mode !== 'local_chain' || this.config.chainId !== 31337 || !task.subscriptionId || task.occurrenceIndex === undefined || !task.planHash) throw new ApiError(422, 'SUBSCRIPTION_CONFIG_REQUIRED', '订阅仅允许完整的本地确认计划');
+    return [BigInt(task.subscriptionId), BigInt(task.occurrenceIndex), BigInt(task.maxUsdCost6), nonce, BigInt(task.requestDeadlineSeconds), BigInt(task.policyVersion), task.planHash] as const;
+  }
+  async previewSubscription(action: SubscriptionAction, requestedMax?: string): Promise<Omit<Quote, 'quoteId' | 'draftId' | 'draftVersion'>> {
+    if (!this.config.deploymentReady) throw new ApiError(503, 'DEPLOYMENT_MISSING', '部署配置缺失 deployment missing');
+    if (this.config.mode !== 'local_chain' || this.config.chainId !== 31337 || !action.subscriptionId || action.occurrenceIndex === undefined || !action.subscription) throw new ApiError(422, 'SUBSCRIPTION_CONFIG_REQUIRED', '订阅仅支持本地完整计划');
+    const sub = action.subscription;
+    // Reuse the same quote pipeline, then apply the engine's contextual subscription check.
+    const quote = await this.preview(sub.recipient, sub.amountWei, requestedMax);
+    try {
+      const check = await this.publicClient.readContract({ address: this.config.walletAddress, abi: walletAbi, functionName: 'previewSubscriptionPayment', args: [this.config.agentAddress, BigInt(action.subscriptionId), BigInt(action.occurrenceIndex), BigInt(quote.maxUsdCost6), BigInt(quote.requestDeadlineSeconds), BigInt(quote.policyVersion)], blockNumber: BigInt(quote.observedBlockNumber) });
+      return { ...quote, actionKind:action.actionKind,subscriptionId:action.subscriptionId,occurrenceIndex:action.occurrenceIndex,subscription:action.subscription,decision: quote.status === 'BLOCKED' ? 'BLOCK' : check[1] ? 'OWNER_APPROVAL' : 'AUTO' };
+    } catch(error) {
+      const failure=chainError(error);
+      return {...quote,actionKind:action.actionKind,subscriptionId:action.subscriptionId,occurrenceIndex:action.occurrenceIndex,subscription:action.subscription,status:'BLOCKED',decision:'BLOCK',reasonCodes:[failure.code]};
+    }
+  }
   async prepare(task: Task): Promise<Prepared> {
     try {
       await this.requireChain();
       if (!this.account || !this.walletClient) throw new ApiError(503, 'EXECUTOR_KEY_MISSING', '未配置执行密钥');
       if (!equal(this.account.address, this.config.agentAddress)) throw new ApiError(503, 'EXECUTOR_MISMATCH', '执行账户与部署不一致');
       const nonce = await this.publicClient.readContract({ address: this.config.walletAddress, abi: walletAbi, functionName: 'nextNonce', args: [this.account.address] });
-      const args = [task.recipient, BigInt(task.amountWei), BigInt(task.maxUsdCost6), nonce, BigInt(task.requestDeadlineSeconds), BigInt(task.policyVersion)] as const;
-      await this.publicClient.simulateContract({ address: this.config.walletAddress, abi: walletAbi, functionName: 'requestNativeTransfer', account: this.account, args });
-      const requestHash = await this.publicClient.readContract({ address: this.config.walletAddress, abi: walletAbi, functionName: 'hashRequest', args: [this.account.address, ...args] });
-      const localHash = keccak256(encodeAbiParameters(parseAbiParameters('bytes32,uint256,address,address,address,uint256,uint256,uint256,uint64,uint64'), [keccak256(toHex('aegis.native-transfer.v1')), BigInt(this.config.chainId), this.config.walletAddress, this.account.address, ...args]));
-      if (localHash !== requestHash) throw new ApiError(503, 'REQUEST_HASH_MISMATCH', '本地重建请求 hash 与合约不同');
-      const data = encodeFunctionData({ abi: walletAbi, functionName: 'requestNativeTransfer', args });
+      let data: Hex; let requestHash: Hex;
+      if (task.actionKind === 'SUBSCRIPTION') {
+        const args=this.subscriptionArgs(task,nonce);
+        await this.publicClient.simulateContract({ address:this.config.walletAddress,abi:walletAbi,functionName:'requestSubscriptionPayment',account:this.account,args });
+        requestHash=await this.publicClient.readContract({address:this.config.walletAddress,abi:walletAbi,functionName:'hashSubscriptionRequest',args:[this.account.address,...args]});
+        const localHash=keccak256(encodeAbiParameters(parseAbiParameters('bytes32,uint256,address,address,uint64,uint64,uint256,uint256,uint64,uint64,bytes32'),[keccak256(toHex('aegis.subscription-payment.v1')),BigInt(this.config.chainId),this.config.walletAddress,this.account.address,...args]));
+        if(localHash!==requestHash) throw new ApiError(503,'REQUEST_HASH_MISMATCH','订阅请求 hash 不一致');
+        data=encodeFunctionData({abi:walletAbi,functionName:'requestSubscriptionPayment',args});
+      } else {
+        const args = [task.recipient, BigInt(task.amountWei), BigInt(task.maxUsdCost6), nonce, BigInt(task.requestDeadlineSeconds), BigInt(task.policyVersion)] as const;
+        await this.publicClient.simulateContract({ address: this.config.walletAddress, abi: walletAbi, functionName: 'requestNativeTransfer', account: this.account, args });
+        requestHash = await this.publicClient.readContract({ address: this.config.walletAddress, abi: walletAbi, functionName: 'hashRequest', args: [this.account.address, ...args] });
+        const localHash = keccak256(encodeAbiParameters(parseAbiParameters('bytes32,uint256,address,address,address,uint256,uint256,uint256,uint64,uint64'), [keccak256(toHex('aegis.native-transfer.v1')), BigInt(this.config.chainId), this.config.walletAddress, this.account.address, ...args]));
+        if (localHash !== requestHash) throw new ApiError(503, 'REQUEST_HASH_MISMATCH', '本地重建请求 hash 与合约不同');
+        data = encodeFunctionData({ abi: walletAbi, functionName: 'requestNativeTransfer', args });
+      }
       const senderNonce = await this.publicClient.getTransactionCount({ address: this.account.address, blockTag: 'pending' });
       const request = await this.walletClient.prepareTransactionRequest({ account: this.account, to: this.config.walletAddress, data, nonce: senderNonce, value: 0n });
       const rawTransaction = await this.walletClient.signTransaction(request);
@@ -287,6 +317,10 @@ export class ViemGateway implements Gateway {
       if (!task.attestationId) throw new ApiError(409, 'NOT_PENDING', '没有 pending attestationId');
       const pending = await this.publicClient.readContract({ address: this.config.walletAddress, abi: walletAbi, functionName: 'pending', args: [BigInt(task.attestationId)] });
       if (!pending[8] || !equal(pending[0], task.agentAddress) || !equal(pending[1], task.recipient) || pending[2].toString() !== task.amountWei || pending[3].toString() !== task.maxUsdCost6 || pending[4].toString() !== task.requestNonce || pending[5].toString() !== String(task.requestDeadlineSeconds) || pending[6].toString() !== task.policyVersion || !equal(pending[7], task.requestHash!)) throw new ApiError(409, 'PENDING_BINDING_MISMATCH', '链上 pending 内容与显示任务不同；请停止签名并核对部署');
+      if(task.actionKind==='SUBSCRIPTION') {
+        const meta=await this.publicClient.readContract({address:this.config.walletAddress,abi:walletAbi,functionName:'subscriptionPending',args:[BigInt(task.attestationId)]});
+        if(String(meta[0])!==task.subscriptionId || String(meta[1])!==task.occurrenceIndex || !task.planHash || !equal(meta[2],task.planHash)) throw new ApiError(409,'PENDING_BINDING_MISMATCH','链上订阅 subscription 期号或确认哈希与任务不一致');
+      }
       await this.publicClient.simulateContract({ address: this.config.walletAddress, abi: walletAbi, functionName: action === 'approve' ? 'approveAndExecute' : 'cancelPending', args: [BigInt(task.attestationId)], account: this.config.ownerAddress });
     } catch (error) { throw chainError(error); }
   }
@@ -295,7 +329,7 @@ export class ViemGateway implements Gateway {
     if (!request?.blockNumber || !task.requestHash) return null;
     const base = { address: this.config.walletAddress, abi: walletAbi, args: { requestHash: task.requestHash }, fromBlock: BigInt(request.blockNumber), toBlock: 'latest' as const };
     const [executed, cancelled] = await Promise.all([
-      this.publicClient.getContractEvents({ ...base, eventName: 'NativeTransferExecuted' }),
+      this.publicClient.getContractEvents({ ...base, eventName: task.actionKind === 'SUBSCRIPTION' ? 'SubscriptionPaymentExecuted' : 'NativeTransferExecuted' }),
       this.publicClient.getContractEvents({ ...base, eventName: 'NativeTransferCancelled' }),
     ]);
     if (executed[0]?.transactionHash) return this.outcome(task, executed[0].transactionHash, 'approve');
@@ -308,19 +342,19 @@ export class ViemGateway implements Gateway {
     try { receipt = await this.publicClient.getTransactionReceipt({ hash }); }
     catch (error) { if (/not found|could not be found/i.test(errorMessage(error))) return null; throw chainError(error); }
     const transaction = await this.publicClient.getTransaction({ hash });
-    const expected = role === 'request' ? encodeFunctionData({ abi: walletAbi, functionName: 'requestNativeTransfer', args: [task.recipient, BigInt(task.amountWei), BigInt(task.maxUsdCost6), BigInt(task.requestNonce!), BigInt(task.requestDeadlineSeconds), BigInt(task.policyVersion)] }) : this.ownerTx(task, role).data;
+    const expected = role === 'request' && task.actionKind === 'SUBSCRIPTION' ? encodeFunctionData({abi:walletAbi,functionName:'requestSubscriptionPayment',args:this.subscriptionArgs(task,BigInt(task.requestNonce!))}) : role === 'request' ? encodeFunctionData({ abi: walletAbi, functionName: 'requestNativeTransfer', args: [task.recipient, BigInt(task.amountWei), BigInt(task.maxUsdCost6), BigInt(task.requestNonce!), BigInt(task.requestDeadlineSeconds), BigInt(task.policyVersion)] }) : this.ownerTx(task, role).data;
     const sender = role === 'request' ? this.config.agentAddress : this.config.ownerAddress;
     if (!equal(transaction.from, sender) || !transaction.to || !equal(transaction.to, this.config.walletAddress) || !equal(transaction.input, expected) || transaction.value !== 0n) throw new ApiError(422, 'TX_BINDING_MISMATCH', '交易的 sender、合约、calldata 或金额不属于该任务');
     const evidence: TransactionEvidence = { role, hash, receiptStatus: receipt.status === 'success' ? 1 : 0, blockNumber: receipt.blockNumber.toString(), blockHash: receipt.blockHash, senderNonce: transaction.nonce.toString(), finality: 'mined' };
     if (receipt.status !== 'success') return { status: 'FAILED', transaction: evidence, reasonCode: 'TX_REVERTED' };
-    let walletEvent: { eventName: 'NativeTransferExecuted' | 'NativeTransferQueued' | 'NativeTransferCancelled'; args: Record<string, string | bigint> } | undefined;
+    let walletEvent: { eventName: string; args: Record<string, string | bigint> } | undefined;
     let policyEvent: { args: Record<string, string | bigint>; logIndex: number } | undefined;
     let sawPolicyEvent = false;
     for (const [index, log] of receipt.logs.entries()) {
       if (equal(log.address, this.config.walletAddress)) {
         let decoded;
         try { decoded = decodeEventLog({ abi: walletAbi, data: log.data, topics: log.topics, strict: true }); } catch { continue; }
-        if (!['NativeTransferExecuted', 'NativeTransferQueued', 'NativeTransferCancelled'].includes(decoded.eventName)) continue;
+        if (!['NativeTransferExecuted', 'NativeTransferQueued', 'NativeTransferCancelled', 'SubscriptionPaymentExecuted','SubscriptionPaymentQueued'].includes(decoded.eventName)) continue;
         const args = decoded.args as unknown as Record<string, string | bigint>;
         if (!task.requestHash || !equal(String(args.requestHash), task.requestHash)) continue;
         if (task.attestationId && String(args.attestationId) !== task.attestationId) continue;
@@ -328,8 +362,9 @@ export class ViemGateway implements Gateway {
           if (role === 'cancel') walletEvent = { eventName: decoded.eventName, args };
           continue;
         }
+        if (task.actionKind === 'SUBSCRIPTION' ? !decoded.eventName.startsWith('SubscriptionPayment') || String(args.subscriptionId)!==task.subscriptionId || String(args.occurrenceIndex)!==task.occurrenceIndex || !equal(String(args.planHash),task.planHash!) : decoded.eventName.startsWith('SubscriptionPayment')) continue;
         if (role === 'cancel' || !equal(String(args.agent), task.agentAddress) || !equal(String(args.to), task.recipient) || String(args.amountWei) !== task.amountWei || String(args.policyVersion) !== task.policyVersion) continue;
-        if (decoded.eventName === 'NativeTransferQueued' && (role !== 'request' || String(args.maxUsdCost6) !== task.maxUsdCost6 || String(args.deadline) !== String(task.requestDeadlineSeconds))) continue;
+        if (decoded.eventName.endsWith('Queued') && (role !== 'request' || String(args.maxUsdCost6) !== task.maxUsdCost6 || String(args.deadline) !== String(task.requestDeadlineSeconds))) continue;
         walletEvent = { eventName: decoded.eventName, args };
         continue;
       }
@@ -342,7 +377,7 @@ export class ViemGateway implements Gateway {
       const decision = BigInt(args.decision);
       const decisionMatchesExecution = role === 'request' ? decision === 1n : role === 'approve' ? decision === 1n || decision === 2n : false;
       if (!task.requestHash || !equal(String(args.requestHash), task.requestHash) || !equal(String(args.actor), task.agentAddress)) continue;
-      if (BigInt(args.actionType) !== 0n || !decisionMatchesExecution) continue;
+      if (BigInt(args.actionType) !== (task.actionKind === 'SUBSCRIPTION' ? 1n : 0n) || !decisionMatchesExecution) continue;
       policyEvent = { args, logIndex: Number(log.logIndex ?? index) };
     }
     if (!walletEvent) return { status: 'FAILED', transaction: evidence, reasonCode: 'EXPECTED_EVENT_MISSING' };
@@ -352,7 +387,7 @@ export class ViemGateway implements Gateway {
       if (sawPolicyEvent) return { status: 'FAILED', transaction: boundTransaction, reasonCode: 'UNEXPECTED_POLICY_EVENT' };
       return { status: 'CANCELLED', attestationId: String(walletEvent.args.attestationId), transaction: boundTransaction, eventData };
     }
-    if (walletEvent.eventName === 'NativeTransferQueued') {
+    if (walletEvent.eventName.endsWith('Queued')) {
       if (sawPolicyEvent) return { status: 'FAILED', transaction: boundTransaction, reasonCode: 'UNEXPECTED_POLICY_EVENT' };
       return { status: 'AWAITING_APPROVAL', attestationId: String(walletEvent.args.attestationId), transaction: boundTransaction, eventData };
     }
@@ -363,7 +398,7 @@ export class ViemGateway implements Gateway {
     }
     const decision = BigInt(policyEvent.args.decision) === 1n ? 'ALLOW' : 'REQUIRE_APPROVAL';
     const policyEvidence: PolicyEvidence = {
-      engineAddress: this.config.policyEngineAddress, event: 'BudgetConsumed', actionType: 'NATIVE_TRANSFER', decision,
+      engineAddress: this.config.policyEngineAddress, event: 'BudgetConsumed', actionType: task.actionKind === 'SUBSCRIPTION' ? 'SUBSCRIPTION' : 'NATIVE_TRANSFER', decision,
       requestHash: String(policyEvent.args.requestHash) as Hex, actor: String(policyEvent.args.actor) as Hex,
       costUsd6: policyCost, day: String(policyEvent.args.day), spentUsd6: String(policyEvent.args.spentUsd6),
       policyVersion: String(walletEvent.args.policyVersion),

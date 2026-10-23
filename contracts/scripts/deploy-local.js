@@ -7,6 +7,10 @@ const same = (first, second) => first.toLowerCase() === second.toLowerCase();
 async function deployLocal({ env = process.env, persist = true, log = true } = {}) {
   const chain = await ethers.provider.getNetwork();
   if (chain.chainId !== 31337n) throw new Error("Local deployment only: expected chainId 31337");
+  const fixtureFlag = env.AEGIS_LOCAL_SUBSCRIPTION_FIXTURE;
+  if (fixtureFlag !== undefined && fixtureFlag !== '0' && fixtureFlag !== '1') {
+    throw new Error('AEGIS_LOCAL_SUBSCRIPTION_FIXTURE must be 0 or 1');
+  }
   const [owner, agent, recipient] = await ethers.getSigners();
   if (!owner || !agent || !recipient || new Set([owner.address, agent.address, recipient.address]).size !== 3) {
     throw new Error("Three distinct local owner/agent/recipient accounts required");
@@ -47,6 +51,10 @@ async function deployLocal({ env = process.env, persist = true, log = true } = {
   await (await acl.setTier(agent.address, 2, 0)).wait();
   await (await wallet.configurePolicy(await oracle.getAddress(), 5_000_000, 10_000_000, 15_000_000, 3600)).wait();
   await (await wallet.setRecipientAllowed(recipient.address, true)).wait();
+  // Explicit fixture values only. Normal deployments keep subscriptions disabled.
+  if (fixtureFlag === '1') {
+    await (await wallet.configureSubscriptionPolicy(10_000_000, 86_400, 24)).wait();
+  }
   await (await owner.sendTransaction({ to: await wallet.getAddress(), value: ethers.parseEther("1") })).wait();
   const aclRoles = [await acl.OWNER_ROLE(), await acl.GUARDIAN_ROLE(), await acl.DEFAULT_ADMIN_ROLE()];
   const attestationRoles = [await att.APPROVER_ROLE(), await att.DEFAULT_ADMIN_ROLE()];

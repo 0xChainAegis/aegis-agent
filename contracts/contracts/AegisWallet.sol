@@ -35,6 +35,20 @@ contract AegisWallet is Ownable, ReentrancyGuard {
         bool requiresApproval;
     }
     mapping(uint64 => PendingOp) public pending;
+    struct SubscriptionPending {
+        uint64 subscriptionId;
+        uint64 occurrenceIndex;
+        bytes32 planHash;
+    }
+    mapping(uint64 => SubscriptionPending) public subscriptionPending;
+    uint64 public nextSubscriptionId = 1;
+    bytes32 public constant SUBSCRIPTION_REQUEST_DOMAIN = keccak256("aegis.subscription-payment.v1");
+
+    event FiniteSubscriptionPaused(uint64 indexed subscriptionId, bool paused);
+    event FiniteSubscriptionCancelled(uint64 indexed subscriptionId);
+    event FiniteSubscriptionCreated(uint64 indexed subscriptionId, address indexed agent, address indexed to, bytes32 parentPlanHash);
+    event SubscriptionPaymentExecuted(bytes32 indexed requestHash, uint64 indexed attestationId, address indexed agent, address to, uint256 amountWei, uint256 costUsd6, uint80 roundId, uint256 updatedAt, uint64 policyVersion, uint64 subscriptionId, uint64 occurrenceIndex, bytes32 planHash);
+    event SubscriptionPaymentQueued(bytes32 indexed requestHash, uint64 indexed attestationId, address indexed agent, address to, uint256 amountWei, uint256 maxUsdCost6, uint64 deadline, uint64 policyVersion, uint64 subscriptionId, uint64 occurrenceIndex, bytes32 planHash);
 
     event Deposited(address indexed user, address token, uint256 amount);
     event PolicyConfigured(uint64 indexed version, address indexed oracle, uint256 autoUsd6, uint256 perTxUsd6, uint256 dailyUsd6, uint256 maxAge);
@@ -102,9 +116,140 @@ contract AegisWallet is Ownable, ReentrancyGuard {
         }
     }
 
+    function configureSubscriptionPolicy(uint256 cap, uint64 duration, uint64 payments) external onlyOwner {
+        policyEngine.configureSubscriptionPolicy(cap, duration, payments);
+    }
+
+    function subscriptions(uint64 id) public view returns (AegisPolicyEngine.FiniteSubscription memory) {
+        return policyEngine.subscriptions(address(this), id);
+    }
+
+    function createFiniteSubscription(address agent, address to, uint256 amountWei, uint64 periodSeconds, uint64 startAt, uint64 endAt, uint64 maxPayments, uint256 periodCapUsd6, bytes32 parentPlanHash) external onlyOwner returns (uint64 id) {
+        AegisPolicyEngine.FiniteSubscription memory s;
+        s.agent = agent;
+        s.to = to;
+        s.amountWei = amountWei;
+        s.periodSeconds = periodSeconds;
+        s.startAt = startAt;
+        s.endAt = endAt;
+        s.maxPayments = maxPayments;
+        s.periodCapUsd6 = periodCapUsd6;
+        s.parentPlanHash = parentPlanHash;
+        id = nextSubscriptionId++;
+        policyEngine.registerSubscription(id, s);
+        emit FiniteSubscriptionCreated(id, agent, to, parentPlanHash);
+    }
+
+    function pauseFiniteSubscription(uint64 id, bool paused) external onlyOwner {
+        policyEngine.pauseSubscriptionRecord(id, paused);
+        emit FiniteSubscriptionPaused(id, paused);
+    }
+
+    function cancelFiniteSubscription(uint64 id) external onlyOwner {
+        policyEngine.cancelSubscriptionRecord(id);
+        emit FiniteSubscriptionCancelled(id);
+    }
+
+    function hashSubscriptionRequest(address agent, uint64 id, uint64 occurrenceIndex, uint256 maxUsdCost6, uint256 nonce, uint64 deadline, uint64 version, bytes32 planHash) public view returns (bytes32) {
+        return keccak256(abi.encode(SUBSCRIPTION_REQUEST_DOMAIN, block.chainid, address(this), agent, id, occurrenceIndex, maxUsdCost6, nonce, deadline, version, planHash));
+    }
+
+    function previewSubscriptionPayment(address requester, uint64 id, uint64 occurrenceIndex, uint256 maxUsdCost6, uint64 deadline, uint64 version) external view returns (uint256 costUsd6, bool requiresApproval) {
+        AegisPolicyEngine.FiniteSubscription memory s = subscriptions(id);
+        PendingOp memory op = PendingOp(requester, s.to, s.amountWei, maxUsdCost6, 0, deadline, version, bytes32(0), true);
+        AegisPolicyEngine.RiskResult memory result = _checkSubscription(op, SubscriptionPending(id, occurrenceIndex, bytes32(0)));
+        return (result.costUsd6, result.decision == AegisPolicyEngine.Decision.RequireApproval);
+    }
+
+    // A plan hash correlates backend per-occurrence confirmation; it is not a
+    // human signature and does not create an on-chain automatic mandate.
+    function requestSubscriptionPayment(uint64 id, uint64 occurrenceIndex, uint256 maxUsdCost6, uint256 nonce, uint64 deadline, uint64 version, bytes32 planHash) external nonReentrant returns (uint64 attId) {
+        require(planHash != bytes32(0), "EMPTY_PLAN_HASH");
+        require(nonce == nextNonce[msg.sender], "NONCE_MISMATCH");
+        AegisPolicyEngine.FiniteSubscription memory s = subscriptions(id);
+        PendingOp memory op = PendingOp(msg.sender, s.to, s.amountWei, maxUsdCost6, nonce, deadline, version,
+            hashSubscriptionRequest(msg.sender, id, occurrenceIndex, maxUsdCost6, nonce, deadline, version, planHash), true);
+        SubscriptionPending memory meta = SubscriptionPending(id, occurrenceIndex, planHash);
+        AegisPolicyEngine.RiskResult memory result = _checkSubscription(op, meta);
+        bool approval = result.decision == AegisPolicyEngine.Decision.RequireApproval;
+        nextNonce[msg.sender] = nonce + 1;
+        attId = attestations.record(msg.sender, op.requestHash, "", approval, !approval);
+        if (approval) {
+            pending[attId] = op;
+            subscriptionPending[attId] = meta;
+            _emitSubscriptionQueued(op, meta, attId);
+        } else {
+            _executeSubscription(op, meta, attId, false);
+        }
+    }
+
+    function _emitSubscriptionQueued(PendingOp memory op, SubscriptionPending memory meta, uint64 attId) internal {
+        emit SubscriptionPaymentQueued(op.requestHash, attId, op.requester, op.to, op.amountWei, op.maxUsdCost6, op.deadline, op.policyVersion, meta.subscriptionId, meta.occurrenceIndex, meta.planHash);
+    }
+
+    function _subscriptionRisk(PendingOp memory op) internal pure returns (AegisPolicyEngine.RiskRequest memory r) {
+        r = _riskRequest(op.requester, op.to, op.amountWei, op.maxUsdCost6, op.deadline, op.policyVersion, op.requestHash);
+        r.actionType = AegisPolicyEngine.ActionType.Subscription;
+    }
+
+    function _checkSubscription(PendingOp memory op, SubscriptionPending memory meta) internal view returns (AegisPolicyEngine.RiskResult memory result) {
+        result = policyEngine.evaluateSubscription(_subscriptionRisk(op), meta.subscriptionId, meta.occurrenceIndex);
+        _enforcePolicy(result);
+        require(address(this).balance >= op.amountWei, "INSUFFICIENT_BALANCE");
+    }
+
+    function _executeSubscription(PendingOp memory op, SubscriptionPending memory meta, uint64 attId, bool ownerApproved) internal {
+        require(address(this).balance >= op.amountWei, "INSUFFICIENT_BALANCE");
+        AegisPolicyEngine.RiskResult memory result = policyEngine.validateAndConsumeSubscription(_subscriptionRisk(op), meta.subscriptionId, meta.occurrenceIndex, ownerApproved);
+        (bool ok, ) = payable(op.to).call{value: op.amountWei}("");
+        require(ok, "NATIVE_TRANSFER_FAILED");
+        _emitSubscriptionExecuted(op, meta, attId, result);
+    }
+
+    // Static tuple matches the non-indexed event fields byte-for-byte. Building
+    // it incrementally avoids stack-too-deep without changing compiler settings.
+    struct SubscriptionExecutionData {
+        address to;
+        uint256 amountWei;
+        uint256 costUsd6;
+        uint80 roundId;
+        uint256 updatedAt;
+        uint64 policyVersion;
+        uint64 subscriptionId;
+        uint64 occurrenceIndex;
+        bytes32 planHash;
+    }
+
+    function _emitSubscriptionExecuted(PendingOp memory op, SubscriptionPending memory meta, uint64 attId, AegisPolicyEngine.RiskResult memory result) internal {
+        SubscriptionExecutionData memory d;
+        d.to = op.to;
+        d.amountWei = op.amountWei;
+        d.costUsd6 = result.costUsd6;
+        d.roundId = result.roundId;
+        d.updatedAt = result.updatedAt;
+        d.policyVersion = op.policyVersion;
+        d.subscriptionId = meta.subscriptionId;
+        d.occurrenceIndex = meta.occurrenceIndex;
+        d.planHash = meta.planHash;
+        bytes memory data = abi.encode(d);
+        bytes32 signature = keccak256("SubscriptionPaymentExecuted(bytes32,uint64,address,address,uint256,uint256,uint80,uint256,uint64,uint64,uint64,bytes32)");
+        bytes32 requestHash = op.requestHash;
+        address agent = op.requester;
+        assembly { log4(add(data, 32), mload(data), signature, requestHash, attId, agent) }
+    }
+
     function approveAndExecute(uint64 attId) external onlyOwner nonReentrant {
         PendingOp memory op = pending[attId];
         require(op.exists, "NO_PENDING");
+        SubscriptionPending memory meta = subscriptionPending[attId];
+        if (meta.subscriptionId != 0) {
+            _checkSubscription(op, meta);
+            delete pending[attId];
+            delete subscriptionPending[attId];
+            attestations.setApproval(attId, true);
+            _executeSubscription(op, meta, attId, true);
+            return;
+        }
         // Requote the fixed amount and revalidate all hard rules at execution.
         _checkHardRules(op.requester, op.to, op.amountWei, op.maxUsdCost6, op.deadline, op.policyVersion);
         delete pending[attId];
@@ -116,6 +261,7 @@ contract AegisWallet is Ownable, ReentrancyGuard {
         PendingOp memory op = pending[attId];
         require(op.exists, "NO_PENDING");
         delete pending[attId];
+        delete subscriptionPending[attId];
         attestations.setApproval(attId, false);
         emit NativeTransferCancelled(op.requestHash, attId);
     }
@@ -173,6 +319,16 @@ contract AegisWallet is Ownable, ReentrancyGuard {
         if (reason == bytes32("QUOTE_EXCEEDS_MAX")) revert("QUOTE_EXCEEDS_MAX");
         if (reason == bytes32("PER_TX_LIMIT")) revert("PER_TX_LIMIT");
         if (reason == bytes32("DAILY_LIMIT")) revert("DAILY_LIMIT");
+        if (result.reasonCode == bytes32("PERIOD_LIMIT")) revert("PERIOD_LIMIT");
+        if (result.reasonCode == bytes32("SUBSCRIPTION_EXPIRED")) revert("SUBSCRIPTION_EXPIRED");
+        if (result.reasonCode == bytes32("SUBSCRIPTION_CANCELLED")) revert("SUBSCRIPTION_CANCELLED");
+        if (result.reasonCode == bytes32("SUBSCRIPTION_PAUSED")) revert("SUBSCRIPTION_PAUSED");
+        if (result.reasonCode == bytes32("PAYMENT_COUNT_REACHED")) revert("PAYMENT_COUNT_REACHED");
+        if (result.reasonCode == bytes32("NOT_DUE")) revert("NOT_DUE");
+        if (result.reasonCode == bytes32("PERIOD_ALREADY_PAID")) revert("PERIOD_ALREADY_PAID");
+        if (result.reasonCode == bytes32("SUBSCRIPTIONS_NOT_CONFIGURED")) revert("SUBSCRIPTIONS_NOT_CONFIGURED");
+        if (result.reasonCode == bytes32("SUBSCRIPTION_POLICY_LIMIT")) revert("SUBSCRIPTION_POLICY_LIMIT");
+        if (result.reasonCode == bytes32("SUBSCRIPTION_CONTEXT_MISMATCH")) revert("SUBSCRIPTION_CONTEXT_MISMATCH");
         revert("POLICY_REJECTED");
     }
 

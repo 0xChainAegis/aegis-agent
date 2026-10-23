@@ -6,8 +6,9 @@ import {AegisAccessControl} from "./AegisAccessControl.sol";
 import {AegisPriceOracle} from "./AegisPriceOracle.sol";
 
 /// @notice Shared deterministic authorization and USD-budget policy for Aegis actions.
-/// @dev Phase one executes native ETH only. Subscription and CCIP kinds are
-///      reserved so later executors share this policy and its daily budget.
+/// @dev Native ETH and finite subscription payments share one daily budget.
+///      Subscription calls require consumer-namespaced registered context; CCIP
+///      and context-free subscription requests remain disabled.
 contract AegisPolicyEngine is Ownable {
     enum ActionType { NativeTransfer, Subscription, CCIPTransfer }
     enum Decision { Reject, Allow, RequireApproval }
@@ -55,6 +56,28 @@ contract AegisPolicyEngine is Ownable {
     uint256 public dailyLimitUsd6;
     uint256 public maxPriceAge;
 
+    struct FiniteSubscription {
+        address agent;
+        address to;
+        uint256 amountWei;
+        uint64 periodSeconds;
+        uint64 startAt;
+        uint64 endAt;
+        uint64 maxPayments;
+        uint256 periodCapUsd6;
+        bytes32 parentPlanHash;
+        uint64 paidCount;
+        uint64 lastPaidOccurrence;
+        bool hasPaid;
+        bool paused;
+        bool cancelled;
+        bool exists;
+    }
+    uint256 public maxSubscriptionPeriodCapUsd6;
+    uint64 public maxSubscriptionDurationSeconds;
+    uint64 public maxSubscriptionPayments;
+    mapping(address => mapping(uint64 => FiniteSubscription)) private _subscriptions;
+
     mapping(address => bool) public allowedRecipients;
     mapping(uint64 => bool) public allowedDestinationChains;
     mapping(address => bool) public authorizedConsumers;
@@ -62,6 +85,7 @@ contract AegisPolicyEngine is Ownable {
     mapping(bytes32 => bool) public consumedRequests;
     mapping(uint256 => uint256) private _spentByDay;
 
+    event SubscriptionPolicyConfigured(uint64 indexed version, uint256 maxPeriodCapUsd6, uint64 maxDurationSeconds, uint64 maxPayments);
     event PolicyConfigured(uint64 indexed version, address indexed oracle, uint256 autoUsd6, uint256 perTxUsd6, uint256 dailyUsd6, uint256 maxAge);
     event RecipientAllowed(address indexed recipient, bool allowed, uint64 policyVersion);
     event DestinationChainAllowed(uint64 indexed chainSelector, bool allowed, uint64 policyVersion);
@@ -121,6 +145,85 @@ contract AegisPolicyEngine is Ownable {
         emit DestinationChainAllowed(chainSelector, allowed, policyVersion);
     }
 
+    function configureSubscriptionPolicy(uint256 periodCapUsd6, uint64 durationSeconds, uint64 payments) external onlyPolicyManager {
+        require(periodCapUsd6 > 0 && durationSeconds > 0 && payments > 0, "BAD_SUBSCRIPTION_LIMITS");
+        maxSubscriptionPeriodCapUsd6 = periodCapUsd6;
+        maxSubscriptionDurationSeconds = durationSeconds;
+        maxSubscriptionPayments = payments;
+        ++policyVersion;
+        emit SubscriptionPolicyConfigured(policyVersion, periodCapUsd6, durationSeconds, payments);
+    }
+
+    function subscriptions(address consumer, uint64 id) external view returns (FiniteSubscription memory) {
+        return _subscriptions[consumer][id];
+    }
+
+    function registerSubscription(uint64 id, FiniteSubscription calldata config) external {
+        require(authorizedConsumers[msg.sender], "UNAUTHORIZED_CONSUMER");
+        require(id != 0 && !_subscriptions[msg.sender][id].exists, "SUBSCRIPTION_EXISTS");
+        require(maxSubscriptionPeriodCapUsd6 > 0 && maxSubscriptionDurationSeconds > 0 && maxSubscriptionPayments > 0, "SUBSCRIPTIONS_NOT_CONFIGURED");
+        require(address(oracle) != address(0), "POLICY_NOT_CONFIGURED");
+        require(config.periodSeconds > 0 && config.endAt > config.startAt && config.endAt > block.timestamp && config.maxPayments > 0 && config.maxPayments <= maxSubscriptionPayments && config.endAt - config.startAt <= maxSubscriptionDurationSeconds && config.periodCapUsd6 > 0 && config.periodCapUsd6 <= maxSubscriptionPeriodCapUsd6, "BAD_SUBSCRIPTION_BOUNDS");
+        require(config.parentPlanHash != bytes32(0), "EMPTY_PLAN_HASH");
+        require(config.amountWei > 0, "ZERO_AMOUNT");
+        require(config.to != address(0) && config.to != msg.sender && allowedRecipients[config.to], "RECIPIENT_NOT_ALLOWED");
+        require(acl.hasRole(acl.AGENT_ROLE(), config.agent), "NOT_AGENT");
+        AegisAccessControl.Tier tier = acl.tierOf(config.agent);
+        require(tier != AegisAccessControl.Tier.Frozen && tier != AegisAccessControl.Tier.ReadOnly, "TIER_BLOCKED");
+        _subscriptions[msg.sender][id] = config;
+        FiniteSubscription storage s = _subscriptions[msg.sender][id];
+        s.paidCount = 0;
+        s.lastPaidOccurrence = 0;
+        s.hasPaid = false;
+        s.paused = false;
+        s.cancelled = false;
+        s.exists = true;
+    }
+
+    function pauseSubscriptionRecord(uint64 id, bool paused) external {
+        require(authorizedConsumers[msg.sender], "UNAUTHORIZED_CONSUMER");
+        FiniteSubscription storage s = _subscriptions[msg.sender][id];
+        require(s.exists, "NO_SUBSCRIPTION");
+        require(!s.cancelled, "SUBSCRIPTION_CANCELLED");
+        s.paused = paused;
+    }
+
+    function cancelSubscriptionRecord(uint64 id) external {
+        require(authorizedConsumers[msg.sender], "UNAUTHORIZED_CONSUMER");
+        FiniteSubscription storage s = _subscriptions[msg.sender][id];
+        require(s.exists, "NO_SUBSCRIPTION");
+        s.cancelled = true;
+    }
+
+    function evaluateSubscription(RiskRequest calldata request, uint64 id, uint64 occurrenceIndex) external view returns (RiskResult memory) {
+        return _evaluateSubscription(request, id, occurrenceIndex);
+    }
+
+    function validateAndConsumeSubscription(RiskRequest calldata request, uint64 id, uint64 occurrenceIndex, bool ownerApproved) external returns (RiskResult memory result) {
+        require(authorizedConsumers[msg.sender], "UNAUTHORIZED_CONSUMER");
+        result = _evaluateSubscription(request, id, occurrenceIndex);
+        _consume(request, result, ownerApproved);
+        FiniteSubscription storage s = _subscriptions[msg.sender][id];
+        ++s.paidCount;
+        s.lastPaidOccurrence = occurrenceIndex;
+        s.hasPaid = true;
+    }
+
+    function _evaluateSubscription(RiskRequest calldata request, uint64 id, uint64 occurrenceIndex) internal view returns (RiskResult memory result) {
+        FiniteSubscription storage s = _subscriptions[msg.sender][id];
+        if (!s.exists || request.actionType != ActionType.Subscription || request.actor != s.agent || request.recipient != s.to || request.amount != s.amountWei) return _reject(result, "SUBSCRIPTION_CONTEXT_MISMATCH");
+        if (maxSubscriptionPeriodCapUsd6 == 0 || maxSubscriptionDurationSeconds == 0 || maxSubscriptionPayments == 0) return _reject(result, "SUBSCRIPTIONS_NOT_CONFIGURED");
+        if (s.periodCapUsd6 > maxSubscriptionPeriodCapUsd6 || s.endAt - s.startAt > maxSubscriptionDurationSeconds || s.maxPayments > maxSubscriptionPayments) return _reject(result, "SUBSCRIPTION_POLICY_LIMIT");
+        if (s.cancelled) return _reject(result, "SUBSCRIPTION_CANCELLED");
+        if (s.paused) return _reject(result, "SUBSCRIPTION_PAUSED");
+        if (block.timestamp >= s.endAt) return _reject(result, "SUBSCRIPTION_EXPIRED");
+        if (s.paidCount >= s.maxPayments) return _reject(result, "PAYMENT_COUNT_REACHED");
+        if (block.timestamp < s.startAt || (block.timestamp - s.startAt) / s.periodSeconds != occurrenceIndex) return _reject(result, "NOT_DUE");
+        if (s.hasPaid && s.lastPaidOccurrence == occurrenceIndex) return _reject(result, "PERIOD_ALREADY_PAID");
+        result = _evaluateCommon(request);
+        if (result.decision != Decision.Reject && result.costUsd6 > s.periodCapUsd6) return _reject(result, "PERIOD_LIMIT");
+    }
+
     function spendingToday() public view returns (uint256 spentUsd6, uint256 remainingUsd6, uint256 day) {
         day = block.timestamp / 1 days;
         spentUsd6 = _spentByDay[day];
@@ -136,6 +239,12 @@ contract AegisPolicyEngine is Ownable {
         require(request.requestHash != bytes32(0), "EMPTY_REQUEST_HASH");
         require(!consumedRequests[request.requestHash], "REQUEST_ALREADY_CONSUMED");
         result = _evaluate(request);
+        _consume(request, result, ownerApproved);
+    }
+
+    function _consume(RiskRequest calldata request, RiskResult memory result, bool ownerApproved) internal {
+        require(request.requestHash != bytes32(0), "EMPTY_REQUEST_HASH");
+        require(!consumedRequests[request.requestHash], "REQUEST_ALREADY_CONSUMED");
         _enforce(result);
         if (result.decision == Decision.RequireApproval) require(ownerApproved, "OWNER_APPROVAL_REQUIRED");
         consumedRequests[request.requestHash] = true;
@@ -147,6 +256,12 @@ contract AegisPolicyEngine is Ownable {
     function _evaluate(RiskRequest calldata request) internal view returns (RiskResult memory result) {
         (, result.remainingUsd6, ) = spendingToday();
         if (request.actionType != ActionType.NativeTransfer || request.asset != address(0) || request.destinationChainSelector != 0) return _reject(result, REASON_UNSUPPORTED_ACTION);
+        return _evaluateCommon(request);
+    }
+
+    function _evaluateCommon(RiskRequest calldata request) internal view returns (RiskResult memory result) {
+        (, result.remainingUsd6, ) = spendingToday();
+        if (request.asset != address(0) || request.destinationChainSelector != 0) return _reject(result, REASON_UNSUPPORTED_ACTION);
         if (!acl.hasRole(acl.AGENT_ROLE(), request.actor)) return _reject(result, REASON_NOT_AGENT);
         AegisAccessControl.Tier tier = acl.tierOf(request.actor);
         if (tier == AegisAccessControl.Tier.Frozen || tier == AegisAccessControl.Tier.ReadOnly) return _reject(result, REASON_TIER_BLOCKED);
@@ -185,6 +300,16 @@ contract AegisPolicyEngine is Ownable {
         if (result.reasonCode == REASON_QUOTE_EXCEEDS_MAX) revert("QUOTE_EXCEEDS_MAX");
         if (result.reasonCode == REASON_PER_TX_LIMIT) revert("PER_TX_LIMIT");
         if (result.reasonCode == REASON_DAILY_LIMIT) revert("DAILY_LIMIT");
+        if (result.reasonCode == bytes32("PERIOD_LIMIT")) revert("PERIOD_LIMIT");
+        if (result.reasonCode == bytes32("SUBSCRIPTION_EXPIRED")) revert("SUBSCRIPTION_EXPIRED");
+        if (result.reasonCode == bytes32("SUBSCRIPTION_CANCELLED")) revert("SUBSCRIPTION_CANCELLED");
+        if (result.reasonCode == bytes32("SUBSCRIPTION_PAUSED")) revert("SUBSCRIPTION_PAUSED");
+        if (result.reasonCode == bytes32("PAYMENT_COUNT_REACHED")) revert("PAYMENT_COUNT_REACHED");
+        if (result.reasonCode == bytes32("NOT_DUE")) revert("NOT_DUE");
+        if (result.reasonCode == bytes32("PERIOD_ALREADY_PAID")) revert("PERIOD_ALREADY_PAID");
+        if (result.reasonCode == bytes32("SUBSCRIPTIONS_NOT_CONFIGURED")) revert("SUBSCRIPTIONS_NOT_CONFIGURED");
+        if (result.reasonCode == bytes32("SUBSCRIPTION_POLICY_LIMIT")) revert("SUBSCRIPTION_POLICY_LIMIT");
+        if (result.reasonCode == bytes32("SUBSCRIPTION_CONTEXT_MISMATCH")) revert("SUBSCRIPTION_CONTEXT_MISMATCH");
         revert("POLICY_REJECTED");
     }
 }
