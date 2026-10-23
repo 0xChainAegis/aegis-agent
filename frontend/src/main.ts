@@ -6,6 +6,7 @@ import { createWalletDiscovery } from './providers';
 import { icon, mark } from './icons';
 import { currentTheme, initTheme, toggleTheme } from './theme';
 import { serviceReadiness } from './readiness';
+import { singleFlightByRevision } from './single-flight';
 import { nextRefreshDelay } from './polling';
 import { formatPolicyReasons } from './policy-reasons';
 import { bindingFromConfig, loadSettings, observationFromSnapshot, parseSettings, sameBinding, saveSettings, storageKey, suggestTopUp, suggestionKey, type ReserveBinding, type ReserveObservation, type Suggestion } from './reserve';
@@ -537,10 +538,13 @@ function rememberWalletIdentity(kind: 'browser' | 'local', address: string) {
   catch { /* A blocked browser store must not prevent the current in-memory connection. */ }
 }
 
-async function refresh(initial = false) {
-  const revision = walletSessionRevision;
+const refresh = singleFlightByRevision(() => walletSessionRevision, refreshSnapshot);
+async function refreshSnapshot(revision: number, initial: boolean) {
+  if (revision !== walletSessionRevision) return;
   try {
-    state.config = await sessionApi('/config');
+    const config = await sessionApi('/config');
+    if (revision !== walletSessionRevision) return;
+    state.config = config;
     state.chainId = expectedChain();
     state.online = true;
     state.serviceErrorCode = '';
@@ -557,22 +561,39 @@ async function refresh(initial = false) {
         } else {
           // A failed snapshot is "unavailable", never a stale or zero balance.
           if (index === 0) { state.wallet = null; state.walletError = errorMessage(result.reason); }
-          if (result.reason instanceof ApiError && result.reason.status === 401) { clearWalletSession(); return; }
+          if (result.reason instanceof ApiError && result.reason.status === 401) {
+            clearWalletSession();
+            // This refresh owns the logout transition; its old revision must
+            // not leave a private snapshot rendered until the next poll.
+            render();
+            return;
+          }
           // /config already proved that the API is online. A slower optional
           // chain snapshot is unavailable data, not an offline backend.
         }
       }
-      if (state.drawer && state.drawer !== 'draft') { try { state.detail = await sessionApi(`/tasks/${encodeURIComponent(state.drawer)}`); } catch { /* Retain the last server response while the network recovers. */ } }
+      if (state.drawer && state.drawer !== 'draft') {
+        const drawer = state.drawer;
+        try {
+          const detail = await sessionApi(`/tasks/${encodeURIComponent(drawer)}`);
+          if (revision !== walletSessionRevision) return;
+          if (state.drawer === drawer) state.detail = detail;
+        } catch { /* Retain the last server response while the network recovers. */ }
+      }
     }
   } catch (error) {
-    if (error instanceof SessionChangedError) return;
+    if (revision !== walletSessionRevision || error instanceof SessionChangedError) return;
     state.config = null;
     state.online = error instanceof ApiError && error.status !== 0;
     state.serviceErrorCode = error instanceof ApiError ? error.code : 'OFFLINE';
     state.serviceErrorMessage = errorMessage(error);
     if (!initial && state.busy) throw error;
   }
-  finally { state.initialLoading = false; syncReserveSettings(); render(); }
+  finally {
+    if (revision === walletSessionRevision) {
+      state.initialLoading = false; syncReserveSettings(); render();
+    }
+  }
 }
 
 async function refreshWithFeedback() {

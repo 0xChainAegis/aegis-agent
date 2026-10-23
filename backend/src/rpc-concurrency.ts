@@ -28,7 +28,8 @@ export function boundedHttp(url: string, config: HttpTransportConfig, concurrenc
   const gate = new ConcurrencyGate(concurrency);
   return parameters => {
     const transport = base(parameters);
-    const request: typeof transport.request = async requestArgs => gate.run(() => transport.request(requestArgs));
+    // Keep per-call retry and cancellation options, especially zero-retry broadcasts.
+    const request: typeof transport.request = async (...args: Parameters<typeof transport.request>) => gate.run(() => transport.request(...args));
     return { ...transport, config: { ...transport.config, request }, request };
   };
 }
