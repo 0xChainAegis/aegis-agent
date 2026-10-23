@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Route } from '@playwright/test';
 
 // Rendering and fail-closed UI fixtures only. All API traffic is intercepted;
 // these tests do not log into the backend or send any chain transaction.
@@ -241,5 +241,80 @@ test('a submitted task is polled until its terminal chain result appears', async
   await expect(page.getByText('提交中', { exact: true })).toBeVisible();
   state.setTasks([{ ...baseTask, status: 'EXECUTED', txHash: '0x' + 'ab'.repeat(32) }]);
   await expect(page.getByText('链上已确认', { exact: true })).toBeVisible();
+  expect(state.writes).toEqual([]);
+});
+
+function deferredResponse() {
+  let release: () => void = () => { throw new Error('Response gate not initialized'); };
+  const promise = new Promise<void>(resolve => { release = resolve; });
+  return { promise, release };
+}
+
+test('manual refresh joins a pending background check and a failed check can recover', async ({ page }) => {
+  await page.clock.install();
+  const state = await fixture(page, { ready: false, code: 'READINESS_CHECKING', source: 'checking' });
+  await expect(page.getByTestId('service-status')).toContainText('正在核对 本地链');
+  const pending = deferredResponse();
+  let attempts = 0;
+  const heldConfig = async (route: Route) => {
+    attempts += 1;
+    await pending.promise;
+    await route.fulfill({ status: 503, json: { error: { code: 'CHAIN_UNAVAILABLE', message: 'Refresh temporarily unavailable' } } });
+  };
+  await page.route('**/api/v1/config', heldConfig);
+  // PR19 schedules a two-second poll while readiness is pending. The user's
+  // refresh must join that existing request, rather than start a second check.
+  await page.clock.runFor(2000);
+  await expect.poll(() => attempts).toBe(1);
+  await page.getByRole('button', { name: '刷新服务状态', exact: true }).click();
+  await expect(page.getByRole('button', { name: '正在刷新服务状态', exact: true })).toBeDisabled();
+  await page.clock.runFor(50);
+  pending.release();
+  await expect(page.getByTestId('service-banner')).toContainText('Refresh temporarily unavailable');
+  await expect(page.getByRole('button', { name: '刷新服务状态', exact: true })).toBeEnabled();
+  expect(attempts).toBe(1);
+  await page.unroute('**/api/v1/config', heldConfig);
+  state.setReadiness(ready);
+  await page.getByRole('button', { name: '刷新服务状态', exact: true }).click();
+  await expect(page.getByTestId('service-status')).toContainText('本地演示 · 可操作');
+  await expect(page.getByTestId('connect-wallet')).toBeEnabled();
+  await expect(page.getByTestId('service-banner')).toHaveCount(0);
+  expect(state.writes).toEqual([]);
+});
+
+test('a new wallet session refreshes before an old check completes and ignores its late failure', async ({ page }) => {
+  await page.clock.install();
+  const state = await fixture(page, ready, true, true);
+  await expect(page.getByTestId('reserve-balance')).toHaveText('0.001 ETH');
+  await page.locator('[data-nav="settings"]').click();
+  const pending = deferredResponse();
+  let attempts = 0;
+  await page.route('**/api/v1/config', async route => {
+    attempts += 1;
+    if (attempts > 1) { await route.fallback(); return; }
+    await pending.promise;
+    await route.fulfill({ status: 503, json: { error: { code: 'CHAIN_UNAVAILABLE', message: 'Old session check failed' } } });
+  });
+  await page.clock.runFor(30_000);
+  await expect.poll(() => attempts).toBe(1);
+  await page.getByRole('button', { name: '断开本次会话', exact: true }).click();
+  await expect(page.getByTestId('connect-wallet')).toContainText('连接钱包');
+  await page.getByTestId('connect-wallet').click();
+  await page.getByTestId('wallet-option-legacy-0').click();
+  await page.getByTestId('owner-login').click();
+  // The new revision must obtain its own snapshot while the old one is held.
+  await expect(page.getByTestId('intent-message')).toBeEnabled();
+  await expect(page.getByTestId('reserve-balance')).toHaveText('0.001 ETH');
+  expect(attempts).toBe(2);
+  const staleResponse = page.waitForResponse(response => response.url().endsWith('/api/v1/config') && response.status() === 503);
+  pending.release();
+  await (await staleResponse).finished();
+  await page.clock.runFor(50);
+  await expect(page.getByTestId('service-status')).toContainText('本地演示 · 可操作');
+  await expect(page.getByTestId('connect-wallet')).toContainText('0x1111…1111');
+  await expect(page.getByTestId('intent-message')).toBeEnabled();
+  await expect(page.getByTestId('service-banner')).toHaveCount(0);
+  expect(await page.evaluate(() => sessionStorage.getItem('aegis.session'))).toBe('readiness-interactive-owner-fixture');
+  expect(state.authRequests).toEqual(['/api/v1/auth/challenge', '/api/v1/auth/verify']);
   expect(state.writes).toEqual([]);
 });
