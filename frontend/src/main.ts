@@ -8,6 +8,7 @@ import { currentTheme, initTheme, toggleTheme } from './theme';
 import { serviceReadiness } from './readiness';
 import { singleFlightByRevision } from './single-flight';
 import { nextRefreshDelay } from './polling';
+import { formatPolicyReasons } from './policy-reasons';
 import { bindingFromConfig, loadSettings, observationFromSnapshot, parseSettings, sameBinding, saveSettings, storageKey, suggestTopUp, suggestionKey, type ReserveBinding, type ReserveObservation, type Suggestion } from './reserve';
 import './style.css';
 
@@ -120,8 +121,7 @@ function statusLabel(task: Data): string {
   const labels: Record<string, string> = { DRAFT: '待确认', NEEDS_INPUT: '待补信息', INCOMPLETE: '待补信息', READY: '已通过预检', SUBMITTED: '链上处理中', SUBMITTING: '提交中', EXECUTING: '执行中', PENDING_APPROVAL: '等待 Owner', AWAITING_APPROVAL: '等待 Owner', EXECUTED: '链上已确认', COMPLETED: '已完成', CONFIRMED: '链上已确认', BLOCKED: '规则已拦截', REJECTED: '已拒绝', FAILED: '执行失败', CANCELLED: '已取消', CANCELED: '已取消', EXPIRED: '已过期' };
   return labels[s] || ({ UNKNOWN: '结果待核对', REQUOTE_REQUIRED: '需要重新报价', BROADCAST: '已广播待回执' } as Record<string, string>)[s] || s || '待确认';
 }
-const reasonLabels: Record<string, string> = { AUTO_THRESHOLD_EXCEEDED: '超过自动额度，需要 Owner 审批', HARD_PER_TX_EXCEEDED: '超过单次硬上限', PER_TX_LIMIT: '超过单次硬上限', DAILY_BUDGET_EXCEEDED: '超过今日累计预算', DAILY_LIMIT: '超过今日累计预算', RECIPIENT_NOT_ALLOWED: '收款地址不在允许名单中', WALLET_BALANCE_LOW: '钱包余额不足', INSUFFICIENT_BALANCE: '钱包余额不足', FEED_STALE: '价格已过期，付款已停止', POLICY_BLOCKED: '未通过合约规则', BROADCAST_UNKNOWN: '广播结果不明，正在核对原交易，请勿重复付款', TX_REVERTED: '交易已回滚，未完成付款', EXPECTED_EVENT_MISSING: '未找到匹配的付款事件' };
-function reasons(task: unknown): string { const codes = get(task, 'reasonCodes'); return Array.isArray(codes) ? codes.map(code => reasonLabels[String(code)] || String(code)).join('；') : ''; }
+function reasons(task: unknown): string { return formatPolicyReasons(get(task, 'reasonCodes')); }
 function taskReason(task: unknown): string { return value(task, 'error.message', 'lastError.message', 'reason', 'blockReason', 'errorMessage') || reasons(task); }
 function broadcastKey(taskId: string): string { return `aegis.owner-broadcast.${expectedChain()}.${taskId}`; }
 function pendingBroadcast(taskId: string): { txHash: string; action: 'approve' | 'cancel' } | null { try { const parsed = z.object({txHash:z.string().regex(/^0x[0-9a-fA-F]{64}$/),action:z.enum(['approve','cancel'])}).strict().safeParse(JSON.parse(sessionStorage.getItem(broadcastKey(taskId)) || 'null')); return parsed.success ? parsed.data : null; } catch { return null; } }

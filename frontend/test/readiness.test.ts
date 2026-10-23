@@ -60,6 +60,17 @@ describe('serviceReadiness', () => {
   });
 
   it.each([
+    ['FEED_UNAVAILABLE', 'Chainlink 价格源不可用'],
+    ['EXECUTOR_UNAUTHORIZED', '执行账户不可用'],
+    ['AGENT_FROZEN', '执行账户不可用'],
+  ])('keeps verified identity readable but blocks payment for %s', (code, title) => {
+    const limited = { ...config, readiness: { ...config.readiness, ready: false, code } };
+    expect(serviceReadiness(limited)).toMatchObject({ phase: 'limited', title, canConnect: true, canPay: false });
+    expect(serviceReadiness({ ...limited, readiness: { ready: false, code } }))
+      .toMatchObject({ canConnect: false, canPay: false });
+  });
+
+  it.each([
     ['DEPLOYMENT_BINDING_MISMATCH', '合约配置未就绪'],
     ['FUTURE_UNKNOWN_FAILURE', '链上状态未确认'],
   ])('maps %s to an actionable blocked state', (code, title) => {
