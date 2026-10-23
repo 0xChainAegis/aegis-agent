@@ -126,6 +126,24 @@ of the already signed raw transaction until a terminal receipt appears. If the
 command reports that hash as unresolved, inspect it on Sepolia before rerunning
 so a delayed first broadcast cannot be mistaken for permission to pay twice.
 
+The client policy-boundary suite runs against disposable local contracts and
+intercepted failure responses, so it can safely mutate permissions and Mock
+Feed states without pretending those faults occurred on the public Feed:
+
+```bash
+npm run test:e2e:wallet
+```
+
+It covers automatic execution, Owner approval, cancellation, a non-allowlisted
+recipient, the hard per-transaction limit, invalid Chainlink prices,
+unauthorized/frozen executors, readable rejection reasons, disabled confirmation
+and the absence of a client write while the service is unsafe. Public Sepolia
+coverage remains split deliberately: the default policy command evaluates
+read-only boundaries against the real contracts and Feed, while the explicit
+one-wei command proves one actual execution. Negative, zero, future and forced
+stale Feed rounds are local fault injection because the public Chainlink Feed
+must not and cannot be mutated by this project.
+
 Public `/api/v1/config` and `/health` share a bounded readiness check on Sepolia. Initial or expired checks return a non-ready status, disabling wallet actions. A completed result remains a display proof for at most fifteen seconds; after five seconds, the next read starts one background refresh without delaying the still-valid result. Failure replaces readiness immediately; results are never served ready past the hard expiry. Responses include check completion time and cache age, which are not a claim of current block finality. These display checks never replace fresh preview, execution or Owner-approval checks.
 
 ## Acceptance on the actual presenting computer
