@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "verified": true,
+  "verifiedAt": "2026-10-22T11:40:18.958Z",
+  "source": "independent_read_only_sepolia_rpc",
+  "chainId": 11155111,
+  "rpc": "https://ethereum-sepolia-rpc.publicnode.com",
+  "transactionHash": "0x47340b28f1b5eaa11c4ce8e2ffadc2937dfb0f3d55ffb35add32c40fb2bfcec2",
+  "requestHash": "0x6494a3827ff2fb7ae32316a5ad045eb6db2d5fe988687b4ff86fc39ab7765f9d",
+  "amountWei": "100000000000000",
+  "amountEth": "0.0001",
+  "deployment": {
+    "chainId": 11155111,
+    "abiVersion": "aegis.native-policy.v2",
+    "walletAddress": "0xD7FD1c334c24FcAb35cF6200F470ab8F238347E8",
+    "policyEngineAddress": "0xa3678d47db5ca812FA3D7f5B1823A894720bE97C",
+    "agentAddress": "0xB9E9E2a7F26D135f5A51B3e785A844b3C12a51c3",
+    "recipientAddress": "0xB2a6b60D51A24a8Dc7DFCE8A2be0a64188f7A87F",
+    "ownerAddress": "0x17cB337e22e6B0F1471a8ff0491198dfF2882913"
+  },
+  "receipt": {
+    "status": 1,
+    "blockNumber": "11969287",
+    "blockHash": "0x6cd15e403205ec614423e24c2f6bae8363acba6231d6bd6d7dc18dd267885c2e",
+    "blockTimestamp": "2026-10-22T11:36:36.000Z",
+    "confirmationsObserved": "19",
+    "gasUsed": "1216072",
+    "effectiveGasPriceWei": "37",
+    "feeWei": "44994664",
+    "feeEth": "0.000000000044994664"
+  },
+  "walletEvent": {
+    "emitter": "0xD7FD1c334c24FcAb35cF6200F470ab8F238347E8",
+    "name": "NativeTransferExecuted",
+    "logIndex": "391",
+    "requestHash": "0x6494a3827ff2fb7ae32316a5ad045eb6db2d5fe988687b4ff86fc39ab7765f9d",
+    "attestationId": "1",
+    "agent": "0xB9E9E2a7F26D135f5A51B3e785A844b3C12a51c3",
+    "to": "0xB2a6b60D51A24a8Dc7DFCE8A2be0a64188f7A87F",
+    "amountWei": "100000000000000",
+    "costUsd6": "240072",
+    "roundId": "18446744073709588605",
+    "updatedAt": "1792667160",
+    "policyVersion": "2"
+  },
+  "policyEvent": {
+    "emitter": "0xa3678d47db5ca812FA3D7f5B1823A894720bE97C",
+    "name": "BudgetConsumed",
+    "logIndex": "389",
+    "requestHash": "0x6494a3827ff2fb7ae32316a5ad045eb6db2d5fe988687b4ff86fc39ab7765f9d",
+    "actionType": "0",
+    "actor": "0xB9E9E2a7F26D135f5A51B3e785A844b3C12a51c3",
+    "decision": "1",
+    "costUsd6": "240072",
+    "day": "20748",
+    "spentUsd6": "240072"
+  },
+  "balances": {
+    "wallet": {
+      "beforeWei": "5000000000000000",
+      "afterWei": "4900000000000000",
+      "deltaWei": "-100000000000000"
+    },
+    "executor": {
+      "beforeWei": "5000000000000000",
+      "afterWei": "4999999955005336",
+      "deltaWei": "-44994664"
+    },
+    "recipient": {
+      "beforeWei": "0",
+      "afterWei": "100000000000000",
+      "deltaWei": "100000000000000"
+    }
+  },
+  "checks": {
+    "receiptSuccess": true,
+    "transactionHash": true,
+    "canonicalBlock": true,
+    "configuredSenderAndWallet": true,
+    "calldataRecipientAndAmount": true,
+    "requestHashBound": true,
+    "walletEventActorRecipientAndAmount": true,
+    "walletPolicyVersion": true,
+    "policyActorAndAction": true,
+    "matchingCostAndCumulativeSpend": true,
+    "recipientBalanceIncreasedExactly": true,
+    "walletBalanceDecreasedExactly": true,
+    "executorPaidExactReceiptFee": true
+  },
+  "finality": "mined_confirmations_are_not_irreversible_finality",
+  "evidenceScope": "One user-confirmed Sepolia payment, not a live-model or full-security acceptance result"
+}
