@@ -98,6 +98,7 @@ export function chainError(error: unknown): ApiError {
     [/per.?tx|per.?transfer|single/i, 'PER_TX_LIMIT', 422],
     [/version|policy changed/i, 'POLICY_CHANGED', 409],
     [/deadline|expired/i, 'QUOTE_EXPIRED', 409],
+    [/ORACLE_(BAD_ANSWER|INCOMPLETE_ROUND|BAD_TIMESTAMP|DECIMALS_CHANGED|NOT_LOCKED)/i, 'FEED_UNAVAILABLE', 503],
     [/max.*cost|slippage|quote|price moved/i, 'REQUOTE_REQUIRED', 409],
     [/REQUEST_ALREADY_CONSUMED|replay|nonce/i, 'NONCE_CONFLICT', 409],
     [/insufficient|balance/i, 'INSUFFICIENT_FUNDS', 422],
@@ -158,7 +159,16 @@ export class ViemGateway implements Gateway {
       if (!quote[3] || quote[3] > timestamp || timestamp - quote[3] > maxAge) throw new ApiError(503, 'FEED_STALE', 'Feed 超过合约 freshness 限制');
       const funded = BigInt(snapshot.walletBalanceWei) > 0n && BigInt(snapshot.agentBalanceWei) > 0n;
       return { ready: funded, ...(!funded ? { code: 'FUNDING_REQUIRED', message: '资金池或执行账户需要测试 ETH' } : {}), rpcChainId: this.config.chainId, contractsDeployed: true, deploymentBindingsVerified: true, executorAuthorized: true, executorConfigured: true, agentTier: Number(agentTier), feedFresh: true, walletFunded: BigInt(snapshot.walletBalanceWei) > 0n, executorFunded: BigInt(snapshot.agentBalanceWei) > 0n };
-    } catch (error) { const result = chainError(error); return { ready: false, code: result.code, message: result.message, ...(result.code === 'FEED_STALE' && Object.keys(verifiedStructure).length ? { ...verifiedStructure, feedFresh: false } : {}) }; }
+    } catch (error) {
+      const result = chainError(error);
+      const priceFailure = result.code === 'FEED_STALE' || result.code === 'FEED_UNAVAILABLE';
+      return {
+        ready: false,
+        code: result.code,
+        message: result.message,
+        ...(priceFailure && Object.keys(verifiedStructure).length ? { ...verifiedStructure, feedFresh: false } : {}),
+      };
+    }
   }
   async snapshot(): Promise<Snapshot> {
     try {

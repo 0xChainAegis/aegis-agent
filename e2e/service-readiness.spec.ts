@@ -117,6 +117,23 @@ test('expired price preserves verified read-only balances and blocks preparation
   expect(writes).toEqual([]);
 });
 
+const policySafetyCases: { name: string; code: string; title: string }[] = [
+  { name: 'invalid Chainlink price', code: 'FEED_UNAVAILABLE', title: 'Chainlink 价格源不可用' },
+  { name: 'unauthorized executor', code: 'EXECUTOR_UNAUTHORIZED', title: '执行账户不可用' },
+  { name: 'frozen executor', code: 'AGENT_FROZEN', title: '执行账户不可用' },
+];
+for (const { name, code, title } of policySafetyCases) {
+  test(`${name} remains read-only and cannot create a client payment`, async ({ page }) => {
+    const { writes } = await fixture(page, { ...verified, ready: false, code }, true);
+    await expect(page.getByTestId('service-banner')).toContainText(title);
+    await expect(page.getByTestId('reserve-balance')).toHaveText('0.001 ETH');
+    await lowReserve(page);
+    await expect(page.getByTestId('send-intent')).toBeDisabled();
+    await expect(page.getByTestId('reserve-prepare')).toBeDisabled();
+    expect(writes).toEqual([]);
+  });
+}
+
 test('funding requirement has an actionable message and permits read-only connection', async ({ page }) => {
   const { writes } = await fixture(page, { ...verified, ready: false, code: 'FUNDING_REQUIRED', walletFunded: false }, true);
   await expect(page.getByTestId('service-banner')).toContainText('测试 ETH 余额不足');

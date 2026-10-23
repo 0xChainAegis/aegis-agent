@@ -86,6 +86,16 @@ export function serviceReadiness(config: unknown, context: ServiceContext = {}):
     message: '最新价格超过合约允许的新鲜度，付款已暂停。链和合约核对通过时仍可登录查看余额。',
     actionLabel: '重新检查报价', canConnect: verified, canPay: false,
   });
+  if (['FEED_UNAVAILABLE', 'ORACLE_UNAVAILABLE', 'INVALID_PRICE'].includes(code)) return status({
+    phase: 'limited', tone: 'amber', code, title: 'Chainlink 价格源不可用',
+    message: '价格为零、负数、未来时间或无法读取时，付款已暂停。链和合约核对通过时仍可登录查看余额。',
+    actionLabel: '重新检查价格源', canConnect: verified, canPay: false,
+  });
+  if (['EXECUTOR_UNAUTHORIZED', 'AGENT_FROZEN'].includes(code)) return status({
+    phase: 'limited', tone: 'amber', code, title: '执行账户不可用',
+    message: '执行账户未获授权、已冻结或仅可读取，付款已暂停。Owner 仍可登录查看当前状态。',
+    actionLabel: '修复权限后重试', canConnect: verified, canPay: false,
+  });
   if (code === 'FUNDING_REQUIRED') return status({
     phase: 'limited', tone: 'amber', code, title: '测试 ETH 余额不足',
     message: '资金池或执行账户需要补充测试 ETH，付款已暂停。仍可登录查看当前余额。',

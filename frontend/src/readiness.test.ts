@@ -26,6 +26,9 @@ describe('service readiness permissions', () => {
 
   it.each([
     ['FEED_STALE', 'Chainlink 报价待更新'],
+    ['FEED_UNAVAILABLE', 'Chainlink 价格源不可用'],
+    ['EXECUTOR_UNAUTHORIZED', '执行账户不可用'],
+    ['AGENT_FROZEN', '执行账户不可用'],
     ['FUNDING_REQUIRED', '测试 ETH 余额不足'],
   ])('allows verified %s read-only connection while blocking payment', (code, title) => {
     const result = serviceReadiness({ ...config, readiness: { ...structural, ready: false, code } });

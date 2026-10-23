@@ -41,7 +41,12 @@ test('real local chain: auto payment, owner approval, cancel, hard block, eviden
  const cancelledEvidence=await page.request.get(`/api/v1/tasks/${cancelled.taskId}/evidence`,{headers:{Authorization:`Bearer ${await token(page)}`}}).then(r=>r.json());
  expect(cancelledEvidence.policy).toMatchObject({consumed:false,verified:false,state:'NOT_CONSUMED'});
  await close(page);
- const blocked=await preview(page,config.recipientAddress,'0.004');expect(blocked.status).toBe('BLOCKED');await expect(page.getByTestId('confirm-transfer')).toBeDisabled();
+ const otherRecipient='0x9000000000000000000000000000000000000009';
+ const recipientBlocked=await preview(page,otherRecipient,'0.001');expect(recipientBlocked.status).toBe('BLOCKED');expect(recipientBlocked.reasonCodes).toContain('NOT_ALLOWLISTED');
+ await expect(page.getByRole('dialog',{name:'操作详情'}).getByText('收款地址不在允许名单中',{exact:true})).toBeVisible();await expect(page.getByTestId('confirm-transfer')).toBeDisabled();
+ await close(page);
+ const blocked=await preview(page,config.recipientAddress,'0.004');expect(blocked.status).toBe('BLOCKED');expect(blocked.reasonCodes).toContain('PER_TX_LIMIT');
+ await expect(page.getByRole('dialog',{name:'操作详情'}).getByText(/超过单次硬上限/)).toBeVisible();await expect(page.getByTestId('confirm-transfer')).toBeDisabled();
  expect(BigInt(await rpc('eth_getBalance',[config.recipientAddress,'latest']))-before).toBe(3_000_000_000_000_000n);
  await close(page);await page.reload();await expect(page.locator(`[data-task-id="${queued.taskId}"]`).first()).toBeVisible();
  await page.screenshot({path:testInfo.outputPath('wallet-desktop.png'),fullPage:true});

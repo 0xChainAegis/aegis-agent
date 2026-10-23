@@ -81,6 +81,94 @@ verifies chain ID, deployed bytecode, bindings, roles, Chainlink freshness and
 funding. It never signs or broadcasts a transaction. A successful result proves
 readiness at the reported block, not that a web payment has been accepted.
 
+Run the read-only policy regression against the same deployment with:
+
+```bash
+npm run test:sepolia:policy
+```
+
+This command reads one observed Sepolia block and calls `PolicyEngine.evaluate`
+with dynamically priced boundary requests. It verifies the configured Feed
+binding and freshness, daily-budget accounting, the exact automatic/approval
+boundary, unauthorized agents, non-allowlisted recipients, zero amounts,
+expired requests, policy-version changes, quote caps, the hard per-transaction
+limit, and the explicit rejection of subscription and CCIP actions that are not
+implemented yet. The report contains only public addresses and chain evidence;
+it never reads a signer key, signs, broadcasts or spends Sepolia ETH.
+
+The public Chainlink Feed cannot safely be forced to publish a negative, zero,
+future or stale round. Those fault-injection cases remain deterministic Hardhat
+tests using `MockV3Aggregator`; the Sepolia command verifies the real Feed's
+current round and age without misrepresenting a local fault as public-testnet
+evidence. A daily-limit rejection can only be exercised on the shared Sepolia
+deployment after its remaining daily budget falls below the per-transaction
+cap, so the read-only command always verifies the on-chain spent/remaining
+accounting and leaves destructive budget exhaustion out of the default run.
+
+After the read-only command succeeds, an explicitly authorized one-wei write
+smoke is available:
+
+```bash
+npm run test:sepolia:policy -- --write --confirm-spend
+```
+
+Both flags are mandatory. This command signs with the configured executor,
+broadcasts one Wallet request that transfers exactly **1 wei** to the configured
+allowlisted recipient, and spends executor gas. It verifies the deterministic
+transaction hash, the matching Wallet execution and PolicyEngine
+`BudgetConsumed` event, request-hash binding, exact Wallet/recipient balance
+delta and daily-budget delta. The Owner key is neither read nor required for
+this automatic-boundary case.
+
+Run only one backend writer for this executor. If broadcast returns an
+ambiguous timeout, the checker never signs a replacement: it follows the hash
+of the already signed raw transaction until a terminal receipt appears. If the
+command reports that hash as unresolved, inspect it on Sepolia before rerunning
+so a delayed first broadcast cannot be mistaken for permission to pay twice.
+
+For a payment above the automatic threshold, use the web UI so the executor
+queues the request and the configured Owner signs `approveAndExecute` in the
+browser wallet. Record both the queue transaction hash and the Owner approval
+transaction hash. Afterwards, produce a read-only machine-verifiable report:
+
+```bash
+npm run verify:sepolia:approval -- \
+  --queue-tx 0xQUEUE_TRANSACTION_HASH \
+  --approval-tx 0xOWNER_APPROVAL_TRANSACTION_HASH
+```
+
+This verifier never requests a private key, signs or broadcasts. It checks that
+the first transaction came from the configured executor and called the deployed
+Wallet, that its `NativeTransferQueued` event matches the calldata, and that the
+second transaction came from the configured Owner. It then requires matching
+`NativeTransferExecuted` and PolicyEngine `BudgetConsumed` evidence with the
+same request hash, attestation, recipient and amount. The report records the
+final policy decision: it is normally `REQUIRE_APPROVAL`, but may safely become
+`ALLOW` if the price falls below the automatic threshold while the queued
+request waits. The queue and Owner transaction still prove the approval path.
+Empty, reverted or unrelated hashes fail closed.
+
+The client policy-boundary suite runs against disposable local contracts and
+intercepted failure responses, so it can safely mutate permissions and Mock
+Feed states without pretending those faults occurred on the public Feed:
+
+```bash
+npm run test:e2e:wallet
+```
+
+It covers automatic execution, Owner approval, cancellation, a non-allowlisted
+recipient, the hard per-transaction limit, invalid Chainlink prices,
+unauthorized/frozen executors, readable rejection reasons, disabled confirmation
+and the absence of a client write while the service is unsafe. The invalid-price
+case changes the deployed local Mock Feed through real Hardhat transactions for
+zero, negative, future and stale values, checks the actual API and browser, and
+restores the Feed after every case. Public Sepolia
+coverage remains split deliberately: the default policy command evaluates
+read-only boundaries against the real contracts and Feed, while the explicit
+one-wei command proves one actual execution. Negative, zero, future and forced
+stale Feed rounds are local fault injection because the public Chainlink Feed
+must not and cannot be mutated by this project.
+
 Public `/api/v1/config` and `/health` share a bounded readiness check on Sepolia. Initial or expired checks return a non-ready status, disabling wallet actions. A completed result remains a display proof for at most fifteen seconds; after five seconds, the next read starts one background refresh without delaying the still-valid result. Failure replaces readiness immediately; results are never served ready past the hard expiry. Responses include check completion time and cache age, which are not a claim of current block finality. These display checks never replace fresh preview, execution or Owner-approval checks.
 
 ## Acceptance on the actual presenting computer
