@@ -37,6 +37,12 @@
 
 浏览器已留存桌面浅色/手机暗色截图；手机 E2E 补充滚动后末尾输入与操作按钮可达性检查。视觉核对未见明显横向溢出；Unix 秒输入仍偏开发工具体验，尚非面向普通用户的最终产品表单。
 
+## CI 干净环境修复
+
+首次 GitHub CI 在 6 项订阅证据/审批单元测试中报 `DEPLOYMENT_MISSING`：测试意外继承了本机被忽略的 `localhost.json` 所带来的 `deploymentReady` 状态。修复仅在这两个 RPC stub 测试的配置中显式声明 `deploymentReady: true`；未修改生产 `requireChain`、未上传部署文件、未跳过断言。
+
+已实际临时移走本机部署文件并在 finally 中还原：修复前 6 失败，修复后 6 通过；无部署文件的完整 `npm run check` 退出 0，仍为 464 项通过。`test:local-mock` 11 项通过。额外的 Python launcher 测试在本机 Windows 为 13 通过、1 失败，原因是既有 `/tools` 与 Windows 路径规范化断言不同；该文件本次未改动，Linux CI 结果单独核验，不能用本地结果代替。
+
 ## 安全边界和未完成事项
 
 - **仅本地链 31337 的 API/UI 启用订阅**。未发送 Sepolia、LINK 或 CCIP 交易；阶段 2 未开始。
