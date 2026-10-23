@@ -1,6 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 import { encodeFunctionData, parseAbi } from 'viem';
+import { z } from 'zod';
 import { authed, balanceOf, config, login, rpc, tasks, token, trackWrites } from './reserve-helpers';
+import { subscriptionListSchema, subscriptionRecordSchema } from '../frontend/src/subscriptions';
 
 // Real Hardhat + backend + browser. No route fulfillment, mock success, shared IDs,
 // ordered parent tests or pre-existing plan/payment is used by any of these four cases.
@@ -10,15 +12,24 @@ const walletAbi = parseAbi([
   'function nextNonce(address agent) view returns(uint256)', 'function policyVersion() view returns(uint64)',
 ]);
 const amountWei = 100_000_000_000_000n; // 0.0001 ETH, $0.30 under the local $3000 fixture.
+const addressSchema=z.string().regex(/^0x[0-9a-fA-F]{40}$/);
+const e2eConfigSchema=z.looseObject({mode:z.literal('local_chain'),chainId:z.literal(31337),walletAddress:addressSchema,ownerAddress:addressSchema,agentAddress:addressSchema,recipientAddress:addressSchema,capabilities:z.looseObject({subscriptions:z.literal(true)})});
+type E2eConfig=z.infer<typeof e2eConfigSchema>;
+type E2ePlan=z.infer<typeof subscriptionRecordSchema>;
 async function post(page: Page, path: string, body: object) {
   return page.request.post(`/api/v1${path}`, { headers: { Authorization: `Bearer ${await token(page)}`, 'Idempotency-Key': crypto.randomUUID() }, data: body });
 }
 async function chainTime(): Promise<number> { return Number(BigInt((await rpc('eth_getBlockByNumber', ['latest', false])).timestamp)); }
-async function record(page: Page, id: string) { return (await authed(page, '/api/v1/subscriptions')).subscriptions.find((record: any) => record.subscriptionId === id); }
+async function record(page: Page, id: string) {
+  const records=subscriptionListSchema.parse(await authed(page, '/api/v1/subscriptions')).subscriptions;
+  const found=records.find(item=>item.subscriptionId===id);
+  if(!found) throw new Error(`Subscription ${id} was not returned by the API`);
+  return found;
+}
 async function refresh(page: Page) { await page.locator('[data-action="refresh"]').first().click(); await expect(page.getByTestId('subscription-preview')).toBeEnabled(); }
 async function createPlan(page: Page, overrides: { amount?: string; cap?: string; duration?: number } = {}) {
   await login(page);
-  const cfg = await config(page);
+  const cfg = e2eConfigSchema.parse(await config(page));
   expect(cfg.mode).toBe('local_chain'); expect(cfg.chainId).toBe(31337); expect(cfg.capabilities.subscriptions).toBe(true);
   await page.locator('[data-nav="subscriptions"]').click();
   const start = Math.max(await chainTime(), Math.floor(Date.now() / 1000)) - 1;
@@ -34,7 +45,7 @@ async function createPlan(page: Page, overrides: { amount?: string; cap?: string
   const observed = page.waitForResponse(r => r.url().endsWith('/subscriptions/observed') && r.request().method() === 'POST');
   await page.getByTestId('subscription-sign').click();
   const response = await observed; expect(response.ok()).toBe(true);
-  const plan = await response.json(); expect(plan.subscriptionId).toBeTruthy();
+  const plan = subscriptionRecordSchema.parse(await response.json()); expect(plan.subscriptionId).toBeTruthy();
   await expect(page.getByTestId(`subscription-record-${plan.subscriptionId}`)).toHaveAttribute('data-status', 'ACTIVE');
   expect(await balanceOf(cfg.recipientAddress)).toBe(before); expect((await record(page, plan.subscriptionId)).paidCount).toBe('0');
   return { cfg, plan, start, end };
@@ -60,10 +71,10 @@ async function control(page: Page, id: string, action: 'pause' | 'resume' | 'can
   await expect(page.getByRole('dialog', { name: /确认.*计划/ })).toHaveCount(0);
   return response.json();
 }
-async function call(cfg: any, functionName: 'nextNonce' | 'policyVersion') {
+async function call(cfg: E2eConfig, functionName: 'nextNonce' | 'policyVersion') {
   const value = await rpc('eth_call', [{ to: cfg.walletAddress, data: functionName === 'nextNonce' ? encodeFunctionData({ abi: walletAbi, functionName, args: [cfg.agentAddress] }) : encodeFunctionData({ abi: walletAbi, functionName }) }, 'latest']); return BigInt(value);
 }
-async function directPayMustReject(cfg: any, plan: any, occurrence: string, reason: RegExp) {
+async function directPayMustReject(cfg: E2eConfig, plan: E2ePlan, occurrence: string, reason: RegExp) {
   const data = encodeFunctionData({ abi: walletAbi, functionName: 'requestSubscriptionPayment', args: [BigInt(plan.subscriptionId), BigInt(occurrence), 10_000_000n, await call(cfg, 'nextNonce'), BigInt(await chainTime() + 300), await call(cfg, 'policyVersion'), `0x${'a'.repeat(64)}`] });
   await expect(rpc('eth_call', [{ from: cfg.agentAddress, to: cfg.walletAddress, data }, 'latest'])).rejects.toThrow(reason);
 }
@@ -113,7 +124,15 @@ test('finite subscription: Owner registers, pause/resume, each real payment need
   }
   await page.locator('.content').evaluate(element => { element.scrollTop = element.scrollHeight; });
   const lastAction = page.getByTestId(`subscription-record-${plan.subscriptionId}`).locator('[data-action="subscription-cancel"]');
-  expect(await lastAction.evaluate(element => { const box = element.getBoundingClientRect(); const nav = document.querySelector('.main-nav')!.getBoundingClientRect(); const content = document.querySelector('.content')!.getBoundingClientRect(); return box.top >= content.top && box.bottom <= Math.min(nav.top, content.bottom); })).toBe(true);
+  expect(await lastAction.evaluate(element => {
+    const box = element.getBoundingClientRect();
+    const nav = document.querySelector('.main-nav');
+    const content = document.querySelector('.content');
+    if (!(nav instanceof HTMLElement) || !(content instanceof HTMLElement)) return false;
+    const navBox = nav.getBoundingClientRect();
+    const contentBox = content.getBoundingClientRect();
+    return box.top >= contentBox.top && box.bottom <= Math.min(navBox.top, contentBox.bottom);
+  })).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('subscriptions-mobile-dark.png'), fullPage: true });
   expect(errors).toEqual([]);
 });

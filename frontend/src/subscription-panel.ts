@@ -14,7 +14,8 @@ type Hooks = {
   sign: (tx: Data) => Promise<string>;
   payment: (draft: Data, quote: Data) => void;
 };
-const esc = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+const htmlEntities: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const esc = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, character => htmlEntities[character] ?? character);
 const row = (label: string, value: unknown) => `<div class="detail-row"><span>${label}</span><div class="mono break-all">${esc(value)}</div></div>`;
 const labels: Record<string, string> = { ACTIVE: '有效', PAUSED: '已暂停', CANCELLED: '已取消', EXPIRED: '已到期', COMPLETED: '次数已用尽', NOT_STARTED: '尚未开始' };
 const utc = (seconds: unknown) => new Date(Number(seconds) * 1000).toISOString().replace('T', ' ').replace('.000Z', ' UTC');

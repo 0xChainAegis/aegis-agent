@@ -342,7 +342,16 @@ export class ViemGateway implements Gateway {
     try { receipt = await this.publicClient.getTransactionReceipt({ hash }); }
     catch (error) { if (/not found|could not be found/i.test(errorMessage(error))) return null; throw chainError(error); }
     const transaction = await this.publicClient.getTransaction({ hash });
-    const expected = role === 'request' && task.actionKind === 'SUBSCRIPTION' ? encodeFunctionData({abi:walletAbi,functionName:'requestSubscriptionPayment',args:this.subscriptionArgs(task,BigInt(task.requestNonce!))}) : role === 'request' ? encodeFunctionData({ abi: walletAbi, functionName: 'requestNativeTransfer', args: [task.recipient, BigInt(task.amountWei), BigInt(task.maxUsdCost6), BigInt(task.requestNonce!), BigInt(task.requestDeadlineSeconds), BigInt(task.policyVersion)] }) : this.ownerTx(task, role).data;
+    let expected: Hex;
+    if (role === 'request') {
+      const requestNonce = task.requestNonce;
+      if (requestNonce === null) throw new ApiError(409, 'NONCE_MISSING', '任务缺少已绑定的请求 nonce');
+      expected = task.actionKind === 'SUBSCRIPTION'
+        ? encodeFunctionData({ abi: walletAbi, functionName: 'requestSubscriptionPayment', args: this.subscriptionArgs(task, BigInt(requestNonce)) })
+        : encodeFunctionData({ abi: walletAbi, functionName: 'requestNativeTransfer', args: [task.recipient, BigInt(task.amountWei), BigInt(task.maxUsdCost6), BigInt(requestNonce), BigInt(task.requestDeadlineSeconds), BigInt(task.policyVersion)] });
+    } else {
+      expected = this.ownerTx(task, role).data;
+    }
     const sender = role === 'request' ? this.config.agentAddress : this.config.ownerAddress;
     if (!equal(transaction.from, sender) || !transaction.to || !equal(transaction.to, this.config.walletAddress) || !equal(transaction.input, expected) || transaction.value !== 0n) throw new ApiError(422, 'TX_BINDING_MISMATCH', '交易的 sender、合约、calldata 或金额不属于该任务');
     const evidence: TransactionEvidence = { role, hash, receiptStatus: receipt.status === 'success' ? 1 : 0, blockNumber: receipt.blockNumber.toString(), blockHash: receipt.blockHash, senderNonce: transaction.nonce.toString(), finality: 'mined' };
@@ -362,7 +371,9 @@ export class ViemGateway implements Gateway {
           if (role === 'cancel') walletEvent = { eventName: decoded.eventName, args };
           continue;
         }
-        if (task.actionKind === 'SUBSCRIPTION' ? !decoded.eventName.startsWith('SubscriptionPayment') || String(args.subscriptionId)!==task.subscriptionId || String(args.occurrenceIndex)!==task.occurrenceIndex || !equal(String(args.planHash),task.planHash!) : decoded.eventName.startsWith('SubscriptionPayment')) continue;
+        if (task.actionKind === 'SUBSCRIPTION') {
+          if (!task.planHash || !decoded.eventName.startsWith('SubscriptionPayment') || String(args.subscriptionId) !== task.subscriptionId || String(args.occurrenceIndex) !== task.occurrenceIndex || !equal(String(args.planHash), task.planHash)) continue;
+        } else if (decoded.eventName.startsWith('SubscriptionPayment')) continue;
         if (role === 'cancel' || !equal(String(args.agent), task.agentAddress) || !equal(String(args.to), task.recipient) || String(args.amountWei) !== task.amountWei || String(args.policyVersion) !== task.policyVersion) continue;
         if (decoded.eventName.endsWith('Queued') && (role !== 'request' || String(args.maxUsdCost6) !== task.maxUsdCost6 || String(args.deadline) !== String(task.requestDeadlineSeconds))) continue;
         walletEvent = { eventName: decoded.eventName, args };

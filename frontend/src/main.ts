@@ -804,7 +804,16 @@ app.addEventListener('click', event => {
   if (button.dataset.composer) { const parsed=z.enum(['natural','manual']).safeParse(button.dataset.composer); if (!parsed.success) return; state.composerMode = parsed.data; render(); return; }
   if (button.dataset.openTask) { void openTask(button.dataset.openTask); return; }
   if (button.dataset.copy) { void navigator.clipboard.writeText(button.dataset.copy).then(() => notify('已复制')).catch(() => notify('无法访问剪贴板，请手动复制。', true)); return; }
-  if (button.dataset.action?.startsWith('subscription-')) { if (!(button.dataset.action === 'subscription-preview' || button.dataset.action === 'subscription-pay' ? disabled() : !state.online || !canConnect() || !boundOwner() || state.refreshing || Boolean(state.busy)) || button.dataset.action === 'subscription-dismiss') void run('subscription', () => subscriptionPanel.action(button.dataset.action!, button.dataset.subscriptionId)); return; }
+  const subscriptionAction = button.dataset.action;
+  if (subscriptionAction?.startsWith('subscription-')) {
+    const actionDisabled = subscriptionAction === 'subscription-preview' || subscriptionAction === 'subscription-pay'
+      ? disabled()
+      : !state.online || !canConnect() || !boundOwner() || state.refreshing || Boolean(state.busy);
+    if (!actionDisabled || subscriptionAction === 'subscription-dismiss') {
+      void run('subscription', () => subscriptionPanel.action(subscriptionAction, button.dataset.subscriptionId));
+    }
+    return;
+  }
   switch (button.dataset.action) {
     case 'refresh': void refreshWithFeedback(); break;
     case 'connect': if (state.online && canConnect() && !state.refreshing) { state.walletPicker = true; discovery.refresh(); render(); } break;
