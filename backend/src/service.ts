@@ -10,6 +10,9 @@ import { type Gateway, type Quote, type Outcome, chainError } from './chain.js';
 import type { DraftInput } from './parser.js';
 import { createLlmClient, parseDraftWithLlm, type LlmIntentClient } from './llm.js';
 import { ApiError, Mutex } from './errors.js';
+import { planHash } from './plan.js';
+import type { SubscriptionConfig } from '@aegis/shared';
+interface SubscriptionReader { get(id:string):Promise<SubscriptionConfig> }
 
 export interface InternalTask extends Task {
   quoteId: string; rawTransaction?: Hex; senderNonce?: string; broadcastAttempts?: number;
@@ -26,6 +29,14 @@ function canonical(value: unknown): string {
 export class AegisService {
   readonly writes = new Mutex();
   readonly worker = new Mutex();
+  subscriptions?: SubscriptionReader;
+  private subscriptionCommitment(intent: Intent) {
+    const { status:_status,updatedAt:_updated,...frozen }=intent; return frozen;
+  }
+  private requirePlan(intent:Intent,quote:Quote,expected?:Hex) {
+    if(intent.actionKind!=='SUBSCRIPTION') return;
+    if(!expected || expected!==quote.planHash || planHash(this.subscriptionCommitment(intent),quote)!==expected) throw new ApiError(409,'PLAN_HASH_MISMATCH','订阅草稿或报价已变化，请重新预览');
+  }
   constructor(readonly config: Config, readonly store: Store, readonly chain: Gateway, readonly llmClient: LlmIntentClient | null = createLlmClient(config.llm)) {
     if (!config.deploymentReady) return;
     const namespace = { mode: config.mode, chainId: config.chainId, wallet: config.walletAddress.toLowerCase(), agent: config.agentAddress.toLowerCase(), owner: config.ownerAddress.toLowerCase() };
@@ -82,7 +93,13 @@ export class AegisService {
   }
   async createIntent(owner: Address, input: DraftInput): Promise<Intent> {
     const id = randomUUID(); const now = new Date().toISOString();
-    const intent: Intent = { ...await parseDraftWithLlm(input, this.config, undefined, this.llmClient), draftId: id, intentId: id, version: 1, revision: 1, createdAt: now, updatedAt: now };
+    let intent:Intent;
+    if(input.actionKind==='SUBSCRIPTION') {
+      if(!this.subscriptions || !input.subscriptionId || input.occurrenceIndex===undefined) throw new ApiError(422,'SUBSCRIPTION_CONFIG_REQUIRED','请提供已登记订阅与期号 subscription');
+      if(input.message || input.purpose || input.recipient || input.amountWei) throw new ApiError(400,'SUBSCRIPTION_FIELDS_DERIVED','订阅收款人与金额只从链上计划读取');
+      const subscription=await this.subscriptions.get(input.subscriptionId);
+      intent={draftId:id,intentId:id,version:1,revision:1,createdAt:now,updatedAt:now,status:'DRAFT',message:'',purpose:'',recipient:subscription.recipient,to:subscription.recipient,amountWei:subscription.amountWei,missingFields:[],question:null,parser:{kind:'rule_parser',model:null,configuredModel:null,fallback:false,reason:'STRUCTURED_SUBSCRIPTION'},actionKind:'SUBSCRIPTION',subscriptionId:input.subscriptionId,occurrenceIndex:input.occurrenceIndex,subscription};
+    } else intent = { ...await parseDraftWithLlm(input, this.config, undefined, this.llmClient), draftId: id, intentId: id, version: 1, revision: 1, createdAt: now, updatedAt: now };
     this.store.put('intent', id, owner, intent);
     return intent;
   }
@@ -93,6 +110,7 @@ export class AegisService {
   }
   async patchIntent(owner: Address, id: string, expected: number, input: DraftInput): Promise<Intent> {
     const previous = this.getIntent(owner, id);
+    if(previous.actionKind==='SUBSCRIPTION' || input.actionKind==='SUBSCRIPTION') throw new ApiError(409,'NEW_SUBSCRIPTION_DRAFT_REQUIRED','更改订阅请新建当期草稿');
     if (previous.version !== expected) throw new ApiError(409, 'REVISION_CONFLICT', '草稿已更新，请读取最新版本');
     if (this.store.list<InternalTask>('task', owner).some(task => task.draftId === id)) throw new ApiError(409, 'INTENT_ALREADY_SUBMITTED', '已提交的付款内容不能编辑；请新建草稿');
     const intent: Intent = { ...previous, ...await parseDraftWithLlm(input, this.config, previous, this.llmClient), version: previous.version + 1, revision: previous.version + 1, updatedAt: new Date().toISOString() };
@@ -104,12 +122,14 @@ export class AegisService {
     if (intent.version !== expected) throw new ApiError(409, 'REVISION_CONFLICT', '草稿已更新，请重新预览');
     if (!intent.recipient || !intent.amountWei || intent.missingFields.length) throw new ApiError(422, 'NEEDS_INPUT', '请先补齐地址、数额和单位', intent.missingFields);
     if (this.store.list<InternalTask>('task', owner).some(task => task.draftId === id)) throw new ApiError(409, 'INTENT_ALREADY_SUBMITTED', '该草稿已提交');
-    const quote: Quote = { ...await this.chain.preview(intent.recipient, intent.amountWei, maxUsdCost6), quoteId: randomUUID(), draftId: id, draftVersion: intent.version };
+    const result=intent.actionKind==='SUBSCRIPTION' ? await (()=>{if(!this.chain.previewSubscription) throw new ApiError(422,'SUBSCRIPTION_CONFIG_REQUIRED','订阅能力未配置'); return this.chain.previewSubscription(intent,maxUsdCost6);})() : await this.chain.preview(intent.recipient,intent.amountWei,maxUsdCost6);
+    const quote: Quote = { ...result, quoteId: randomUUID(), draftId: id, draftVersion: intent.version };
+    if(intent.actionKind==='SUBSCRIPTION') quote.planHash=planHash(this.subscriptionCommitment(intent),quote);
     this.store.put('quote', quote.quoteId, owner, quote);
     this.store.put('intent', id, owner, { ...intent, status: quote.status, updatedAt: new Date().toISOString() });
     return quote;
   }
-  submit(owner: Address, id: string, expected: number, quoteId: string): InternalTask {
+  submit(owner: Address, id: string, expected: number, quoteId: string, expectedPlanHash?:Hex): InternalTask {
     const existing = this.store.list<InternalTask>('task', owner).find(task => task.draftId === id && task.quoteId === quoteId);
     if (existing) {
       if (existing.draftVersion !== expected) throw new ApiError(409, 'REVISION_CONFLICT', '提交版本与原任务不一致');
@@ -118,12 +138,14 @@ export class AegisService {
     const intent = this.getIntent(owner, id);
     const quote = this.store.get<Quote>('quote', quoteId, owner);
     if (!quote || quote.draftId !== id || quote.draftVersion !== expected || intent.version !== expected) throw new ApiError(409, 'QUOTE_MISMATCH', '报价与当前草稿版本不一致');
+    this.requirePlan(intent,quote,expectedPlanHash);
     if (quote.status !== 'READY') throw new ApiError(422, 'POLICY_BLOCKED', '硬规则阻止该付款', quote.reasonCodes);
     if (quote.quoteExpiresAtSeconds <= Math.floor(Date.now() / 1000)) throw new ApiError(409, 'QUOTE_EXPIRED', '报价已过期，请重新预览并确认');
     if (quote.recipient !== intent.recipient || quote.amountWei !== intent.amountWei) throw new ApiError(409, 'INTENT_CHANGED', '报价动作与草稿不一致');
     if (this.store.list<InternalTask>('task', owner).some(task => task.draftId === id)) throw new ApiError(409, 'INTENT_ALREADY_SUBMITTED', '同一草稿只能提交一次');
     const now = new Date().toISOString(); const taskId = randomUUID();
     const task: InternalTask = {
+      ...(intent.actionKind==='SUBSCRIPTION'?{actionKind:'SUBSCRIPTION' as const,subscriptionId:intent.subscriptionId,occurrenceIndex:intent.occurrenceIndex,subscription:intent.subscription,planHash:quote.planHash}:{}),
       taskId, draftId: id, intentId: id, quoteId, draftVersion: expected, stateVersion: 1, status: 'SUBMITTING',
       chainId: this.config.chainId, walletAddress: this.config.walletAddress, ownerAddress: this.config.ownerAddress, agentAddress: this.config.agentAddress,
       recipient: quote.recipient, to: quote.recipient, amountWei: quote.amountWei, maxUsdCost6: quote.maxUsdCost6, previewCostUsd6: quote.costUsd6,
@@ -218,7 +240,9 @@ export class AegisService {
     };
     return {
       taskId: id, status: task.status, chainId: task.chainId, verification: task.verification,
-      intent: { draftId: task.draftId, draftVersion: task.draftVersion, walletAddress: task.walletAddress, agentAddress: task.agentAddress, recipient: task.recipient, amountWei: task.amountWei, maxUsdCost6: task.maxUsdCost6, policyVersion: task.policyVersion, requestNonce: task.requestNonce, requestDeadlineSeconds: task.requestDeadlineSeconds, requestHash: task.requestHash },
+      provenance: task.planHash ? {version:'aegis.draft-plan.v2',planHash:task.planHash,scope:'CONFIRMED_SUBSCRIPTION_DRAFT_AND_QUOTE'} : null,
+      subscription: task.subscription ?? null,
+      intent: { actionKind:task.actionKind ?? 'NATIVE_TRANSFER',subscriptionId:task.subscriptionId,occurrenceIndex:task.occurrenceIndex,planHash:task.planHash,draftId: task.draftId, draftVersion: task.draftVersion, walletAddress: task.walletAddress, agentAddress: task.agentAddress, recipient: task.recipient, amountWei: task.amountWei, maxUsdCost6: task.maxUsdCost6, policyVersion: task.policyVersion, requestNonce: task.requestNonce, requestDeadlineSeconds: task.requestDeadlineSeconds, requestHash: task.requestHash },
       attestationId: task.attestationId, transactions: task.transactions, outcome: task.eventData ?? null, previewPolicy, policy, configuredPriceSource,
       approvalMode: 'owner_approve_and_execute', finality: 'mined_is_not_irreversible', confirmationsRequired: 1,
       explorerBaseUrl: this.config.mode === 'testnet' ? 'https://sepolia.etherscan.io' : null,
@@ -234,6 +258,14 @@ export class AegisService {
       if (active) {
         try {
           if (!active.rawTransaction) {
+            const originalKind=this.getIntent(active.ownerAddress,active.draftId).actionKind ?? 'NATIVE_TRANSFER';
+            if(originalKind!==(active.actionKind ?? 'NATIVE_TRANSFER')) throw new ApiError(409,'PLAN_HASH_MISMATCH','任务动作类型与原草稿不一致');
+            if(active.actionKind==='SUBSCRIPTION') {
+              const original=this.getIntent(active.ownerAddress,active.draftId); const savedQuote=this.store.get<Quote>('quote',active.quoteId,active.ownerAddress);
+              if(!savedQuote) throw new ApiError(409,'PLAN_HASH_MISMATCH','报价丢失');
+              this.requirePlan(original,savedQuote,active.planHash);
+              if(active.subscriptionId!==original.subscriptionId || active.occurrenceIndex!==original.occurrenceIndex || active.recipient!==original.recipient || active.amountWei!==original.amountWei || active.maxUsdCost6!==savedQuote.maxUsdCost6 || active.policyVersion!==savedQuote.policyVersion || active.requestDeadlineSeconds!==savedQuote.requestDeadlineSeconds) throw new ApiError(409,'PLAN_HASH_MISMATCH','任务与确认计划不一致');
+            }
             const prepared = await this.chain.prepare(active);
             active.rawTransaction = prepared.rawTransaction; active.txHash = prepared.hash;
             active.senderNonce = prepared.senderNonce; active.requestNonce = prepared.requestNonce; active.requestHash = prepared.requestHash;

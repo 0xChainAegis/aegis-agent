@@ -234,6 +234,7 @@ export async function parseDraftWithLlm(
   // Parse first so a blocked input cannot regain complete fields through any
   // fallback, explicit-field request, or previous draft when the model is off.
   const authoritativeDraft = parseDraft(input, config.configuredModel, previous);
+  if (authoritativeDraft.parser.reason === 'ACTION_SCOPE_REQUIRED') return authoritativeDraft;
   if (authoritativeDraft.parser.reason === 'PROMPT_BLOCKED') {
     return { ...authoritativeDraft, parser: fallback('PROMPT_BLOCKED') };
   }

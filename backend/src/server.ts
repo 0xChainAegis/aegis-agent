@@ -4,18 +4,19 @@ import { z } from 'zod';
 import { isAddress, type Address, type Hex } from 'viem';
 import { SCHEMA_VERSION } from '@aegis/shared';
 import { AegisService } from './service.js';
-import { walletAbi, oracleAbi, policyEngineAbi } from './chain.js';
+import { walletAbi, oracleAbi, policyEngineAbi, ViemGateway } from './chain.js';
+import { SubscriptionManager, registrationSchema } from './subscriptions.js';
 import { ApiError } from './errors.js';
 import { PublicReadinessCache, readinessIdentity } from './readiness-cache.js';
 
 const address = z.string().refine(value => isAddress(value), 'Invalid Ethereum address');
 const integer = z.string().regex(/^[1-9]\d*$/).max(78).refine(value => /^[1-9]\d*$/.test(value) && BigInt(value) < 2n ** 256n, 'Amount exceeds uint256');
 const hash = z.string().regex(/^0x[0-9a-fA-F]{64}$/);
-const draftSchema = z.object({ message: z.string().max(4000).optional(), recipient: address.nullable().optional(), amountWei: integer.nullable().optional(), purpose: z.string().max(500).optional() }).strict();
+const draftSchema = z.object({ actionKind:z.enum(['NATIVE_TRANSFER','SUBSCRIPTION']).optional(),subscriptionId:integer.refine(v=>BigInt(v)<2n**64n).optional(),occurrenceIndex:z.string().regex(/^(0|[1-9]\d*)$/).max(20).refine(v=>BigInt(v)<2n**64n).optional(),message: z.string().max(4000).optional(), recipient: address.nullable().optional(), amountWei: integer.nullable().optional(), purpose: z.string().max(500).optional() }).strict();
 const revision = z.number().int().positive();
 const patchSchema = draftSchema.extend({ expectedRevision: revision }).strict();
 const previewSchema = z.object({ expectedRevision: revision, maxUsdCost6: integer.optional() }).strict();
-const submitSchema = z.object({ expectedRevision: revision, quoteId: z.string().uuid() }).strict();
+const submitSchema = z.object({ expectedRevision: revision, quoteId: z.string().uuid(), planHash:hash.optional() }).strict();
 const docs: Record<string, { title: string; markdown: string }> = {
   overview: { title: 'Aegis 运行钱包补给', markdown: '# Aegis\n\n读取运行钱包真实 ETH 余额，按用户设置的下限与目标建议补给金额。重新读取后生成预览，用户确认才提交。准备金设置保存在浏览器，后台不会自动监控或补款。\n\n自然语言只生成草稿。付款由 agent 在合约预算与收款范围内发起；超过自动额度的请求等待 owner 链上 approveAndExecute。审批时仍检查报价与硬预算。' },
   roles: { title: '角色与签名', markdown: '# 角色与签名\n\nOwner 用钱包签一次性登录消息，并在浏览器签规则修改、充值及高风险审批交易。登录不授权付款。后台只保存受限 agent 执行密钥，绝不保存 owner 私钥。\n\n当前是单 owner 资金池；Bearer 会话过期后需重新登录。' },
@@ -39,6 +40,9 @@ function publicRpc(rpcUrl: string) {
   return url.username || url.password || url.search || (url.pathname !== '/' && url.pathname !== '') ? null : rpcUrl;
 }
 export function createApiServer(service: AegisService) {
+  const subscriptions=service.chain instanceof ViemGateway ? new SubscriptionManager(service.config,service.store,service.chain) : undefined;
+  service.subscriptions=subscriptions;
+  const requireSubscriptions=()=>{if(!subscriptions) throw new ApiError(422,'SUBSCRIPTIONS_LOCAL_ONLY','订阅需要本地链 Gateway');return subscriptions;};
   const readinessCache = new PublicReadinessCache(() => service.chain.readiness(), () => readinessIdentity(service.config));
   const publicReadiness = () => service.config.mode === 'testnet' ? readinessCache.read() : service.chain.readiness();
   const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
@@ -83,7 +87,7 @@ export function createApiServer(service: AegisService) {
             llmEnabled: config.llm.mode !== 'off',
             timeoutMs: config.llm.timeoutMs,
           },
-          capabilities: { nativeEth: true, ownerApproval: 'owner_approve_and_execute', usdDecimals: 6, monitoring: false, x402: false },
+          capabilities: { subscriptions:subscriptions?await subscriptions.enabled():false,nativeEth: true, ownerApproval: 'owner_approve_and_execute', usdDecimals: 6, monitoring: false, x402: false },
           auth: { kind: 'personal_sign_challenge', domain: config.authDomain, chainId: config.chainId },
           docs: Object.keys(docs).map(slug => ({ slug, title: docs[slug].title, url: `/api/v1/docs/${slug}` })),
         }); return;
@@ -104,6 +108,7 @@ export function createApiServer(service: AegisService) {
       }
       const authorization = request.headers.authorization;
       const owner = service.authenticate(authorization?.startsWith('Bearer ') ? authorization.slice(7) : undefined);
+      if (request.method==='GET' && path==='/api/v1/subscriptions') {send(200,await requireSubscriptions().list(owner));return;}
       if (request.method === 'GET' && path === '/api/v1/wallets/current') { send(200, await service.chain.snapshot()); return; }
       if (request.method === 'GET' && path === '/api/v1/tasks') {
         send(200, { tasks: service.store.list<Parameters<typeof service.publicTask>[0]>('task', owner).map(task => service.publicTask(task)) }); return;
@@ -124,6 +129,13 @@ export function createApiServer(service: AegisService) {
         const raw = await readJson(request);
         const key = request.headers['idempotency-key'];
         const result = await service.idempotent(owner, `${request.method}:${path}`, Array.isArray(key) ? key[0] : key, raw, async () => {
+          if(request.method==='POST' && path==='/api/v1/subscriptions/preview')return {status:200,body:await requireSubscriptions().preview(owner,registrationSchema.parse(raw))};
+          if(request.method==='POST' && path==='/api/v1/subscriptions/observed'){const b=z.object({registrationId:z.string().uuid(),txHash:hash}).strict().parse(raw);return {status:200,body:await requireSubscriptions().observed(owner,b.registrationId,b.txHash as Hex)};}
+          const control=path.match(/^\/api\/v1\/subscriptions\/([1-9]\d*)\/(control-preview|control-observed)$/);
+          if(request.method==='POST' && control){
+            if(control[2]==='control-preview'){const b=z.object({action:z.enum(['pause','resume','cancel'])}).strict().parse(raw);return {status:200,body:await requireSubscriptions().controlPreview(owner,control[1],b.action)};}
+            const b=z.object({controlId:z.string().uuid(),txHash:hash}).strict().parse(raw);return {status:200,body:await requireSubscriptions().controlObserved(owner,control[1],b.controlId,b.txHash as Hex)};
+          }
           if (request.method === 'POST' && path === '/api/v1/intents') return { status: 201, body: await service.createIntent(owner, draftSchema.parse(raw)) };
           if (intentMatch) {
             const [, id, action] = intentMatch;
@@ -137,7 +149,7 @@ export function createApiServer(service: AegisService) {
             }
             if (request.method === 'POST' && action === 'submit') {
               const body = submitSchema.parse(raw);
-              return { status: 202, body: service.publicTask(service.submit(owner, id, body.expectedRevision, body.quoteId)) };
+              return { status: 202, body: service.publicTask(service.submit(owner, id, body.expectedRevision, body.quoteId,body.planHash as Hex|undefined)) };
             }
           }
           if (request.method === 'POST' && taskMatch?.[2] === 'observed-tx') {

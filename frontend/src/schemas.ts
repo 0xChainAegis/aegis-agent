@@ -43,6 +43,28 @@ export const ConfigResponseSchema = z.object({
   readiness: ReadinessSchema,
 }).passthrough();
 
+const positiveUint = (bits: number) => z.string().max(78).regex(/^[1-9]\d*$/).refine(value => /^[1-9]\d*$/.test(value) && value.length <= 78 && BigInt(value) < 2n ** BigInt(bits), '超出合约整数范围');
+
+/** Explicit UTC seconds and both finite boundaries; never infer a calendar month or mandate. */
+export const FiniteSubscriptionFormSchema = z.object({
+  recipient: AddressSchema,
+  amount: z.string().max(96).regex(/^(?:0|[1-9]\d*)(?:\.\d{1,18})?$/),
+  periodSeconds: positiveUint(64),
+  startAt: positiveUint(64),
+  endAt: positiveUint(64),
+  maxPayments: positiveUint(64),
+  periodCap: z.string().max(84).regex(/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/),
+  purpose: z.string().trim().max(500),
+}).strict().superRefine((value, context) => {
+  if (/^[1-9]\d*$/.test(value.startAt) && /^[1-9]\d*$/.test(value.endAt) && BigInt(value.endAt) <= BigInt(value.startAt)) context.addIssue({ code: 'custom', path: ['endAt'], message: '结束时间必须晚于开始时间' });
+  for (const [field, decimals] of [['amount', 18], ['periodCap', 6]] as const) {
+    if (!/^\d+(?:\.\d+)?$/.test(value[field]) || value[field].length > 96) continue;
+    const [whole, fraction = ''] = value[field].split('.');
+    const base = BigInt(whole + fraction.padEnd(decimals, '0'));
+    if (base <= 0n || base >= 2n ** 256n) context.addIssue({ code: 'custom', path: [field], message: '金额必须为合约范围内的正数' });
+  }
+});
+
 export const ApiObjectSchema = z.record(z.string(), z.unknown());
 export const SessionTokenSchema = z.string().max(16_384);
 
