@@ -1,12 +1,10 @@
 # Aegis native ETH contracts
 
-This implementation authorizes fixed native ETH payments through a shared,
-deterministic `AegisPolicyEngine` backed by a locked ETH/USD feed. It is a local
-integration MVP. ERC20 payments, subscriptions and CCIP are excluded from the
-wallet's execution path. Their action kinds are reserved in the engine so future
-executors can use the same policy and daily budget, but they currently fail
-closed as `UNSUPPORTED_ACTION`. `AegisCCIPSender` remains experimental source and
-is never deployed or granted access by the local deployment script.
+This implementation authorizes fixed native ETH payments and finite subscriptions
+through a shared deterministic `AegisPolicyEngine`. A policy-gated
+`AegisCCIPSender` is also implemented and contract-tested for allowlisted ERC20
+CCIP transfers. CCIP is not yet included in the default local or Sepolia
+deployment scripts and is not exposed by the HTTP/UI product flow.
 
 ## Local integration
 
@@ -90,6 +88,23 @@ design constrains the agent, not the owner.
 production oracle or recipient implementations. Tests exercise real local ETH
 balance changes and receipts, stale/invalid feed data, approval rechecks, shared
 budgets across concurrent agents, expiry, replay, rejection rollback and reentry.
+
+## CCIP contract stage
+
+`AegisCCIPSender` holds allowlisted ERC20 liquidity and native ETH for router
+fees. Agent requests bind the source token, amount, destination receiver, CCIP
+chain selector, maximum USD6 value, maximum native fee, nonce, deadline and
+policy version. The PolicyEngine prices the token with its locked token/USD feed
+and applies the same roles, recipient allowlist, automatic/Owner decision,
+per-action limit and UTC daily budget used by native payments and subscriptions.
+
+The Owner cannot override hard policy through approval. Execution requotes both
+the asset and router fee; a changed price, policy, route or fee can keep a queued
+request pending. Router failure rolls back budget, nonce and attestation changes.
+`CCIPTransferExecuted` plus the matching `BudgetConsumed` event is the source-side
+execution evidence. It proves submission to the configured router, not final
+delivery on the destination chain. The current mock router only supports local
+tests and must never be deployed.
 
 ## Sepolia deployment
 

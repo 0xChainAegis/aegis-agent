@@ -6,9 +6,8 @@ import {AegisAccessControl} from "./AegisAccessControl.sol";
 import {AegisPriceOracle} from "./AegisPriceOracle.sol";
 
 /// @notice Shared deterministic authorization and USD-budget policy for Aegis actions.
-/// @dev Native ETH and finite subscription payments share one daily budget.
-///      Subscription calls require consumer-namespaced registered context; CCIP
-///      and context-free subscription requests remain disabled.
+/// @dev Native ETH, finite subscription payments and CCIP token transfers share
+///      one daily budget. Subscription calls require registered context.
 contract AegisPolicyEngine is Ownable {
     enum ActionType { NativeTransfer, Subscription, CCIPTransfer }
     enum Decision { Reject, Allow, RequireApproval }
@@ -47,6 +46,8 @@ contract AegisPolicyEngine is Ownable {
     bytes32 public constant REASON_QUOTE_EXCEEDS_MAX = "QUOTE_EXCEEDS_MAX";
     bytes32 public constant REASON_PER_TX_LIMIT = "PER_TX_LIMIT";
     bytes32 public constant REASON_DAILY_LIMIT = "DAILY_LIMIT";
+    bytes32 public constant REASON_DESTINATION_CHAIN_NOT_ALLOWED = "DESTINATION_CHAIN_NOT_ALLOWED";
+    bytes32 public constant REASON_ASSET_NOT_SUPPORTED = "ASSET_NOT_SUPPORTED";
 
     AegisAccessControl public immutable acl;
     AegisPriceOracle public oracle;
@@ -211,7 +212,7 @@ contract AegisPolicyEngine is Ownable {
 
     function _evaluateSubscription(RiskRequest calldata request, uint64 id, uint64 occurrenceIndex) internal view returns (RiskResult memory result) {
         FiniteSubscription storage s = _subscriptions[msg.sender][id];
-        if (!s.exists || request.actionType != ActionType.Subscription || request.actor != s.agent || request.recipient != s.to || request.amount != s.amountWei) return _reject(result, "SUBSCRIPTION_CONTEXT_MISMATCH");
+        if (!s.exists || request.actionType != ActionType.Subscription || request.actor != s.agent || request.recipient != s.to || request.asset != address(0) || request.destinationChainSelector != 0 || request.amount != s.amountWei) return _reject(result, "SUBSCRIPTION_CONTEXT_MISMATCH");
         if (maxSubscriptionPeriodCapUsd6 == 0 || maxSubscriptionDurationSeconds == 0 || maxSubscriptionPayments == 0) return _reject(result, "SUBSCRIPTIONS_NOT_CONFIGURED");
         if (s.periodCapUsd6 > maxSubscriptionPeriodCapUsd6 || s.endAt - s.startAt > maxSubscriptionDurationSeconds || s.maxPayments > maxSubscriptionPayments) return _reject(result, "SUBSCRIPTION_POLICY_LIMIT");
         if (s.cancelled) return _reject(result, "SUBSCRIPTION_CANCELLED");
@@ -255,13 +256,19 @@ contract AegisPolicyEngine is Ownable {
 
     function _evaluate(RiskRequest calldata request) internal view returns (RiskResult memory result) {
         (, result.remainingUsd6, ) = spendingToday();
-        if (request.actionType != ActionType.NativeTransfer || request.asset != address(0) || request.destinationChainSelector != 0) return _reject(result, REASON_UNSUPPORTED_ACTION);
+        if (request.actionType == ActionType.NativeTransfer) {
+            if (request.asset != address(0) || request.destinationChainSelector != 0) return _reject(result, REASON_UNSUPPORTED_ACTION);
+        } else if (request.actionType == ActionType.CCIPTransfer) {
+            if (request.asset == address(0) || request.destinationChainSelector == 0) return _reject(result, REASON_UNSUPPORTED_ACTION);
+            if (!allowedDestinationChains[request.destinationChainSelector]) return _reject(result, REASON_DESTINATION_CHAIN_NOT_ALLOWED);
+        } else {
+            return _reject(result, REASON_UNSUPPORTED_ACTION);
+        }
         return _evaluateCommon(request);
     }
 
     function _evaluateCommon(RiskRequest calldata request) internal view returns (RiskResult memory result) {
         (, result.remainingUsd6, ) = spendingToday();
-        if (request.asset != address(0) || request.destinationChainSelector != 0) return _reject(result, REASON_UNSUPPORTED_ACTION);
         if (!acl.hasRole(acl.AGENT_ROLE(), request.actor)) return _reject(result, REASON_NOT_AGENT);
         AegisAccessControl.Tier tier = acl.tierOf(request.actor);
         if (tier == AegisAccessControl.Tier.Frozen || tier == AegisAccessControl.Tier.ReadOnly) return _reject(result, REASON_TIER_BLOCKED);
@@ -270,7 +277,8 @@ contract AegisPolicyEngine is Ownable {
         if (request.amount == 0 || request.maxUsdCost6 == 0) return _reject(result, REASON_ZERO_AMOUNT);
         if (block.timestamp > request.deadline) return _reject(result, REASON_REQUEST_EXPIRED);
         if (request.policyVersion != policyVersion) return _reject(result, REASON_POLICY_VERSION_MISMATCH);
-        (result.costUsd6, result.roundId, , result.updatedAt, ) = oracle.latestEthQuote(request.amount);
+        if (oracle.feeds(request.asset) == address(0)) return _reject(result, REASON_ASSET_NOT_SUPPORTED);
+        (result.costUsd6, result.roundId, , result.updatedAt, ) = oracle.latestQuote(request.asset, request.amount);
         if (block.timestamp - result.updatedAt > maxPriceAge) return _reject(result, REASON_ORACLE_STALE);
         if (result.costUsd6 > request.maxUsdCost6) return _reject(result, REASON_QUOTE_EXCEEDS_MAX);
         if (result.costUsd6 > perTxLimitUsd6) return _reject(result, REASON_PER_TX_LIMIT);
@@ -300,6 +308,8 @@ contract AegisPolicyEngine is Ownable {
         if (result.reasonCode == REASON_QUOTE_EXCEEDS_MAX) revert("QUOTE_EXCEEDS_MAX");
         if (result.reasonCode == REASON_PER_TX_LIMIT) revert("PER_TX_LIMIT");
         if (result.reasonCode == REASON_DAILY_LIMIT) revert("DAILY_LIMIT");
+        if (result.reasonCode == REASON_DESTINATION_CHAIN_NOT_ALLOWED) revert("DESTINATION_CHAIN_NOT_ALLOWED");
+        if (result.reasonCode == REASON_ASSET_NOT_SUPPORTED) revert("ASSET_NOT_SUPPORTED");
         if (result.reasonCode == bytes32("PERIOD_LIMIT")) revert("PERIOD_LIMIT");
         if (result.reasonCode == bytes32("SUBSCRIPTION_EXPIRED")) revert("SUBSCRIPTION_EXPIRED");
         if (result.reasonCode == bytes32("SUBSCRIPTION_CANCELLED")) revert("SUBSCRIPTION_CANCELLED");
