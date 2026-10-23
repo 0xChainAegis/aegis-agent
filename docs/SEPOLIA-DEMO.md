@@ -105,6 +105,27 @@ deployment after its remaining daily budget falls below the per-transaction
 cap, so the read-only command always verifies the on-chain spent/remaining
 accounting and leaves destructive budget exhaustion out of the default run.
 
+After the read-only command succeeds, an explicitly authorized one-wei write
+smoke is available:
+
+```bash
+npm run test:sepolia:policy -- --write --confirm-spend
+```
+
+Both flags are mandatory. This command signs with the configured executor,
+broadcasts one Wallet request that transfers exactly **1 wei** to the configured
+allowlisted recipient, and spends executor gas. It verifies the deterministic
+transaction hash, the matching Wallet execution and PolicyEngine
+`BudgetConsumed` event, request-hash binding, exact Wallet/recipient balance
+delta and daily-budget delta. The Owner key is neither read nor required for
+this automatic-boundary case.
+
+Run only one backend writer for this executor. If broadcast returns an
+ambiguous timeout, the checker never signs a replacement: it follows the hash
+of the already signed raw transaction until a terminal receipt appears. If the
+command reports that hash as unresolved, inspect it on Sepolia before rerunning
+so a delayed first broadcast cannot be mistaken for permission to pay twice.
+
 Public `/api/v1/config` and `/health` share a bounded readiness check on Sepolia. Initial or expired checks return a non-ready status, disabling wallet actions. A completed result remains a display proof for at most fifteen seconds; after five seconds, the next read starts one background refresh without delaying the still-valid result. Failure replaces readiness immediately; results are never served ready past the hard expiry. Responses include check completion time and cache age, which are not a claim of current block finality. These display checks never replace fresh preview, execution or Owner-approval checks.
 
 ## Acceptance on the actual presenting computer

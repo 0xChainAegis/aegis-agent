@@ -27,7 +27,7 @@
     "test:backend": "npm run test --workspace backend",
     "test:frontend": "npm run test --workspace frontend",
     "check:sepolia": "npm run check:sepolia --workspace backend",
-    "test:sepolia:policy": "npm run test:sepolia:policy --workspace backend",
+    "test:sepolia:policy": "npm run test:sepolia:policy --workspace backend --",
     "test": "npm run test:contracts && npm run test:backend && npm run test:frontend",
     "test:e2e": "npm run test:e2e:wallet && npm run test:e2e:reserve",
     "test:e2e:wallet": "playwright test e2e/api-timeouts.spec.ts e2e/service-readiness.spec.ts e2e/wallet-provider.spec.ts e2e/wallet.spec.ts",
