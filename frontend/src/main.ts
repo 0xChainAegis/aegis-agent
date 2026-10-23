@@ -561,7 +561,13 @@ async function refreshSnapshot(revision: number, initial: boolean) {
         } else {
           // A failed snapshot is "unavailable", never a stale or zero balance.
           if (index === 0) { state.wallet = null; state.walletError = errorMessage(result.reason); }
-          if (result.reason instanceof ApiError && result.reason.status === 401) { clearWalletSession(); return; }
+          if (result.reason instanceof ApiError && result.reason.status === 401) {
+            clearWalletSession();
+            // This refresh owns the logout transition; its old revision must
+            // not leave a private snapshot rendered until the next poll.
+            render();
+            return;
+          }
           // /config already proved that the API is online. A slower optional
           // chain snapshot is unavailable data, not an offline backend.
         }

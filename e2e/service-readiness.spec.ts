@@ -318,3 +318,25 @@ test('a new wallet session refreshes before an old check completes and ignores i
   expect(state.authRequests).toEqual(['/api/v1/auth/challenge', '/api/v1/auth/verify']);
   expect(state.writes).toEqual([]);
 });
+
+test('an unauthorized background snapshot immediately removes the signed-in private interface', async ({ page }) => {
+  await page.clock.install();
+  const state = await fixture(page, ready, true);
+  await expect(page.getByTestId('reserve-balance')).toHaveText('0.001 ETH');
+  await expect(page.getByTestId('intent-message')).toBeVisible();
+  let unauthorizedSnapshots = 0;
+  await page.route('**/api/v1/wallets/current', async route => {
+    unauthorizedSnapshots += 1;
+    await route.fulfill({ status: 401, json: { error: { code: 'UNAUTHORIZED', message: 'Owner session expired' } } });
+  });
+  // Advance only to this background refresh. No user action or later poll
+  // should be required to remove the interface belonging to the expired session.
+  await page.clock.runFor(30_000);
+  await expect(page.getByTestId('connect-wallet')).toContainText('连接钱包');
+  await expect(page.getByTestId('reserve-balance')).toHaveCount(0);
+  await expect(page.getByTestId('intent-message')).toHaveCount(0);
+  expect(await page.evaluate(() => sessionStorage.getItem('aegis.session'))).toBeNull();
+  expect(await page.evaluate(() => sessionStorage.getItem('aegis.address'))).toBeNull();
+  expect(unauthorizedSnapshots).toBe(1);
+  expect(state.writes).toEqual([]);
+});
