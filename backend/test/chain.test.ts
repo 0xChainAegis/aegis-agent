@@ -40,7 +40,7 @@ function gatewayConfig(): Config {
   };
 }
 
-function readinessHarness(options: { attestation?: Address; locked?: boolean; policyEngine?: Address; policyOwner?: Address; policyAuthorized?: boolean; stale?: boolean; authorized?: boolean; chainId?: number } = {}) {
+function readinessHarness(options: { attestation?: Address; locked?: boolean; policyEngine?: Address; policyOwner?: Address; policyAuthorized?: boolean; stale?: boolean; quoteError?: string; authorized?: boolean; chainId?: number } = {}) {
   const gateway = new ViemGateway(gatewayConfig());
   const client = gateway.publicClient as any;
   const bytecodeReads: Address[] = [];
@@ -66,7 +66,10 @@ function readinessHarness(options: { attestation?: Address; locked?: boolean; po
       case 'perTxLimitUsd6': return 10_000_000n;
       case 'dailyLimitUsd6': return 20_000_000n;
       case 'spendingToday': return [4_000_000n, 16_000_000n];
-      case 'latestEthQuote': return [1n, 1n, 300_000_000_000n, options.stale ? 1_699_990_000n : 1_699_999_999n, 8];
+      case 'latestEthQuote': {
+        if (options.quoteError) throw new Error(options.quoteError);
+        return [1n, 1n, 300_000_000_000n, options.stale ? 1_699_990_000n : 1_699_999_999n, 8];
+      }
       case 'maxPriceAge': return 3600n;
       default: throw new Error(`Unexpected contract read: ${address} ${functionName}`);
     }
@@ -95,6 +98,25 @@ test('stale readiness preserves read-only identity proofs only after all structu
     assert.equal('rpcChainId' in failed, false);
     assert.equal('deploymentBindingsVerified' in failed, false);
   }
+});
+
+test('invalid feed answer preserves verified read-only identity while payment remains disabled', async () => {
+  const invalid = await readinessHarness({
+    quoteError: 'ContractFunctionExecutionError: The contract function "latestEthQuote" reverted with reason: ORACLE_BAD_ANSWER',
+  }).gateway.readiness();
+  assert.equal(invalid.ready, false);
+  assert.equal(invalid.code, 'FEED_UNAVAILABLE');
+  assert.equal('rpcChainId' in invalid && invalid.rpcChainId, 31337);
+  assert.equal('deploymentBindingsVerified' in invalid && invalid.deploymentBindingsVerified, true);
+  assert.equal('feedFresh' in invalid && invalid.feedFresh, false);
+
+  const structurallyInvalid = await readinessHarness({
+    attestation: otherContract,
+    quoteError: 'execution reverted: ORACLE_BAD_ANSWER',
+  }).gateway.readiness();
+  assert.equal(structurallyInvalid.ready, false);
+  assert.equal('rpcChainId' in structurallyInvalid, false);
+  assert.equal('deploymentBindingsVerified' in structurallyInvalid, false);
 });
 
 test('ViemGateway readiness fails closed for changed bindings or unlocked feed', async () => {

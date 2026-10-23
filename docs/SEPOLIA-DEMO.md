@@ -126,6 +126,28 @@ of the already signed raw transaction until a terminal receipt appears. If the
 command reports that hash as unresolved, inspect it on Sepolia before rerunning
 so a delayed first broadcast cannot be mistaken for permission to pay twice.
 
+For a payment above the automatic threshold, use the web UI so the executor
+queues the request and the configured Owner signs `approveAndExecute` in the
+browser wallet. Record both the queue transaction hash and the Owner approval
+transaction hash. Afterwards, produce a read-only machine-verifiable report:
+
+```bash
+npm run verify:sepolia:approval -- \
+  --queue-tx 0xQUEUE_TRANSACTION_HASH \
+  --approval-tx 0xOWNER_APPROVAL_TRANSACTION_HASH
+```
+
+This verifier never requests a private key, signs or broadcasts. It checks that
+the first transaction came from the configured executor and called the deployed
+Wallet, that its `NativeTransferQueued` event matches the calldata, and that the
+second transaction came from the configured Owner. It then requires matching
+`NativeTransferExecuted` and PolicyEngine `BudgetConsumed` evidence with the
+same request hash, attestation, recipient and amount. The report records the
+final policy decision: it is normally `REQUIRE_APPROVAL`, but may safely become
+`ALLOW` if the price falls below the automatic threshold while the queued
+request waits. The queue and Owner transaction still prove the approval path.
+Empty, reverted or unrelated hashes fail closed.
+
 The client policy-boundary suite runs against disposable local contracts and
 intercepted failure responses, so it can safely mutate permissions and Mock
 Feed states without pretending those faults occurred on the public Feed:
@@ -137,7 +159,10 @@ npm run test:e2e:wallet
 It covers automatic execution, Owner approval, cancellation, a non-allowlisted
 recipient, the hard per-transaction limit, invalid Chainlink prices,
 unauthorized/frozen executors, readable rejection reasons, disabled confirmation
-and the absence of a client write while the service is unsafe. Public Sepolia
+and the absence of a client write while the service is unsafe. The invalid-price
+case changes the deployed local Mock Feed through real Hardhat transactions for
+zero, negative, future and stale values, checks the actual API and browser, and
+restores the Feed after every case. Public Sepolia
 coverage remains split deliberately: the default policy command evaluates
 read-only boundaries against the real contracts and Feed, while the explicit
 one-wei command proves one actual execution. Negative, zero, future and forced
