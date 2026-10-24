@@ -50,6 +50,12 @@ export const ConfigResponseSchema = z.object({
   ccipDestinationTokenAddress: AddressSchema.nullable().optional(),
   ccipTokenPriceSource: z.literal('OWNER_MAINTAINED_TESTNET_VALUE').nullable().optional(),
   capabilities: z.looseObject({ ccip: z.boolean().optional(), subscriptions: z.boolean().optional() }).optional(),
+  subscriptionPolicy: z.looseObject({
+    configured:z.boolean(),
+    maxPeriodCapUsd6:z.string().regex(/^\d+$/).max(78).refine(value=>BigInt(value)<2n**256n),
+    maxDurationSeconds:z.string().regex(/^\d+$/).max(20).refine(value=>BigInt(value)<2n**64n),
+    maxPayments:z.string().regex(/^\d+$/).max(20).refine(value=>BigInt(value)<2n**64n),
+  }).nullable().optional(),
   readiness: ReadinessSchema,
 }).passthrough().superRefine((value, context) => {
   const enabled=value.capabilities?.ccip===true;

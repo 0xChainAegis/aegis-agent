@@ -5,7 +5,7 @@ import { isAddress, zeroAddress, type Address, type Hex } from 'viem';
 import { SCHEMA_VERSION } from '@aegis/shared';
 import { AegisService } from './service.js';
 import { walletAbi, oracleAbi, policyEngineAbi, ccipSenderAbi, ViemGateway } from './chain.js';
-import { SubscriptionManager, registrationSchema } from './subscriptions.js';
+import { SubscriptionManager, registrationSchema, subscriptionPolicyInputSchema } from './subscriptions.js';
 import { ApiError } from './errors.js';
 import { PublicReadinessCache, readinessIdentity } from './readiness-cache.js';
 
@@ -47,7 +47,7 @@ function publicRpc(rpcUrl: string) {
 export function createApiServer(service: AegisService) {
   const subscriptions=service.chain instanceof ViemGateway ? new SubscriptionManager(service.config,service.store,service.chain) : undefined;
   service.subscriptions=subscriptions;
-  const requireSubscriptions=()=>{if(!subscriptions) throw new ApiError(422,'SUBSCRIPTIONS_LOCAL_ONLY','订阅需要本地链 Gateway');return subscriptions;};
+  const requireSubscriptions=()=>{if(!subscriptions) throw new ApiError(422,'SUBSCRIPTIONS_UNAVAILABLE','订阅需要链上 Gateway');return subscriptions;};
   const readinessCache = new PublicReadinessCache(() => service.chain.readiness(), () => readinessIdentity(service.config));
   const publicReadiness = () => service.config.mode === 'testnet' ? readinessCache.read() : service.chain.readiness();
   const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
@@ -75,6 +75,8 @@ export function createApiServer(service: AegisService) {
       }
       if (request.method === 'GET' && path === '/api/v1/config') {
         const config = service.config;
+        let subscriptionPolicy=null;
+        if(subscriptions){try{subscriptionPolicy=await subscriptions.policy();}catch{/* Unsupported deployments expose no subscription capability. */}}
         send(200, {
           chainId: config.chainId, rpcUrl: publicRpc(config.rpcUrl), abiVersion: config.abiVersion,
           localTestWalletAvailable: config.mode === 'local_chain' && config.chainId === 31337 && config.ownerAddress.toLowerCase() === '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266',
@@ -94,7 +96,8 @@ export function createApiServer(service: AegisService) {
             llmEnabled: config.llm.mode !== 'off',
             timeoutMs: config.llm.timeoutMs,
           },
-          capabilities: { subscriptions:subscriptions?await subscriptions.enabled():false,ccip:service.chain.ccipEnabled?await service.chain.ccipEnabled():false,nativeEth: true, ownerApproval: 'owner_approve_and_execute', usdDecimals: 6, monitoring: false, x402: false },
+          capabilities: { subscriptions:subscriptionPolicy!==null,ccip:service.chain.ccipEnabled?await service.chain.ccipEnabled():false,nativeEth: true, ownerApproval: 'owner_approve_and_execute', usdDecimals: 6, monitoring: false, x402: false },
+          subscriptionPolicy,
           auth: { kind: 'personal_sign_challenge', domain: config.authDomain, chainId: config.chainId },
           docs: Object.keys(docs).map(slug => ({ slug, title: docs[slug].title, url: `/api/v1/docs/${slug}` })),
         }); return;
@@ -139,6 +142,8 @@ export function createApiServer(service: AegisService) {
         const result = await service.idempotent(owner, `${request.method}:${path}`, Array.isArray(key) ? key[0] : key, raw, async () => {
           if(request.method==='POST' && path==='/api/v1/subscriptions/preview')return {status:200,body:await requireSubscriptions().preview(owner,registrationSchema.parse(raw))};
           if(request.method==='POST' && path==='/api/v1/subscriptions/observed'){const b=z.object({registrationId:z.string().uuid(),txHash:hash}).strict().parse(raw);return {status:200,body:await requireSubscriptions().observed(owner,b.registrationId,b.txHash as Hex)};}
+          if(request.method==='POST' && path==='/api/v1/subscriptions/policy-preview')return {status:200,body:await requireSubscriptions().policyPreview(owner,subscriptionPolicyInputSchema.parse(raw))};
+          if(request.method==='POST' && path==='/api/v1/subscriptions/policy-observed'){const b=z.object({policyId:z.string().uuid(),txHash:hash}).strict().parse(raw);return {status:200,body:await requireSubscriptions().policyObserved(owner,b.policyId,b.txHash as Hex)};}
           const control=path.match(/^\/api\/v1\/subscriptions\/([1-9]\d*)\/(control-preview|control-observed)$/);
           if(request.method==='POST' && control){
             if(control[2]==='control-preview'){const b=z.object({action:z.enum(['pause','resume','cancel'])}).strict().parse(raw);return {status:200,body:await requireSubscriptions().controlPreview(owner,control[1],b.action)};}

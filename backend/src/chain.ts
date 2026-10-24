@@ -304,7 +304,7 @@ export class ViemGateway implements Gateway {
     } catch (error) { throw chainError(error); }
   }
   private subscriptionArgs(task: Task, nonce: bigint) {
-    if (this.config.mode !== 'local_chain' || this.config.chainId !== 31337 || !task.subscriptionId || task.occurrenceIndex === undefined || !task.planHash) throw new ApiError(422, 'SUBSCRIPTION_CONFIG_REQUIRED', '订阅仅允许完整的本地确认计划');
+    if (!['local_chain','testnet'].includes(this.config.mode) || ![31337,11155111].includes(this.config.chainId) || !task.subscriptionId || task.occurrenceIndex === undefined || !task.planHash) throw new ApiError(422, 'SUBSCRIPTION_CONFIG_REQUIRED', '订阅需要受支持网络上的完整确认计划');
     return [BigInt(task.subscriptionId), BigInt(task.occurrenceIndex), BigInt(task.maxUsdCost6), nonce, BigInt(task.requestDeadlineSeconds), BigInt(task.policyVersion), task.planHash] as const;
   }
   private ccipArgs(task: Task, nonce: bigint) {
@@ -316,7 +316,7 @@ export class ViemGateway implements Gateway {
   }
   async previewSubscription(action: SubscriptionAction, requestedMax?: string): Promise<Omit<Quote, 'quoteId' | 'draftId' | 'draftVersion'>> {
     if (!this.config.deploymentReady) throw new ApiError(503, 'DEPLOYMENT_MISSING', '部署配置缺失 deployment missing');
-    if (this.config.mode !== 'local_chain' || this.config.chainId !== 31337 || !action.subscriptionId || action.occurrenceIndex === undefined || !action.subscription) throw new ApiError(422, 'SUBSCRIPTION_CONFIG_REQUIRED', '订阅仅支持本地完整计划');
+    if (!['local_chain','testnet'].includes(this.config.mode) || ![31337,11155111].includes(this.config.chainId) || !action.subscriptionId || action.occurrenceIndex === undefined || !action.subscription) throw new ApiError(422, 'SUBSCRIPTION_CONFIG_REQUIRED', '订阅需要受支持网络上的完整计划');
     const sub = action.subscription;
     // Reuse the same quote pipeline, then apply the engine's contextual subscription check.
     const quote = await this.preview(sub.recipient, sub.amountWei, requestedMax);
