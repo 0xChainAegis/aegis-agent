@@ -1,6 +1,6 @@
 # 本地联调说明
 
-本文对应 TS + viem + Hardhat 本地集成，接口版本 `aegis.v1`。运行钱包准备金卡片读取实际余额，按用户设置建议补给量，再经人工确认进入受限 native ETH 支付流程。下限与目标仅保存在浏览器，后台监控与自动触发尚未实现。
+本文对应 TS + viem + Hardhat/Sepolia 集成，接口版本 `aegis.v1`。运行钱包准备金卡片读取实际余额，按用户设置建议补给量，再经人工确认进入受限 native ETH 支付流程。系统还提供有限订阅和固定路线 CCIP-BnM 跨链；下限与目标仅保存在浏览器，后台监控与无人值守自动触发尚未实现。日常启动见[启动与网页验收](STARTUP.zh-CN.md)。
 
 ## 环境与启动
 
@@ -25,7 +25,7 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 ## 实际与模拟来源
 
 - `local_chain`：真实本地链交易与事件；当前部署使用本地 Mock Feed，不是公网 Chainlink 行情或 Sepolia。
-- `testnet`：预留配置路径；本轮尚未完成 Sepolia 端到端验证，不作为已验证交付。
+- `testnet`：Ethereum Sepolia 实际部署模式。原生 ETH 网页付款已有独立公开证据；CCIP 已完成 Sepolia → Base Sepolia 实际验收并保留源链、message ID 与目标链状态核验。有限订阅的 Sepolia 代码路径已实现，但新资金池仍需 Owner 首次设置订阅上限后再做独立公网付款验收。不同证据范围不能互相替代。
 - `mock`：不广播、不伪造随机交易 hash。RPC/Feed 出错不会切换成该模式。
 - `parser.kind=rule_parser,model=null`：默认规则解析或模型失败后的确定性 fallback。配置模型名不代表调用过 LLM。
 - `parser.kind=llm,model=<model>`：只有严格 JSON 通过地址、金额、字段白名单校验后才会出现。缺字段、冲突、超时、429、乱码或 schema 多字段会回退规则解析。注入规则命中则整条返回 `NEEDS_INPUT / PROMPT_BLOCKED`，清空付款字段，不生成可付款草稿；解析器不授权、不提交、不付款。
@@ -117,7 +117,7 @@ Feed 初始价格 $3,000，自动额度 $5、单笔硬上限 $10、UTC 日预算
 
 请求 hash 使用与合约一致的编码，绑定 domain、chainId、Wallet、Agent、收款人、amountWei、maxUsdCost6、nonce、deadline、policyVersion。它不是自然语言、模型推理与执行后完整记录的证明。结果证据来自回执/事件；一次 mined 确认不代表最终不可逆。
 
-2026 年 10 月 21 日本地验证通过类型检查、生产构建、34 项合约测试、47 项后端测试计数（含嵌套测试）和 38 条浏览器用例（钱包、网络与就绪状态组 31 条，储备组 7 条），另有 9 项离线 Mock 维护器测试及 7 项离线模型启动器测试。后端链侧使用显式假适配器；浏览器分成两组，各自从零启动真实本地 RPC、部署、SQLite、API 和界面，核对接收余额增量及对应事件。覆盖统一策略决策、跨消费者共享预算、消费回滚与防重放，以及付款、Owner 审批、取消、硬预算拒绝、网络切换、报价过期时停止付款、准备金建议重查、刷新、缺失/离线数据、LLM 草稿严格 schema、注入拦截、模型不得补全字段和无任务创建。该付款验收使用本地 Mock Feed。Sepolia v2 已核对部署与公开 Feed 绑定，尚未完成网页付款验收；只读部署检查不能代替付款证明。
+当前合并前入口为 `npm run check` 和 `npm run test:e2e`，覆盖 strict TypeScript、生产构建、合约、后端、前端以及真实本地 RPC/部署/SQLite/API/浏览器流程。专项命令分别覆盖钱包、储备、有限订阅和 CCIP。自动化本地链使用 Mock Feed；`npm run check:sepolia` 是只读公网就绪检查。已记录的 Sepolia 原生付款和 CCIP 跨链验收属于独立公网证据，任何一次历史成功都不能替代当前部署的新鲜度、余额与权限检查。
 
 ## 重置本地链
 

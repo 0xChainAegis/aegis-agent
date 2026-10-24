@@ -103,7 +103,7 @@ npm run dev
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Local chain ID is 31337, API port 3001 and RPC port 8545. This mode uses a Mock Feed. Published development keys are for local use only.
 
-For **Sepolia**, configure the actual deployment, Owner, executor and RPC. [The Sepolia guide](docs/SEPOLIA-DEMO.md) covers `npm run check:sepolia`, `npm run start:sepolia`, no-model mode and the Python entry point for Windows. Generated deployment and secret environment files remain outside Git.
+For **Sepolia**, configure the actual deployment, Owner, executor and RPC. The [Chinese startup and web acceptance guide](docs/STARTUP.zh-CN.md) is the short operational path; [the Sepolia guide](docs/SEPOLIA-DEMO.md) retains detailed deployment and evidence boundaries. Generated deployment and secret environment files remain outside Git.
 
 **Live models** require a server-side project key, reachable Base URL and exact model ID. [Live setup](docs/LLM-LIVE-LOCAL.md). Responses identify the actual parser and fallback reason. Neither `off` nor `stub` is a live model call.
 
@@ -120,9 +120,9 @@ Tests cover quotes, budgets, permissions, event bindings, replay, approvals, can
 
 ## <img src="docs/images/section-features.svg" width="24" height="24" alt="" align="absmiddle"> Current scope
 
-One running backend serves **one Owner pool, one configured operating wallet and native ETH refills**. Browser reserve settings suggest amounts. They do not form a scheduler. Optional models create drafts and cannot pay directly.
+One running backend serves **one Owner pool and one configured operating wallet**, with native ETH refills, finite subscriptions and a fixed-route CCIP transfer flow. Browser reserve settings suggest amounts. They do not form a scheduler. Optional models create drafts and cannot pay directly.
 
-Prompt scanning is an auxiliary heuristic. Structured output also undergoes validation, while contract policy constrains funds. Automatic multi-user pool creation, multi-wallet allocation, scheduled payments, subscriptions and CCIP execution are outside this delivery. The project does not claim a production security audit.
+Prompt scanning is an auxiliary heuristic. Structured output also undergoes validation, while contract policy constrains funds. The current product includes finite ETH subscriptions and a fixed Ethereum Sepolia → Base Sepolia CCIP-BnM route. Every subscription occurrence still requires a fresh preview and human confirmation, and CCIP source execution is verified separately from destination delivery. Automatic multi-user pool creation, multi-wallet allocation and unattended scheduled debits remain outside this delivery. The project does not claim a production security audit.
 
 The historical 40-case intent evaluation includes version and sample limitations in [its report](eval/REPORT.md). Its scores do not establish current-version model accuracy.
 

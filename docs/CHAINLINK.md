@@ -40,7 +40,7 @@ The verified Sepolia instance has a **5 USD automatic-approval threshold**, **10
 
 The ETH/USD feed values the transferred ETH principal. It does **not** estimate transaction gas prices. The restricted executor pays the transaction fee separately; that fee is not part of the principal's USD budget.
 
-Feed validation and on-chain permissions do not prove an LLM understood a user's intent. The accepted payment above used the rule parser, not a live model. Prompt scanning is an additional heuristic, not a complete prompt-injection defense. Aegis currently executes native ETH only: CCIP and subscription action kinds are reserved, not deployed end-to-end payment features.
+Feed validation and on-chain permissions do not prove an LLM understood a user's intent. The accepted payment above used the rule parser, not a live model. Prompt scanning is an additional heuristic, not a complete prompt-injection defense. Aegis also exposes finite ETH subscriptions and a fixed Sepolia → Base Sepolia CCIP-BnM route. Those flows use separate transaction bindings and evidence; this native-payment record does not prove their execution.
 
 Local contract tests use a mock feed for deterministic price and boundary cases. A live read-only feed check proves connectivity and configuration only. The confirmed payment proves the execution described above. These are separate kinds of evidence; none is a production security audit.
 
