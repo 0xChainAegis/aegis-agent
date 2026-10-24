@@ -10,20 +10,28 @@ const service = new AegisService(config, store, new ViemGateway(config));
 const server = createApiServer(service);
 let stopped = false;
 let timer: NodeJS.Timeout | undefined;
+let deliveryTimer: NodeJS.Timeout | undefined;
 async function runWorker() {
   try { await service.tick(); } catch { console.error('Background reconciliation unavailable; saved transactions remain pending.'); }
   if (!stopped) timer = setTimeout(runWorker, 1000);
 }
+async function runDeliveryWorker() {
+  try { await service.reconcileCcipDeliveries(); } catch { console.error('CCIP delivery reconciliation unavailable; source transactions remain saved.'); }
+  if (!stopped) deliveryTimer = setTimeout(runDeliveryWorker, 5000);
+}
 server.listen(config.port, config.host, () => {
   console.log(`Aegis backend http://${config.host}:${config.port} mode=${config.mode} chainId=${config.chainId}`);
   void runWorker();
+  void runDeliveryWorker();
 });
 server.on('error', error => { console.error(error.message); process.exitCode = 1; stopped = true; store.close(); });
 async function stop() {
   if (stopped) return;
-  stopped = true; if (timer) clearTimeout(timer);
+  stopped = true; if (timer) clearTimeout(timer); if (deliveryTimer) clearTimeout(deliveryTimer);
   await new Promise<void>(resolve => server.close(() => resolve()));
-  await service.worker.run(async () => { store.close(); });
+  await service.worker.run(async () => undefined);
+  await service.deliveryWorker.run(async () => undefined);
+  store.close();
 }
 process.on('SIGINT', () => { void stop(); });
 process.on('SIGTERM', () => { void stop(); });
