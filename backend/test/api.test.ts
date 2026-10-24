@@ -477,6 +477,12 @@ test('HTTP boundaries reject malformed or unauthorized writes and never expose s
     assert.equal(invalidJson.status, 400); assert.equal(invalidJson.body.error.code, 'INVALID_JSON');
     const unknownField = await app.call('/intents', 'POST', { recipient, amountWei: '1', skipApproval: true }, 'unknown-field-01');
     assert.equal(unknownField.status, 400); assert.equal(unknownField.body.error.code, 'INVALID_REQUEST');
+    const nativeWithCcipField = await app.call('/intents', 'POST', { recipient, amountWei: '1', tokenAddress: wallet }, 'native-ccip-field-01');
+    assert.equal(nativeWithCcipField.status, 400); assert.equal(nativeWithCcipField.body.error.code, 'INVALID_REQUEST');
+    const subscriptionWithPaymentField = await app.call('/intents', 'POST', { actionKind: 'SUBSCRIPTION', subscriptionId: '1', occurrenceIndex: '0', recipient }, 'subscription-field-01');
+    assert.equal(subscriptionWithPaymentField.status, 400); assert.equal(subscriptionWithPaymentField.body.error.code, 'INVALID_REQUEST');
+    const zeroCcipRecipient = await app.call('/intents', 'POST', { actionKind: 'CCIP_TRANSFER', recipient: '0x0000000000000000000000000000000000000000', amountWei: '1', tokenAddress: wallet, destinationChainSelector: '1' }, 'zero-ccip-recipient');
+    assert.equal(zeroCcipRecipient.status, 400); assert.equal(zeroCcipRecipient.body.error.code, 'INVALID_REQUEST');
     assert.equal(app.store.list<Task>('task').length, 0);
 
     const { submit } = await app.draftAndSubmit(); await app.service.tick();

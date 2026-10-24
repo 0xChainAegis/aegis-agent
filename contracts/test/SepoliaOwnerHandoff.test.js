@@ -46,11 +46,15 @@ describe("Sepolia Owner handoff on real local contracts", function () {
 
   it("grants final Owner administration and approval while removing every deployer admin role", async function () {
     const f = await fixture();
-    const result = await handoffOwnerAdministration(f.contracts, {
+    const testFeed = await ethers.deployContract("AegisTestnetPriceFeed", [f.deployer.address, 100_000_000]);
+    await testFeed.waitForDeployment();
+    const contracts = { ...f.contracts, additionalOwnedContracts: [testFeed] };
+    const result = await handoffOwnerAdministration(contracts, {
       deployerAddress: f.deployer.address, ownerAddress: f.owner.address,
     });
     expect(result).to.deep.equal({ ownerAdministrationVerified: true, deployerAdministrationRevoked: true });
-    await verifyOwnerAdministration({ ...f.contracts, deployerAddress: f.deployer.address, ownerAddress: f.owner.address });
+    await verifyOwnerAdministration({ ...contracts, deployerAddress: f.deployer.address, ownerAddress: f.owner.address });
+    expect(await testFeed.owner()).to.equal(f.owner.address);
     for (const contract of [f.wallet, f.policy, f.oracle]) expect(await contract.owner()).to.equal(f.owner.address);
     const aclRoles = [await f.acl.DEFAULT_ADMIN_ROLE(), await f.acl.OWNER_ROLE(), await f.acl.GUARDIAN_ROLE()];
     const attestationRoles = [await f.attestations.DEFAULT_ADMIN_ROLE(), await f.attestations.APPROVER_ROLE()];
@@ -189,6 +193,21 @@ describe("Sepolia Owner handoff on real local contracts", function () {
     } catch (error) { failure = error; }
     expect(failure).to.be.instanceOf(Error);
     expect(failure.message).to.include("this deployment's contracts");
+    expect(await ethers.provider.getTransactionCount(deployer.address)).to.equal(nonce);
+  });
+
+  it("reserves every predicted CREATE address when optional CCIP contracts are enabled", async function () {
+    const [deployer, agent, recipient] = await ethers.getSigners();
+    const nonce = await ethers.provider.getTransactionCount(deployer.address);
+    const futureCcipSender = ethers.getCreateAddress({ from: deployer.address, nonce: nonce + 6 });
+    await expect(validateDeploymentOwner({
+      provider: ethers.provider,
+      deployerAddress: deployer.address,
+      ownerAddress: futureCcipSender,
+      agentAddress: agent.address,
+      recipientAddress: recipient.address,
+      deploymentContractCount: 7,
+    })).to.be.rejectedWith("this deployment's contracts");
     expect(await ethers.provider.getTransactionCount(deployer.address)).to.equal(nonce);
   });
 

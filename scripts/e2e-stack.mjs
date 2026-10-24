@@ -12,7 +12,7 @@ try{
  const chain=start([hardhat,'node','--hostname','127.0.0.1'],path.join(root,'contracts'));
  chain.on('exit',code=>{if(!stopping)stop(code??1)});
  await waitFor(async()=>{const r=await fetch('http://127.0.0.1:8545',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'eth_chainId',params:[]})});return (await r.json()).result==='0x7a69'});
- const deployment=start([hardhat,'run','scripts/deploy-local.js','--network','localhost'],path.join(root,'contracts'),{AEGIS_LOCAL_SUBSCRIPTION_FIXTURE:'1'});
+ const deployment=start([hardhat,'run','scripts/deploy-local.js','--network','localhost'],path.join(root,'contracts'),{AEGIS_LOCAL_SUBSCRIPTION_FIXTURE:'1',AEGIS_LOCAL_CCIP_FIXTURE:'1'});
  const code=await new Promise(resolve=>deployment.on('exit',resolve));if(code!==0)throw new Error('Local deployment failed');
  const backend=start(['--import','tsx','backend/src/index.ts'],root,{AEGIS_DB_PATH:path.join(root,'test-results',`chain-${Date.now()}.sqlite`)});
  backend.on('exit',code=>{if(!stopping)stop(code??1)});

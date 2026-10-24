@@ -6,7 +6,7 @@ async function waitFor(txPromise, confirmations) {
   await tx.wait(confirmations);
 }
 
-async function validateDeploymentOwner({ provider, deployerAddress, ownerAddress, agentAddress, recipientAddress }) {
+async function validateDeploymentOwner({ provider, deployerAddress, ownerAddress, agentAddress, recipientAddress, deploymentContractCount = 5 }) {
   let owner;
   try { owner = getAddress(ownerAddress); }
   catch { throw new Error("OWNER_ADDRESS must be a valid EVM address"); }
@@ -21,9 +21,12 @@ async function validateDeploymentOwner({ provider, deployerAddress, ownerAddress
   if (code !== "0x" && !delegatedEoa) {
     throw new Error("OWNER_ADDRESS must have empty code or an exact nonzero EIP-7702 delegation supported by Owner login");
   }
-  // The five Sepolia CREATE transactions precede all configuration transactions.
+  if (!Number.isSafeInteger(deploymentContractCount) || deploymentContractCount < 1 || deploymentContractCount > 32) {
+    throw new Error("deploymentContractCount must be an integer between 1 and 32");
+  }
+  // All Sepolia CREATE transactions precede configuration transactions.
   const firstNonce = await provider.getTransactionCount(deployerAddress, "pending");
-  for (let offset = 0; offset < 5; offset++) {
+  for (let offset = 0; offset < deploymentContractCount; offset++) {
     if (same(getCreateAddress({ from: deployerAddress, nonce: firstNonce + offset }), owner)) {
       throw new Error("OWNER_ADDRESS cannot be an address of this deployment's contracts");
     }
@@ -37,8 +40,8 @@ async function administrationRoles(acl, attestations) {
   ];
 }
 
-async function verifyOwnerAdministration({ wallet, policy, oracle, acl, attestations, deployerAddress, ownerAddress }) {
-  for (const contract of [wallet, policy, oracle]) {
+async function verifyOwnerAdministration({ wallet, policy, oracle, acl, attestations, deployerAddress, ownerAddress, additionalOwnedContracts = [] }) {
+  for (const contract of [wallet, policy, oracle, ...additionalOwnedContracts]) {
     if (!same(await contract.owner(), ownerAddress)) throw new Error("Final contract Owner verification failed");
   }
   for (const [contract, roles] of await administrationRoles(acl, attestations)) {
@@ -54,7 +57,7 @@ async function verifyOwnerAdministration({ wallet, policy, oracle, acl, attestat
 async function handoffOwnerAdministration(contracts, { deployerAddress, ownerAddress, confirmations = 1 }) {
   const finalOwner = getAddress(ownerAddress);
   if (finalOwner === ZeroAddress) throw new Error("OWNER_ADDRESS must not be the zero address");
-  const { wallet, policy, oracle, acl, attestations } = contracts;
+  const { wallet, policy, oracle, acl, attestations, additionalOwnedContracts = [] } = contracts;
   const changed = !same(finalOwner, deployerAddress);
   if (changed) {
     const roleGroups = await administrationRoles(acl, attestations);
@@ -64,7 +67,7 @@ async function handoffOwnerAdministration(contracts, { deployerAddress, ownerAdd
         if (!(await contract.hasRole(role, finalOwner))) throw new Error("Owner role grant verification failed before handoff");
       }
     }
-    for (const contract of [wallet, policy, oracle]) {
+    for (const contract of [wallet, policy, oracle, ...additionalOwnedContracts]) {
       await waitFor(contract.transferOwnership(finalOwner), confirmations);
       if (!same(await contract.owner(), finalOwner)) throw new Error("Contract ownership handoff failed");
     }
@@ -73,7 +76,7 @@ async function handoffOwnerAdministration(contracts, { deployerAddress, ownerAdd
       for (const role of roles) await waitFor(contract.revokeRole(role, deployerAddress), confirmations);
     }
   }
-  await verifyOwnerAdministration({ ...contracts, deployerAddress, ownerAddress: finalOwner });
+  await verifyOwnerAdministration({ ...contracts, additionalOwnedContracts, deployerAddress, ownerAddress: finalOwner });
   return { ownerAdministrationVerified: true, deployerAdministrationRevoked: changed };
 }
 

@@ -1,4 +1,4 @@
-import { decodeFunctionData, formatEther, formatUnits, isAddress, parseAbi, parseEther } from 'viem';
+import { formatEther, formatUnits, isAddress, parseEther } from 'viem';
 import { z } from 'zod';
 import { api, ApiError, hasSession, setToken, type Data } from './api';
 import { authenticateOwner, connectBrowserWallet, connectWallet, disconnectProvider, getActiveProvider, localWalletAvailable, sendOwnerTransaction, type WalletConnection, type WalletProvider } from './wallet';
@@ -11,9 +11,11 @@ import { nextRefreshDelay } from './polling';
 import { formatPolicyReasons } from './policy-reasons';
 import { bindingFromConfig, loadSettings, observationFromSnapshot, parseSettings, sameBinding, saveSettings, storageKey, suggestTopUp, suggestionKey, type ReserveBinding, type ReserveObservation, type Suggestion } from './reserve';
 import { createSubscriptionPanel } from './subscription-panel';
+import { createCcipPanel } from './ccip-panel';
+import { validateOwnerTransaction } from './ccip';
 import './style.css';
 
-type View = 'overview' | 'operations' | 'approvals' | 'verification' | 'settings' | 'subscriptions';
+type View = 'overview' | 'operations' | 'approvals' | 'verification' | 'settings' | 'subscriptions' | 'ccip';
 type Column = 'draft' | 'ready' | 'approval' | 'done' | 'blocked';
 initTheme();
 const appElement = document.querySelector<HTMLDivElement>('#app');
@@ -67,6 +69,10 @@ const state = {
   evidence: null as Data | null,
   evidenceLoading: false,
   evidenceError: '',
+  ccipDelivery: null as Data | null,
+  ccipDeliveryLoading: false,
+  ccipDeliveryError: '',
+  ccipDeliveryRetryable: false,
   ownerReview: null as { tx: Data; task: Data; action: 'approve' | 'cancel' } | null,
   localWalletConfirm: false,
   walletKind: stored('aegis.wallet-kind', storedKind, ''),
@@ -86,12 +92,17 @@ const subscriptionPanel = createSubscriptionPanel({
   sign: tx => sendOwnerTransaction(tx, state.address, state.walletKind === 'local' && state.config ? state.config : undefined),
   payment: (draft, quote) => { state.draft = draft; state.quote = quote; state.previewError = ''; state.drawer = 'draft'; state.reserve.draft = null; },
 });
+const ccipPanel = createCcipPanel({
+  api: sessionApi, config: () => state.config, disabled,
+  payment: (draft, quote) => { state.draft=draft;state.quote=quote;state.previewError='';state.drawer='draft';state.reserve.draft=null; },
+});
 interface ReserveDraft { draftId: string; recipient: string; topUpWei: string; balanceWei: string; thresholdWei: string; targetWei: string; blockNumber: string; observedAt: string }
 
 const nav: [View, string, string, string][] = [
   ['overview', 'grid', '总览', 'Overview'],
   ['operations', 'layers', '操作', 'Operations'],
   ['subscriptions', 'clock', '订阅', 'Subscriptions'],
+  ['ccip', 'layers', '跨链', 'CCIP'],
   ['approvals', 'approve', '待审批', 'Approvals'],
   ['verification', 'verify', '验证记录', 'Verification'],
   ['settings', 'settings', '设置', 'Settings'],
@@ -126,6 +137,7 @@ function column(task: Data): Column {
 }
 function statusLabel(task: Data): string {
   const s = status(task);
+  if(isCcip(task)&&s==='EXECUTED')return '源链已确认';
   const labels: Record<string, string> = { DRAFT: '待确认', NEEDS_INPUT: '待补信息', INCOMPLETE: '待补信息', READY: '已通过预检', SUBMITTED: '链上处理中', SUBMITTING: '提交中', EXECUTING: '执行中', PENDING_APPROVAL: '等待 Owner', AWAITING_APPROVAL: '等待 Owner', EXECUTED: '链上已确认', COMPLETED: '已完成', CONFIRMED: '链上已确认', BLOCKED: '规则已拦截', REJECTED: '已拒绝', FAILED: '执行失败', CANCELLED: '已取消', CANCELED: '已取消', EXPIRED: '已过期' };
   return labels[s] || ({ UNKNOWN: '结果待核对', REQUOTE_REQUIRED: '需要重新报价', BROADCAST: '已广播待回执' } as Record<string, string>)[s] || s || '待确认';
 }
@@ -136,6 +148,10 @@ function pendingBroadcast(taskId: string): { txHash: string; action: 'approve' |
 function taskName(task: Data): string { return value(task, 'purpose', 'intent.purpose', 'description', 'message', 'title') || '原生 ETH 付款'; }
 function taskRecipient(task: Data): string { return value(task, 'recipient', 'intent.recipient', 'request.recipient', 'to'); }
 function taskAmount(task: Data): string { return value(task, 'amountWei', 'intent.amountWei', 'request.amountWei'); }
+function isCcip(task: Data | null): boolean { return task?.actionKind === 'CCIP_TRANSFER'; }
+function taskUnit(task: Data): string { return isCcip(task) ? 'CCIP-BnM' : 'ETH'; }
+function displayAmount(task: Data): string { return isCcip(task) ? (()=>{try{return formatUnits(BigInt(taskAmount(task)),18).replace(/(\.\d{0,8}).*$/,'$1').replace(/\.$/,'');}catch{return '—';}})() : eth(taskAmount(task)); }
+function executionAddress(task: Data): string { return isCcip(task) ? value(task,'ccipSenderAddress','walletAddress') : value(task,'walletAddress') || walletAddress(); }
 function walletAddress(): string { return value(state.config, 'walletAddress', 'addresses.wallet', 'contracts.wallet', 'wallet.address') || value(state.wallet, 'walletAddress', 'address'); }
 function expectedChain(): number { return Number(get(state.config, 'chainId', 'chain.id') || 0); }
 function currentServiceStatus() {
@@ -199,7 +215,7 @@ function render() {
       <div class="content ${state.view === 'settings' ? 'settings-content' : ''}">
         ${availability.phase !== 'ready' ? `<div class="service-banner ${availability.tone}" role="${availability.phase === 'loading' ? 'status' : 'alert'}" data-testid="service-banner" aria-live="polite">${availability.phase === 'loading' ? '<span class="spinner"></span>' : icon('info')}<div class="service-banner-copy"><strong id="service-status-title">${esc(availability.title)}</strong><p>${esc(availability.message)}</p></div>${availability.actionLabel ? `<button class="text-button" data-action="refresh" ${state.refreshing ? 'disabled' : ''}>${esc(availability.actionLabel)}</button>` : ''}</div>` : ''}
         ${connected() && !boundOwner() ? '<div class="info-panel" data-testid="reconnect-owner-note">已恢复登录会话和任务。付款或审批前，请重新选择钱包并以 Owner 签名登录；本地演示可重新选择“本地测试钱包”。</div>' : ''}
-        ${state.view === 'subscriptions' ? subscriptionPanel.render() : state.view === 'settings' ? settingsView() : state.view === 'verification' ? verificationView() : operationsView()}
+        ${state.view === 'subscriptions' ? subscriptionPanel.render() : state.view === 'ccip' ? ccipPanel.render() : state.view === 'settings' ? settingsView() : state.view === 'verification' ? verificationView() : operationsView()}
         ${connected() && ['overview', 'operations'].includes(state.view) ? composer() : ''}
       </div>
     </main>
@@ -261,7 +277,7 @@ function summary(): string {
 function taskRow(t: Data): string {
   const c = column(t);
   const tag = t._draft ? '草稿' : `AEG-${id(t).slice(-6).toUpperCase()}`;
-  return `<button class="task-row" data-open-task="${esc(id(t))}" data-task-id="${esc(id(t))}"><span class="cell time">${dateTime(get(t, 'updatedAt', 'createdAt'))}</span><span class="cell name"><span class="task-mark ${c}">${icon(c === 'done' ? 'check' : c === 'approval' ? 'clock' : c === 'blocked' ? 'info' : 'arrow')}</span><span class="name-text">${esc(taskName(t))}</span></span><span class="cell amount">${taskAmount(t) ? eth(taskAmount(t)) : '—'} <small>ETH</small></span><span class="cell state task-status ${c}"><span class="status-dot ${columns.find(col => col[0] === c)?.[2] ?? 'neutral'}"></span>${statusLabel(t)}</span><span class="cell ref mono">${tag}</span></button>`;
+  return `<button class="task-row" data-open-task="${esc(id(t))}" data-task-id="${esc(id(t))}"><span class="cell time">${dateTime(get(t, 'updatedAt', 'createdAt'))}</span><span class="cell name"><span class="task-mark ${c}">${icon(c === 'done' ? 'check' : c === 'approval' ? 'clock' : c === 'blocked' ? 'info' : 'arrow')}</span><span class="name-text">${esc(taskName(t))}</span></span><span class="cell amount">${taskAmount(t) ? displayAmount(t) : '—'} <small>${esc(taskUnit(t))}</small></span><span class="cell state task-status ${c}"><span class="status-dot ${columns.find(col => col[0] === c)?.[2] ?? 'neutral'}"></span>${statusLabel(t)}</span><span class="cell ref mono">${tag}</span></button>`;
 }
 function recentTasks(): string {
   const stamp = (t: Data) => String(get(t, 'updatedAt', 'createdAt') ?? '');
@@ -434,7 +450,7 @@ async function prepareReserve(shownKey: string) {
 function taskCard(task: Data): string {
   const key = column(task);
   const taskId = id(task);
-  return `<button class="task-card" data-task-id="${esc(taskId)}" data-open-task="${esc(taskId)}"><div class="task-card-top"><span class="task-kind">${task._draft ? '草稿' : `AEG-${taskId.slice(-6).toUpperCase()}`}</span></div><h3>${esc(taskName(task))}</h3><div class="task-amount">${taskAmount(task) ? eth(taskAmount(task)) : '待填写'} <span>${taskAmount(task) ? 'ETH' : ''}</span></div><div class="task-recipient mono">${esc(short(taskRecipient(task), 8))}</div>${taskReason(task) ? `<p class="card-reason">${esc(taskReason(task))}</p>` : ''}<div class="task-card-bottom"><span class="task-status ${key}"><span class="status-dot ${columns.find(c => c[0] === key)?.[2] ?? 'neutral'}"></span>${statusLabel(task)}</span><span>${dateTime(get(task, 'updatedAt', 'createdAt'))}</span></div></button>`;
+  return `<button class="task-card" data-task-id="${esc(taskId)}" data-open-task="${esc(taskId)}"><div class="task-card-top"><span class="task-kind">${task._draft ? '草稿' : `AEG-${taskId.slice(-6).toUpperCase()}`}${isCcip(task)?' · CCIP':''}</span></div><h3>${esc(taskName(task))}</h3><div class="task-amount">${taskAmount(task) ? displayAmount(task) : '待填写'} <span>${taskAmount(task) ? esc(taskUnit(task)) : ''}</span></div><div class="task-recipient mono">${esc(short(taskRecipient(task), 8))}</div>${taskReason(task) ? `<p class="card-reason">${esc(taskReason(task))}</p>` : ''}<div class="task-card-bottom"><span class="task-status ${key}"><span class="status-dot ${columns.find(c => c[0] === key)?.[2] ?? 'neutral'}"></span>${statusLabel(task)}</span><span>${dateTime(get(task, 'updatedAt', 'createdAt'))}</span></div></button>`;
 }
 
 function composer(): string {
@@ -470,7 +486,7 @@ function settingsBody(): string {
 
 function verificationView(): string {
   const tasks = state.tasks.filter(t => ['done', 'approval', 'blocked'].includes(column(t)));
-  return `<section class="page-heading"><div><h1>验证每一笔结果</h1><p>对照任务、真实交易回执与存证记录。尚未取得的证据会明确标记。</p></div><button class="button subtle" data-action="refresh">${icon('refresh')}刷新记录</button></section><div class="verification-callout">${icon('verify')}<div><strong>证据来自服务与链上查询</strong><p>一次本地哈希重算无法单独证明付款成功。打开记录查看网络、金额、回执与验证结果。</p></div></div><div class="activity-list">${tasks.length ? tasks.map(t => `<button class="activity-row" data-open-task="${esc(id(t))}" data-task-id="${esc(id(t))}"><span class="activity-symbol ${column(t)}">${icon(column(t) === 'done' ? 'check' : column(t) === 'approval' ? 'clock' : 'info')}</span><div><strong>${esc(taskName(t))}</strong><p class="mono">${esc(id(t))}</p></div><span class="activity-amount">${eth(taskAmount(t))} ETH</span><span class="task-status ${column(t)}">${statusLabel(t)}</span>${icon('chevron')}</button>`).join('') : emptyState('verify', '还没有可验证的操作', '完成一笔真实测试交易后，在这里查看回执与存证。')}</div>`;
+  return `<section class="page-heading"><div><h1>验证每一笔结果</h1><p>对照任务、真实交易回执与存证记录。尚未取得的证据会明确标记。</p></div><button class="button subtle" data-action="refresh">${icon('refresh')}刷新记录</button></section><div class="verification-callout">${icon('verify')}<div><strong>证据来自服务与链上查询</strong><p>一次本地哈希重算无法单独证明付款成功。打开记录查看网络、金额、回执与验证结果。</p></div></div><div class="activity-list">${tasks.length ? tasks.map(t => `<button class="activity-row" data-open-task="${esc(id(t))}" data-task-id="${esc(id(t))}"><span class="activity-symbol ${column(t)}">${icon(column(t) === 'done' ? 'check' : column(t) === 'approval' ? 'clock' : 'info')}</span><div><strong>${esc(taskName(t))}</strong><p class="mono">${esc(id(t))}</p></div><span class="activity-amount">${displayAmount(t)} ${esc(taskUnit(t))}</span><span class="task-status ${column(t)}">${statusLabel(t)}</span>${icon('chevron')}</button>`).join('') : emptyState('verify', '还没有可验证的操作', '完成一笔真实测试交易后，在这里查看回执与存证。')}</div>`;
 }
 
 function drawer(): string {
@@ -482,11 +498,11 @@ function drawer(): string {
   const s = isDraft && quote ? value(quote, 'status') : status(task);
   const c = isDraft && quote ? column({ status: s }) : column(task);
   const transactions = Array.isArray(task.transactions) ? task.transactions as Data[] : [];
-  return `<div class="drawer-backdrop" data-action="close-drawer"></div><aside class="drawer" aria-label="操作详情" role="dialog" aria-modal="true"><div class="drawer-header"><span>${icon(isDraft ? 'layers' : 'activity')} ${isDraft ? '确认操作' : '操作详情'}</span><button class="icon-button" data-action="close-drawer" aria-label="关闭详情">${icon('close')}</button></div><div class="drawer-body"><div class="drawer-title"><div class="eyebrow">${isDraft ? '提交前确认' : `AEG-${esc(taskId.slice(-6).toUpperCase())}`}</div><h2>${esc(taskName(task))}</h2><span class="badge ${c}">${isDraft && !quote ? '等待预览' : statusLabel({ status: s })}</span></div><div class="transfer-hero"><span>付款金额</span><strong>${eth(taskAmount(task))}<small> ETH</small></strong>${get(quote, 'costUsd6') !== undefined ? `<span>预计 ${usd(get(quote, 'costUsd6'))} · 执行时重新计价</span>` : ''}</div>${isDraft ? reserveDraftSection(task) : ''}${subscriptionPaymentSection(task, quote)}<div class="detail-section"><h3>付款信息</h3>${detailRow('收款地址', taskRecipient(task), true)}${detailRow('所在网络', `${mode()} · Chain ${expectedChain() || '—'}`)}${detailRow('资金池合约', walletAddress(), true)}${detailRow('任务 ID', taskId, true)}${detailRow('策略版本', value(quote, 'policyVersion') || value(task, 'policyVersion'))}</div>
-    ${quote && Object.keys(quote).length ? `<div class="detail-section"><h3>规则预检</h3>${detailRow('状态', s === 'READY' ? '已通过预检，提交时仍会重新检查' : value(quote, 'reason', 'message', 'blockReason') || reasons(quote) || s)}${detailRow('美元最高成本', get(quote, 'maxUsdCost6') !== undefined ? usd(get(quote, 'maxUsdCost6')) : '')}${detailRow('报价有效至', dateTime(get(quote, 'quoteExpiresAtSeconds', 'expiresAt')))}${detailRow('授权路径', get(quote, 'requiresApproval') === true || /APPROVAL/.test(value(quote, 'decision', 'path')) ? '需要 Owner 审批' : value(quote, 'decision', 'path') || '以提交后链上结果为准')}</div>` : ''}
+  return `<div class="drawer-backdrop" data-action="close-drawer"></div><aside class="drawer" aria-label="操作详情" role="dialog" aria-modal="true"><div class="drawer-header"><span>${icon(isDraft ? 'layers' : 'activity')} ${isDraft ? '确认操作' : '操作详情'}</span><button class="icon-button" data-action="close-drawer" aria-label="关闭详情">${icon('close')}</button></div><div class="drawer-body"><div class="drawer-title"><div class="eyebrow">${isDraft ? '提交前确认' : `AEG-${esc(taskId.slice(-6).toUpperCase())}`}</div><h2>${esc(taskName(task))}</h2><span class="badge ${c}">${isDraft && !quote ? '等待预览' : statusLabel({ status: s })}</span></div><div class="transfer-hero"><span>${isCcip(task)?'跨链代币数量':'付款金额'}</span><strong>${displayAmount(task)}<small> ${esc(taskUnit(task))}</small></strong>${get(quote, 'costUsd6') !== undefined ? `<span>预计 ${usd(get(quote, 'costUsd6'))} · 执行时重新计价</span>` : ''}</div>${isDraft ? reserveDraftSection(task) : ''}${subscriptionPaymentSection(task, quote)}${ccipPaymentSection(task,quote)}<div class="detail-section"><h3>付款信息</h3>${detailRow(isCcip(task)?'目标链收款地址':'收款地址', taskRecipient(task), true)}${detailRow('源链网络', `${mode()} · Chain ${expectedChain() || '—'}`)}${detailRow(isCcip(task)?'CCIP Sender 合约':'资金池合约', executionAddress(task), true)}${detailRow('任务 ID', taskId, true)}${detailRow('策略版本', value(quote, 'policyVersion') || value(task, 'policyVersion'))}</div>
+    ${quote && Object.keys(quote).length ? `<div class="detail-section"><h3>规则预检</h3>${detailRow('状态', s === 'READY' ? '已通过预检，提交时仍会重新检查' : value(quote, 'reason', 'message', 'blockReason') || reasons(quote) || s)}${detailRow('美元最高成本', get(quote, 'maxUsdCost6') !== undefined ? usd(get(quote, 'maxUsdCost6')) : '')}${isCcip(task)?detailRow('Router 当前费用',`${eth(get(quote,'quotedFeeWei'))} ETH`)+detailRow('Router 费用上限',`${eth(get(quote,'maxFeeWei'))} ETH`):''}${detailRow('报价有效至', dateTime(get(quote, 'quoteExpiresAtSeconds', 'expiresAt')))}${detailRow('授权路径', get(quote, 'requiresApproval') === true || /APPROVAL/.test(value(quote, 'decision', 'path')) ? '需要 Owner 审批' : value(quote, 'decision', 'path') || '以提交后链上结果为准')}</div>` : ''}
     ${isDraft && state.previewError ? `<div class="info-panel error-panel">${icon('info')}<p>${esc(state.previewError)} 草稿已保留，可重新预览。</p></div>` : taskReason(task) ? `<div class="info-panel error-panel">${icon('info')}<p>${esc(taskReason(task))}</p></div>` : ''}
     ${transactions.length ? `<div class="detail-section"><h3>交易记录</h3>${transactions.map(tx => { const hash = value(tx, 'txHash', 'hash', 'transactionHash'); const link = explorer(hash); return `<div class="transaction-item"><div><span>${esc(value(tx, 'action', 'kind', 'type') || '链上交易')}</span><span>${esc(value(tx, 'status') || '待核对')}</span></div>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener noreferrer" class="mono">${esc(short(hash, 12))}${icon('external')}</a>` : `<span class="mono">${esc(hash || '尚未取得交易哈希')}</span>`}</div>`; }).join('')}</div>` : ''}
-    ${!isDraft ? `<div class="detail-section"><div class="section-title-row"><h3>结果验证</h3><button class="text-button" data-action="load-evidence">${icon('refresh')}重新核验</button></div>${evidenceView()}</div>` : `<div class="review-note">${icon('info')}<p>请核对完整地址与金额。确认后由服务发起链上请求；若需要审批，Owner 仍需在钱包中签名。</p></div>`}</div>
+    ${!isDraft ? `<div class="detail-section"><div class="section-title-row"><h3>结果验证</h3><button class="text-button" data-action="load-evidence">${icon('refresh')}重新核验</button></div>${evidenceView()}</div>${isCcip(task)?ccipDeliveryView(task):''}` : `<div class="review-note">${icon('info')}<p>请核对完整地址与金额。确认后由服务发起链上请求；若需要审批，Owner 仍需在钱包中签名。</p></div>`}</div>
     <div class="drawer-footer">${drawerActions(task, isDraft, quote, c)}</div></aside>`;
 }
 function drawerActions(task: Data, isDraft: boolean, quote: Data | null, c: Column): string {
@@ -500,6 +516,18 @@ function subscriptionPaymentSection(task: Data, quote: Data | null): string {
   if (task.actionKind !== 'SUBSCRIPTION') return '';
   const plan = object(task.subscription);
   return `<div class="detail-section" data-testid="subscription-payment-context"><h3>本期有限订阅付款</h3>${detailRow('订阅 / 当期索引', `${task.subscriptionId} / ${task.occurrenceIndex}`)}${detailRow('父计划哈希', value(plan, 'parentPlanHash'), true)}${detailRow('本期独立计划哈希', value(quote, 'planHash') || value(task, 'planHash'), true)}${detailRow('周期 / 最多成功次数', `${plan.periodSeconds} 秒 / ${plan.maxPayments}`)}${detailRow('每期本金硬上限', usd(plan.periodCapUsd6))}<p class="settings-caption">只确认这一期，不授权后续扣款。下一期必须新建草稿、重新报价并再次人工确认。ETH 本金美元预算不含另付的 Gas。</p></div>`;
+}
+function ccipPaymentSection(task: Data,quote:Data|null):string{
+  if(!isCcip(task))return '';
+  return `<div class="detail-section" data-testid="ccip-payment-context"><h3>固定 CCIP 路线</h3>${detailRow('源链 Token',value(task,'tokenAddress'),true)}${detailRow('目标链',`${value(state.config,'ccipDestinationNetwork')||'目标链'} · Chain ${value(state.config,'ccipDestinationChainId')||'—'}`)}${detailRow('目标链 Selector',value(task,'destinationChainSelector'),true)}${detailRow('目标链 Token',value(state.config,'ccipDestinationTokenAddress'),true)}${detailRow('计划哈希',value(quote,'planHash')||value(task,'planHash'),true)}<p class="settings-caption">源链执行后仍需等待 CCIP 目标链交付。查询失败不会重新发送代币。</p></div>`;
+}
+function ccipDeliveryView(task:Data):string{
+  if(state.ccipDeliveryLoading)return '<div class="detail-section" data-testid="ccip-delivery"><h3>目标链交付</h3><div class="evidence-placeholder"><span class="spinner"></span>正在核对同一个 messageId…</div></div>';
+  if(state.ccipDeliveryError)return `<div class="detail-section" data-testid="ccip-delivery"><h3>目标链交付</h3><div class="evidence-placeholder error-text">${icon('info')}${esc(state.ccipDeliveryError)}；没有重新发送。</div><button class="text-button" data-action="load-ccip-delivery">重新查询原消息</button></div>`;
+  const delivery=state.ccipDelivery;
+  if(!delivery)return `<div class="detail-section" data-testid="ccip-delivery"><h3>目标链交付</h3><p class="muted">${value(task,'messageId')?'等待查询目标链状态。':'源链尚未产生 messageId，不能宣称已经到账。'}</p>${value(task,'messageId')?'<button class="text-button" data-action="load-ccip-delivery">查询原消息</button>':''}</div>`;
+  const delivered=delivery.state==='DELIVERED';
+  return `<div class="detail-section" data-testid="ccip-delivery"><h3>目标链交付</h3><div class="verification-summary"><span class="status-dot ${delivered?'green':delivery.state==='FAILED'?'red':'neutral'}"></span>${delivered?'目标链到账已核实':delivery.state==='FAILED'?'跨链交付失败':'源链已确认，等待目标链'}</div>${detailRow('Message ID',delivery.messageId,true)}${detailRow('Chainlink 状态',delivery.apiStatus||delivery.state)}${detailRow('目标链交易',delivery.destinationTransactionHash,true)}<a class="text-button" href="${esc(delivery.explorerUrl)}" target="_blank" rel="noopener noreferrer">打开 Chainlink CCIP 记录 ${icon('external')}</a><p class="settings-caption">状态查询只追踪原 messageId，不会自动重发。</p></div>`;
 }
 function detailRow(label: string, content: unknown, mono = false): string { return `<div class="detail-row"><span>${label}</span><div class="${mono ? 'mono break-all' : ''}">${esc(content || '尚未取得')}${mono && content ? `<button class="icon-button small" data-copy="${esc(content)}" aria-label="复制${label}">${icon('copy')}</button>` : ''}</div></div>`; }
 function evidenceView(): string {
@@ -519,7 +547,7 @@ function evidenceView(): string {
 function ownerModal(): string {
   const review = state.ownerReview;
   if (!review) return '';
-  return `<div class="modal-backdrop"><section class="owner-modal" role="dialog" aria-modal="true" aria-labelledby="owner-review-title"><div class="modal-symbol">${icon('shield')}</div><h2 id="owner-review-title">${review.action === 'approve' ? '确认 Owner 批准' : '确认取消这笔请求'}</h2><p>${review.action === 'approve' ? '此签名将批准并执行付款。请再次核对收款地址和金额。' : '此签名将取消链上的待审批请求。'}</p><div class="modal-details">${detailRow('金额', `${eth(taskAmount(review.task))} ETH`)}${detailRow('收款地址', taskRecipient(review.task), true)}${detailRow('网络', `${mode()} · Chain ${expectedChain()}`)}${detailRow('签名账户', value(review.tx, 'from'), true)}${detailRow('目标合约', value(review.tx, 'to'), true)}</div><div class="review-note">${icon('verify')}<p>已核对合约、方法与待审批记录 ID。钱包打开后，请继续检查交易详情。</p></div><div class="modal-actions"><button class="button subtle" data-action="dismiss-owner">返回</button><button class="button primary" data-action="sign-owner" data-testid="sign-owner-transaction" ${disabled() ? 'disabled' : ''}>${icon('wallet')}${state.busy ? '等待钱包…' : review.action === 'approve' ? '打开钱包批准' : '打开钱包取消'}</button></div></section></div>`;
+  return `<div class="modal-backdrop"><section class="owner-modal" role="dialog" aria-modal="true" aria-labelledby="owner-review-title"><div class="modal-symbol">${icon('shield')}</div><h2 id="owner-review-title">${review.action === 'approve' ? '确认 Owner 批准' : '确认取消这笔请求'}</h2><p>${review.action === 'approve' ? '此签名将批准并执行付款。请再次核对收款地址和金额。' : '此签名将取消链上的待审批请求。'}</p><div class="modal-details">${detailRow('金额', `${displayAmount(review.task)} ${taskUnit(review.task)}`)}${detailRow(isCcip(review.task)?'目标链收款地址':'收款地址', taskRecipient(review.task), true)}${isCcip(review.task)?detailRow('目标链 Selector',value(review.task,'destinationChainSelector'),true)+detailRow('Token',value(review.task,'tokenAddress'),true)+detailRow('Router 费用上限',`${eth(value(review.task,'maxFeeWei'))} ETH`):''}${detailRow('网络', `${mode()} · Chain ${expectedChain()}`)}${detailRow('签名账户', value(review.tx, 'from'), true)}${detailRow('目标合约', value(review.tx, 'to'), true)}</div><div class="review-note">${icon('verify')}<p>已核对合约、方法、待审批记录 ID${isCcip(review.task)?'、代币、目标链和费用上限':''}。钱包打开后，请继续检查交易详情。</p></div><div class="modal-actions"><button class="button subtle" data-action="dismiss-owner">返回</button><button class="button primary" data-action="sign-owner" data-testid="sign-owner-transaction" ${disabled() ? 'disabled' : ''}>${icon('wallet')}${state.busy ? '等待钱包…' : review.action === 'approve' ? '打开钱包批准' : '打开钱包取消'}</button></div></section></div>`;
 }
 function localWalletModal(): string {
   return `<div class="modal-backdrop"><section class="owner-modal" role="dialog" aria-modal="true" aria-labelledby="local-wallet-title"><div class="modal-symbol">${icon('wallet')}</div><h2 id="local-wallet-title">使用本地测试钱包</h2><p>使用本机节点已解锁的公开开发 Owner 账户。仅限 Chain 31337，测试 ETH 没有真实价值。此入口不会读取或保存私钥，也不能用于 Sepolia 或公网资金。</p><div class="modal-details">${detailRow('网络', 'Local · 真实本地链')}${detailRow('价格', '本地 Mock Feed，非公网 Chainlink 行情')}${detailRow('公开开发账户', value(state.config, 'ownerAddress'), true)}${detailRow('RPC', value(state.config, 'rpcUrl'))}</div><div class="modal-actions"><button class="button subtle" data-action="dismiss-local-wallet">返回</button><button class="button primary" data-action="confirm-local-wallet" data-testid="confirm-local-wallet" ${!state.online || !canConnect() || state.refreshing || state.busy ? 'disabled' : ''}>${state.busy ? '正在签名登录…' : '确认使用公开开发账户'}</button></div></section></div>`;
@@ -541,8 +569,8 @@ function clearWalletSession() {
   try { sessionStorage.removeItem('aegis.address'); sessionStorage.removeItem('aegis.wallet-kind'); } catch { /* Clear in-memory private state even when browser storage is blocked. */ }
   state.address = ''; state.connection = null; state.walletKind = ''; state.providerName = '';
   state.wallet = null; state.tasks = []; state.draft = null; state.quote = null;
-  state.ownerReview = null; state.drawer = ''; state.detail = null; state.evidence = null; state.evidenceLoading = false;
-  state.reserve.draft = null; state.localWalletConfirm = false; subscriptionPanel.clear();
+  state.ownerReview = null; state.drawer = ''; state.detail = null; state.evidence = null; state.evidenceLoading = false;state.ccipDelivery=null;state.ccipDeliveryLoading=false;state.ccipDeliveryError='';state.ccipDeliveryRetryable=false;
+  state.reserve.draft = null; state.localWalletConfirm = false; subscriptionPanel.clear();ccipPanel.clear();
   registerWalletListeners();
 }
 
@@ -591,7 +619,10 @@ async function refreshSnapshot(revision: number, initial: boolean) {
         try {
           const detail = await sessionApi(`/tasks/${encodeURIComponent(drawer)}`);
           if (revision !== walletSessionRevision) return;
-          if (state.drawer === drawer) state.detail = detail;
+          if (state.drawer === drawer) {
+            state.detail = detail;
+            if(isCcip(detail)&&value(detail,'messageId'))await loadCcipDelivery();
+          }
         } catch { /* Retain the last server response while the network recovers. */ }
       }
     }
@@ -624,6 +655,7 @@ function scheduleNextRefresh() {
   const active = !document.hidden && !state.busy && !state.refreshing;
   const trackedTasks: unknown[] = [...state.tasks];
   if (state.detail) trackedTasks.push(state.detail);
+  if(isCcip(state.detail)&&value(state.detail,'messageId')&&state.ccipDelivery?.state!=='DELIVERED'&&state.ccipDelivery?.state!=='FAILED'&&(!state.ccipDeliveryError||state.ccipDeliveryRetryable))trackedTasks.push({status:'UNKNOWN'});
   refreshTimer = window.setTimeout(async () => {
     refreshTimer = undefined;
     if (!document.hidden && !state.busy && !state.refreshing) await refresh();
@@ -654,7 +686,7 @@ async function createIntent() {
       if (amount <= 0n || amount >= 2n ** 256n) throw new Error('ETH 金额必须大于零且不超过合约范围。');
       body = { recipient: fields.data.recipient, amountWei: amount.toString(), purpose: fields.data.purpose || '原生 ETH 付款' };
     }
-    const draftId = state.composerMode === 'manual' && state.draft && state.draft.actionKind !== 'SUBSCRIPTION' ? id(state.draft) : '';
+    const draftId = state.composerMode === 'manual' && state.draft && !['SUBSCRIPTION','CCIP_TRANSFER'].includes(String(state.draft.actionKind)) ? id(state.draft) : '';
     const draft = draftId ? await sessionApi(`/intents/${encodeURIComponent(draftId)}`, 'PATCH', { ...body, expectedRevision: get(state.draft, 'revision', 'version', 'draftVersion') }) : await sessionApi('/intents', 'POST', body);
     state.draft = draft; state.quote = null; state.previewError = '';
     state.recipient = taskRecipient(draft);
@@ -691,7 +723,7 @@ async function submitIntent() {
   const quote = state.quote;
   await run('submit', async () => {
     const reserveContext = reserveDraftFor(state.draft);
-    const result = await sessionApi(`/intents/${encodeURIComponent(id(draft))}/submit`, 'POST', { expectedRevision: get(draft, 'revision', 'version', 'draftVersion'), quoteId: get(quote, 'quoteId', 'id'), ...(draft.actionKind === 'SUBSCRIPTION' ? { planHash: quote.planHash } : {}) });
+    const result = await sessionApi(`/intents/${encodeURIComponent(id(draft))}/submit`, 'POST', { expectedRevision: get(draft, 'revision', 'version', 'draftVersion'), quoteId: get(quote, 'quoteId', 'id'), ...(['SUBSCRIPTION','CCIP_TRANSFER'].includes(String(draft.actionKind)) ? { planHash: quote.planHash } : {}) });
     const taskId = value(result, 'taskId', 'id');
     if (!taskId) throw new Error('服务没有返回任务 ID。请查看操作列表，不要重复提交。');
     const binding = bindingFromConfig(state.config);
@@ -710,8 +742,8 @@ async function submitIntent() {
 
 async function openTask(taskId: string) {
   if (state.draft && id(state.draft) === taskId) { state.drawer = 'draft'; render(); return; }
-  state.drawer = taskId; state.detail = state.tasks.find(t => id(t) === taskId) || null; state.evidence = null; state.evidenceError = ''; render();
-  try { state.detail = await sessionApi(`/tasks/${encodeURIComponent(taskId)}`); render(); await loadEvidence(); }
+  state.drawer = taskId; state.detail = state.tasks.find(t => id(t) === taskId) || null; state.evidence = null; state.evidenceError = ''; state.ccipDelivery=null;state.ccipDeliveryError='';state.ccipDeliveryRetryable=false;render();
+  try { state.detail = await sessionApi(`/tasks/${encodeURIComponent(taskId)}`); render(); await loadEvidence();if(isCcip(state.detail)&&value(state.detail,'messageId'))await loadCcipDelivery(); }
   catch (error) { notify(errorMessage(error), true); }
 }
 
@@ -723,8 +755,14 @@ async function loadEvidence() {
   catch (error) { if (state.drawer === taskId) state.evidenceError = errorMessage(error); }
   finally { state.evidenceLoading = false; render(); }
 }
-
-const ownerAbi = parseAbi(['function approveAndExecute(uint64 attestationId)', 'function cancelPending(uint64 attestationId)']);
+async function loadCcipDelivery(){
+  const taskId=state.drawer;
+  if(!taskId||taskId==='draft'||!isCcip(state.detail)||!value(state.detail,'messageId')||state.ccipDeliveryLoading)return;
+  state.ccipDeliveryLoading=true;state.ccipDeliveryError='';state.ccipDeliveryRetryable=false;render();
+  try{const result=await sessionApi(`/tasks/${encodeURIComponent(taskId)}/ccip-delivery`);if(state.drawer===taskId)state.ccipDelivery=result;}
+  catch(error){if(state.drawer===taskId){state.ccipDeliveryError=errorMessage(error);state.ccipDeliveryRetryable=error instanceof ApiError&&error.status>=500;}}
+  finally{state.ccipDeliveryLoading=false;render();}
+}
 
 async function reviewOwner(action: 'approve' | 'cancel') {
   if (!state.detail || disabled()) return;
@@ -732,13 +770,7 @@ async function reviewOwner(action: 'approve' | 'cancel') {
   await run('owner-review', async () => {
     const task = await sessionApi(`/tasks/${encodeURIComponent(state.drawer)}`);
     const tx = await sessionApi(`/tasks/${encodeURIComponent(state.drawer)}/owner-tx?action=${action}`);
-    if (!isAddress(String(tx.to)) || String(tx.to).toLowerCase() !== walletAddress().toLowerCase() || Number(tx.chainId) !== expectedChain()) throw new Error('审批交易的网络或合约与当前钱包不一致，已停止签名。');
-    if (tx.chainBindingVerified !== true || value(tx, 'taskId') !== id(task) || value(tx, 'requestHash').toLowerCase() !== value(task, 'requestHash').toLowerCase() || value(tx, 'attestationId') !== value(task, 'attestationId') || value(tx, 'recipient').toLowerCase() !== taskRecipient(task).toLowerCase() || value(tx, 'amountWei') !== taskAmount(task)) throw new Error('链上待审批内容与任务记录不一致，已停止签名。');
-    if (BigInt(String(tx.value || '0')) !== 0n) throw new Error('审批交易携带了额外 ETH，已停止签名。');
-    const decoded = decodeFunctionData({ abi: ownerAbi, data: String(tx.data) as `0x${string}` });
-    const expectedMethods = action === 'approve' ? ['approveAndExecute'] : ['cancelPending'];
-    const attestationId = value(task, 'attestationId', 'pendingId', 'attId', 'onchain.attestationId', 'result.attestationId');
-    if (!expectedMethods.includes(decoded.functionName) || !attestationId || !decoded.args || String(decoded.args[0]) !== attestationId) throw new Error('审批方法或待审批记录 ID 与任务不一致，已停止签名。');
+    validateOwnerTransaction(state.config,task,tx,action);
     if (column(task) !== 'approval') throw new Error('此任务不再处于待审批状态，请刷新查看。');
     state.detail = task; state.ownerReview = { tx, task, action };
   });
@@ -784,6 +816,7 @@ app.addEventListener('input', event => {
   if (!text.success) return;
   const fields: Record<string, 'message' | 'recipient' | 'amount' | 'purpose' | 'query'> = { 'intent-message': 'message', recipient: 'recipient', amount: 'amount', purpose: 'purpose', 'task-search': 'query' };
   if (input instanceof HTMLInputElement && input.dataset.subscriptionField) subscriptionPanel.input(input);
+  if (input instanceof HTMLInputElement && input.dataset.ccipField) ccipPanel.input(input);
   if (fields[input.id]) { state[fields[input.id]] = text.data; if (input.id === 'task-search') render(); }
   if (input.id === 'reserve-threshold' || input.id === 'reserve-target') {
     state.reserve[input.id === 'reserve-threshold' ? 'threshold' : 'target'] = text.data;
@@ -798,7 +831,7 @@ app.addEventListener('click', event => {
   if (!(event.target instanceof Element)) return;
   const button = event.target.closest<HTMLElement>('button, [data-action]');
   if (!button || button.hasAttribute('disabled')) return;
-  if (button.dataset.nav) { const parsed=z.enum(['overview','operations','approvals','verification','settings','subscriptions']).safeParse(button.dataset.nav); if (!parsed.success) return; state.view = parsed.data; state.filter = 'all'; state.drawer = ''; render(); return; }
+  if (button.dataset.nav) { const parsed=z.enum(['overview','operations','approvals','verification','settings','subscriptions','ccip']).safeParse(button.dataset.nav); if (!parsed.success) return; state.view = parsed.data; state.filter = 'all'; state.drawer = ''; render(); return; }
   if (button.dataset.settings) { const parsed=z.enum(['account','policy','network','developer']).safeParse(button.dataset.settings); if (!parsed.success) return; state.settingsTab = parsed.data; render(); return; }
   if (button.dataset.filter) { const parsed=z.enum(['all','active','completed']).safeParse(button.dataset.filter); if (!parsed.success) return; state.filter = parsed.data; render(); return; }
   if (button.dataset.composer) { const parsed=z.enum(['natural','manual']).safeParse(button.dataset.composer); if (!parsed.success) return; state.composerMode = parsed.data; render(); return; }
@@ -842,14 +875,21 @@ app.addEventListener('click', event => {
     case 'confirm-local-wallet': void run('connect', async () => { const config = state.config; if (!config || state.refreshing || !state.online || !canConnect() || !localWalletAvailable(config)) throw new Error('当前环境不允许本地测试钱包。'); clearWalletSession(); const session = await connectWallet(31337, config); state.address = session.address; state.chainId = session.chainId; state.walletKind = 'local'; state.connection = session; rememberWalletIdentity('local', session.address); await refresh(); notify('已登录本地公开开发账户，仅用于 Local 测试。'); }); break;
     case 'disconnect': clearWalletSession(); notify('本次会话已断开。'); break;
     case 'send-intent': void createIntent(); break;
+    case 'ccip-preview': if(!disabled())void run('ccip-preview',()=>ccipPanel.preview());break;
     case 'retry-preview': void retryPreview(); break;
     case 'reserve-prepare': void prepareReserve(button.dataset.reserveKey || ''); break;
     case 'confirm-transfer': void submitIntent(); break;
     case 'close-drawer': state.drawer = ''; state.ownerReview = null; render(); break;
-    case 'edit-draft': state.drawer = ''; if (state.draft?.actionKind === 'SUBSCRIPTION') { state.draft = null; state.quote = null; state.view = 'subscriptions'; render(); break; } state.composerMode = 'manual'; render(); document.getElementById('recipient')?.focus(); break;
+    case 'edit-draft': {
+      state.drawer='';
+      if(state.draft?.actionKind==='SUBSCRIPTION'){state.draft=null;state.quote=null;state.view='subscriptions';render();break;}
+      if(state.draft?.actionKind==='CCIP_TRANSFER'){state.draft=null;state.quote=null;state.view='ccip';render();document.getElementById('ccip-recipient')?.focus();break;}
+      state.composerMode='manual';render();document.getElementById('recipient')?.focus();break;
+    }
     case 'fill-example': if (isAddress(exampleRecipient())) { state.recipient = exampleRecipient(); render(); notify('已填入测试地址，请核对后再预览。'); } break;
     case 'new-operation': state.view = 'operations'; state.drawer = ''; render(); document.getElementById(state.composerMode === 'natural' ? 'intent-message' : 'recipient')?.focus(); break;
     case 'load-evidence': void loadEvidence(); break;
+    case 'load-ccip-delivery': void loadCcipDelivery();break;
     case 'approve-task': void reviewOwner('approve'); break;
     case 'cancel-task': void reviewOwner('cancel'); break;
     case 'dismiss-owner': state.ownerReview = null; render(); break;

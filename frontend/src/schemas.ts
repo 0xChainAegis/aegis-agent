@@ -40,8 +40,22 @@ export const ConfigResponseSchema = z.object({
   ownerAddress: AddressSchema,
   recipientAddress: AddressSchema,
   agentAddress: AddressSchema,
+  ccipSenderAddress: AddressSchema.nullable().optional(),
+  ccipRouterAddress: AddressSchema.nullable().optional(),
+  ccipTokenAddress: AddressSchema.nullable().optional(),
+  ccipTokenFeedAddress: AddressSchema.nullable().optional(),
+  ccipDestinationChainSelector: z.string().regex(/^[1-9]\d*$/).refine(value => BigInt(value) < 2n ** 64n).nullable().optional(),
+  ccipDestinationChainId: z.number().int().positive().nullable().optional(),
+  ccipDestinationNetwork: z.string().min(1).max(64).nullable().optional(),
+  ccipDestinationTokenAddress: AddressSchema.nullable().optional(),
+  ccipTokenPriceSource: z.literal('OWNER_MAINTAINED_TESTNET_VALUE').nullable().optional(),
+  capabilities: z.looseObject({ ccip: z.boolean().optional(), subscriptions: z.boolean().optional() }).optional(),
   readiness: ReadinessSchema,
-}).passthrough();
+}).passthrough().superRefine((value, context) => {
+  const enabled=value.capabilities?.ccip===true;
+  const route=[value.ccipSenderAddress,value.ccipRouterAddress,value.ccipTokenAddress,value.ccipTokenFeedAddress,value.ccipDestinationChainSelector];
+  if(enabled&&route.some(item=>item===null||item===undefined))context.addIssue({code:'custom',path:['capabilities','ccip'],message:'CCIP capability requires a complete validated route'});
+});
 
 const positiveUint = (bits: number) => z.string().max(78).regex(/^[1-9]\d*$/).refine(value => /^[1-9]\d*$/.test(value) && value.length <= 78 && BigInt(value) < 2n ** BigInt(bits), '超出合约整数范围');
 

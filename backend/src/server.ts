@@ -1,26 +1,31 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { isAddress, type Address, type Hex } from 'viem';
+import { isAddress, zeroAddress, type Address, type Hex } from 'viem';
 import { SCHEMA_VERSION } from '@aegis/shared';
 import { AegisService } from './service.js';
-import { walletAbi, oracleAbi, policyEngineAbi, ViemGateway } from './chain.js';
+import { walletAbi, oracleAbi, policyEngineAbi, ccipSenderAbi, ViemGateway } from './chain.js';
 import { SubscriptionManager, registrationSchema } from './subscriptions.js';
 import { ApiError } from './errors.js';
 import { PublicReadinessCache, readinessIdentity } from './readiness-cache.js';
 
 const address = z.string().refine(value => isAddress(value), 'Invalid Ethereum address');
+const nonZeroAddress = address.refine(value => value.toLowerCase() !== zeroAddress, 'Zero address is not allowed');
 const integer = z.string().regex(/^[1-9]\d*$/).max(78).refine(value => /^[1-9]\d*$/.test(value) && BigInt(value) < 2n ** 256n, 'Amount exceeds uint256');
+const uint64 = z.string().regex(/^[1-9]\d*$/).max(20).refine(value => BigInt(value) < 2n ** 64n, 'Value exceeds uint64');
 const hash = z.string().regex(/^0x[0-9a-fA-F]{64}$/);
-const draftSchema = z.object({ actionKind:z.enum(['NATIVE_TRANSFER','SUBSCRIPTION']).optional(),subscriptionId:integer.refine(v=>BigInt(v)<2n**64n).optional(),occurrenceIndex:z.string().regex(/^(0|[1-9]\d*)$/).max(20).refine(v=>BigInt(v)<2n**64n).optional(),message: z.string().max(4000).optional(), recipient: address.nullable().optional(), amountWei: integer.nullable().optional(), purpose: z.string().max(500).optional() }).strict();
+const nativeDraftSchema = z.object({ actionKind:z.literal('NATIVE_TRANSFER').optional(),message:z.string().max(4000).optional(),recipient:address.nullable().optional(),amountWei:integer.nullable().optional(),purpose:z.string().max(500).optional() }).strict();
+const subscriptionDraftSchema = z.object({ actionKind:z.literal('SUBSCRIPTION'),subscriptionId:uint64,occurrenceIndex:z.string().regex(/^(0|[1-9]\d*)$/).max(20).refine(value=>BigInt(value)<2n**64n) }).strict();
+const ccipDraftSchema = z.object({ actionKind:z.literal('CCIP_TRANSFER'),recipient:nonZeroAddress,amountWei:integer,tokenAddress:nonZeroAddress,destinationChainSelector:uint64,purpose:z.string().max(500).optional() }).strict();
+const draftSchema = z.union([nativeDraftSchema,subscriptionDraftSchema,ccipDraftSchema]);
 const revision = z.number().int().positive();
-const patchSchema = draftSchema.extend({ expectedRevision: revision }).strict();
-const previewSchema = z.object({ expectedRevision: revision, maxUsdCost6: integer.optional() }).strict();
+const patchSchema = nativeDraftSchema.extend({ expectedRevision: revision }).strict();
+const previewSchema = z.object({ expectedRevision: revision, maxUsdCost6: integer.optional(), maxFeeWei: integer.optional() }).strict();
 const submitSchema = z.object({ expectedRevision: revision, quoteId: z.string().uuid(), planHash:hash.optional() }).strict();
 const docs: Record<string, { title: string; markdown: string }> = {
   overview: { title: 'Aegis 运行钱包补给', markdown: '# Aegis\n\n读取运行钱包真实 ETH 余额，按用户设置的下限与目标建议补给金额。重新读取后生成预览，用户确认才提交。准备金设置保存在浏览器，后台不会自动监控或补款。\n\n自然语言只生成草稿。付款由 agent 在合约预算与收款范围内发起；超过自动额度的请求等待 owner 链上 approveAndExecute。审批时仍检查报价与硬预算。' },
   roles: { title: '角色与签名', markdown: '# 角色与签名\n\nOwner 用钱包签一次性登录消息，并在浏览器签规则修改、充值及高风险审批交易。登录不授权付款。后台只保存受限 agent 执行密钥，绝不保存 owner 私钥。\n\n当前是单 owner 资金池；Bearer 会话过期后需重新登录。' },
-  chainlink: { title: 'Chainlink 与硬规则', markdown: '# Chainlink\n\n合约在请求及审批执行时读取 ETH/USD Data Feed，检查正价格与时间新鲜度，并最终校验 USD 单笔、累计日预算、允许收款人、请求期限和策略版本。前端预览不是执行许可。\n\n金额使用整数 wei 与 USD6。美元输入不会被当作 ETH。CCIP、x402、CRE 与自动监控均不属于当前核心流程。' },
+  chainlink: { title: 'Chainlink 与硬规则', markdown: '# Chainlink\n\n合约在请求及审批执行时读取 ETH/USD Data Feed，检查正价格与时间新鲜度，并最终校验 USD 单笔、累计日预算、允许收款人、请求期限和策略版本。前端预览不是执行许可。\n\n金额使用整数 wei 与 USD6。美元输入不会被当作 ETH。启用后的 CCIP 只接受结构化请求，并把源链 Router 提交与目标链送达分开核验；x402、CRE 与自动监控不属于当前核心流程。' },
   evidence: { title: '交易与验证', markdown: '# 可核查的结果\n\nSUBMITTING 表示正在准备；BROADCAST 表示已发送；UNKNOWN 表示广播结果不明。链上 receipt 成功且同一交易中有相互匹配的 NativeTransferExecuted 与 PolicyEngine BudgetConsumed，才能显示已付款并验证风险预算。NativeTransferQueued 表示等待 owner，尚未消费预算。\n\n后台保存原始签名交易、原哈希与 nonce 后再发送。超时和重启优先查原哈希，不创建新付款。一次 mined 确认不代表最终不可逆。local_chain 是本地真实链交易，testnet 是测试网真实交易，mock 没有链上执行。' },
   api: { title: '联调 API', markdown: '# API\n\n接口版本 aegis.v1，路径 /api/v1。先 auth/challenge，再用钱包签 message 调 auth/verify，后续使用 Authorization: Bearer token。\n\nintents → preview → submit → tasks/:id → evidence。所有业务写请求带 Idempotency-Key；相同 key 同内容返回原结果，异内容返回 409。编辑使用 expectedRevision。文档是静态 Markdown，没有 RAG。' },
 };
@@ -75,8 +80,10 @@ export function createApiServer(service: AegisService) {
           localTestWalletAvailable: config.mode === 'local_chain' && config.chainId === 31337 && config.ownerAddress.toLowerCase() === '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266',
           walletAddress: config.walletAddress, aclAddress: config.aclAddress, attestationAddress: config.attestationAddress,
           oracleAddress: config.oracleAddress, policyEngineAddress: config.policyEngineAddress, feedAddress: config.feedAddress, ownerAddress: config.ownerAddress, agentAddress: config.agentAddress, recipientAddress: config.recipientAddress,
+          ccipSenderAddress:config.ccipSenderAddress??null,ccipRouterAddress:config.ccipRouterAddress??null,ccipTokenAddress:config.ccipTokenAddress??null,ccipTokenFeedAddress:config.ccipTokenFeedAddress??null,ccipDestinationChainSelector:config.ccipDestinationChainSelector??null,
+          ccipDestinationChainId:config.ccipDestinationChainId??null,ccipDestinationNetwork:config.ccipDestinationNetwork??null,ccipDestinationTokenAddress:config.ccipDestinationTokenAddress??null,ccipTokenPriceSource:config.ccipTokenPriceSource??null,
           addresses: { wallet: config.walletAddress, acl: config.aclAddress, attestation: config.attestationAddress, oracle: config.oracleAddress, policyEngine: config.policyEngineAddress, feed: config.feedAddress, owner: config.ownerAddress, agent: config.agentAddress, recipient: config.recipientAddress },
-          abi: { wallet: walletAbi, oracle: oracleAbi, policyEngine: policyEngineAbi }, walletAbi, oracleAbi, policyEngineAbi,
+          abi: { wallet: walletAbi, oracle: oracleAbi, policyEngine: policyEngineAbi,ccipSender:ccipSenderAbi }, walletAbi, oracleAbi, policyEngineAbi,ccipSenderAbi,
           readiness: await publicReadiness(), explorerBaseUrl: config.mode === 'testnet' ? 'https://sepolia.etherscan.io' : null,
           planner: {
             kind: config.llm.mode === 'off' ? 'rule_parser' : 'llm',
@@ -87,7 +94,7 @@ export function createApiServer(service: AegisService) {
             llmEnabled: config.llm.mode !== 'off',
             timeoutMs: config.llm.timeoutMs,
           },
-          capabilities: { subscriptions:subscriptions?await subscriptions.enabled():false,nativeEth: true, ownerApproval: 'owner_approve_and_execute', usdDecimals: 6, monitoring: false, x402: false },
+          capabilities: { subscriptions:subscriptions?await subscriptions.enabled():false,ccip:service.chain.ccipEnabled?await service.chain.ccipEnabled():false,nativeEth: true, ownerApproval: 'owner_approve_and_execute', usdDecimals: 6, monitoring: false, x402: false },
           auth: { kind: 'personal_sign_challenge', domain: config.authDomain, chainId: config.chainId },
           docs: Object.keys(docs).map(slug => ({ slug, title: docs[slug].title, url: `/api/v1/docs/${slug}` })),
         }); return;
@@ -115,11 +122,12 @@ export function createApiServer(service: AegisService) {
       }
       const intentMatch = path.match(/^\/api\/v1\/intents\/([a-f0-9-]+)(?:\/(preview|submit))?$/);
       if (request.method === 'GET' && intentMatch && !intentMatch[2]) { send(200, service.getIntent(owner, intentMatch[1])); return; }
-      const taskMatch = path.match(/^\/api\/v1\/tasks\/([a-f0-9-]+)(?:\/(owner-tx|observed-tx|evidence))?$/);
+      const taskMatch = path.match(/^\/api\/v1\/tasks\/([a-f0-9-]+)(?:\/(owner-tx|observed-tx|evidence|ccip-delivery))?$/);
       if (request.method === 'GET' && taskMatch) {
         const [, id, action] = taskMatch;
         if (!action) { send(200, service.publicTask(service.getTask(owner, id))); return; }
         if (action === 'evidence') { send(200, service.evidence(owner, id)); return; }
+        if (action === 'ccip-delivery') { send(200, await service.ccipDelivery(owner, id)); return; }
         if (action === 'owner-tx') {
           const kind = z.enum(['approve', 'cancel']).parse(url.searchParams.get('action'));
           send(200, await service.ownerTx(owner, id, kind)); return;
@@ -145,7 +153,7 @@ export function createApiServer(service: AegisService) {
             }
             if (request.method === 'POST' && action === 'preview') {
               const body = previewSchema.parse(raw);
-              return { status: 200, body: await service.preview(owner, id, body.expectedRevision, body.maxUsdCost6) };
+              return { status: 200, body: await service.preview(owner, id, body.expectedRevision, body.maxUsdCost6, body.maxFeeWei) };
             }
             if (request.method === 'POST' && action === 'submit') {
               const body = submitSchema.parse(raw);

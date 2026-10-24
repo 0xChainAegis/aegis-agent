@@ -6,6 +6,15 @@ const UNSAFE_PRIVATE_KEYS = new Set([
   "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
 ]);
 
+const SEPOLIA_CCIP = Object.freeze({
+  routerAddress: "0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59",
+  tokenAddress: "0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05",
+  destinationTokenAddress: "0x88A2d74F47a237a62e7A51cdDa67270CE381555e",
+  destinationChainId: 84532,
+  destinationChainSelector: 10_344_971_235_874_465_080n,
+  destinationNetwork: "base-sepolia",
+});
+
 function required(env, name) {
   const value = env[name]?.trim();
   if (!value) throw new Error(`${name} is required for a Sepolia deployment`);
@@ -46,6 +55,13 @@ function parsePositiveBigInt(env, name) {
   return value;
 }
 
+function parseFlag(env, name) {
+  const raw = env[name];
+  if (raw === undefined || raw === "0") return false;
+  if (raw === "1") return true;
+  throw new Error(`${name} must be 0 or 1`);
+}
+
 function readSepoliaDeploymentConfig(env = process.env) {
   const privateKey = parsePrivateKey(env);
   const deployerAddress = new Wallet(privateKey).address;
@@ -82,10 +98,18 @@ function readSepoliaDeploymentConfig(env = process.env) {
     throw new Error("DEPLOY_CONFIRMATIONS must be an integer between 1 and 64");
   }
 
+  const ccipEnabled = parseFlag(env, "CCIP_ENABLED");
+  const ccip = ccipEnabled ? {
+    ...SEPOLIA_CCIP,
+    tokenFundingWei: parsePositiveBigInt(env, "CCIP_TOKEN_FUNDING_WEI"),
+    feeFundingWei: parsePositiveBigInt(env, "CCIP_FEE_FUNDING_WEI"),
+    testTokenPriceUsd8: parsePositiveBigInt(env, "CCIP_TEST_TOKEN_PRICE_USD8"),
+  } : null;
   return {
     privateKey, rpcUrl, deployerAddress, ownerAddress, agentAddress, recipientAddress, feedAddress,
     autoLimitUsd6, perTxLimitUsd6, dailyLimitUsd6, maxPriceAge, vaultFundingWei, confirmations,
+    ccip,
   };
 }
 
-module.exports = { readSepoliaDeploymentConfig, UNSAFE_PRIVATE_KEYS };
+module.exports = { readSepoliaDeploymentConfig, UNSAFE_PRIVATE_KEYS, SEPOLIA_CCIP };

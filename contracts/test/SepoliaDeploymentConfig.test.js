@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { Wallet, ZeroAddress } = require("ethers");
 const { ethers } = require("hardhat");
-const { readSepoliaDeploymentConfig } = require("../scripts/sepolia-config");
+const { readSepoliaDeploymentConfig, SEPOLIA_CCIP } = require("../scripts/sepolia-config");
 
 const privateKey = `0x${"11".repeat(32)}`;
 
@@ -28,6 +28,7 @@ describe("Sepolia deployment configuration", function () {
     expect(config.deployerAddress).to.equal(config.ownerAddress);
     expect(config.autoLimitUsd6).to.equal(10_000_000n);
     expect(config.confirmations).to.equal(2);
+    expect(config.ccip).to.equal(null);
   });
 
   it("accepts a distinct public final Owner without changing the deployment signer", function () {
@@ -78,5 +79,36 @@ describe("Sepolia deployment configuration", function () {
     expect(() => readSepoliaDeploymentConfig({ ...validEnv(), RPC_URL: "http://example.invalid" })).to.throw("must use HTTPS");
     const owner = new Wallet(privateKey).address;
     expect(() => readSepoliaDeploymentConfig({ ...validEnv(), AGENT_ADDRESS: owner })).to.throw("three different addresses");
+  });
+
+  it("enables only the canonical Sepolia to Base Sepolia CCIP-BnM lane", function () {
+    const config = readSepoliaDeploymentConfig({
+      ...validEnv(),
+      CCIP_ENABLED: "1",
+      CCIP_TOKEN_FUNDING_WEI: "1000000000000000000",
+      CCIP_FEE_FUNDING_WEI: "10000000000000000",
+      CCIP_TEST_TOKEN_PRICE_USD8: "100000000",
+    });
+    expect(config.ccip).to.deep.equal({
+      ...SEPOLIA_CCIP,
+      tokenFundingWei: 1_000_000_000_000_000_000n,
+      feeFundingWei: 10_000_000_000_000_000n,
+      testTokenPriceUsd8: 100_000_000n,
+    });
+  });
+
+  it("rejects ambiguous, empty, and nonpositive CCIP deployment funding", function () {
+    expect(() => readSepoliaDeploymentConfig({ ...validEnv(), CCIP_ENABLED: "yes" })).to.throw("CCIP_ENABLED must be 0 or 1");
+    for (const name of ["CCIP_TOKEN_FUNDING_WEI", "CCIP_FEE_FUNDING_WEI", "CCIP_TEST_TOKEN_PRICE_USD8"]) {
+      const env = {
+        ...validEnv(),
+        CCIP_ENABLED: "1",
+        CCIP_TOKEN_FUNDING_WEI: "1",
+        CCIP_FEE_FUNDING_WEI: "1",
+        CCIP_TEST_TOKEN_PRICE_USD8: "1",
+        [name]: "0",
+      };
+      expect(() => readSepoliaDeploymentConfig(env)).to.throw(`${name} must be greater than zero`);
+    }
   });
 });

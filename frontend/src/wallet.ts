@@ -27,6 +27,7 @@ const valueSchema = z.string().refine(value => {
 const configSchema = z.object({
   mode: z.enum(['local_chain', 'testnet', 'mock']), chainId: chainIdSchema,
   ownerAddress: addressSchema, walletAddress: addressSchema,
+  ccipSenderAddress: addressSchema.nullable().optional(),
   rpcUrl: z.string().url().nullable().optional(),
   localTestWalletAvailable: z.boolean().optional(),
 }).superRefine((config, context) => {
@@ -87,11 +88,14 @@ export function localWalletAvailable(input: unknown): boolean {
 let provider: WalletProvider | undefined;
 let activeConnection: WalletConnection | undefined;
 let activeWallet = '';
+let activeCcipSender = '';
 let activeOwner = '';
 let authenticated = false;
 let connectionRevision = 0;
 export function getActiveProvider() { return provider; }
-export function disconnectProvider() { provider = undefined; activeConnection = undefined; activeWallet = ''; activeOwner = ''; authenticated = false; connectionRevision++; }
+// Owner approvals may target only a contract from the verified deployment: the wallet, or the CCIP sender when one is configured.
+const isApprovalTarget = (target: string, wallet: string, ccipSender: string) => target.toLowerCase() === wallet || (ccipSender !== '' && target.toLowerCase() === ccipSender);
+export function disconnectProvider() { provider = undefined; activeConnection = undefined; activeWallet = ''; activeCcipSender = ''; activeOwner = ''; authenticated = false; connectionRevision++; }
 
 function localProvider(config: WalletConfig): WalletProvider {
   const url = localRpc(config);
@@ -127,7 +131,7 @@ function localProvider(config: WalletConfig): WalletProvider {
       }
       if (method === 'eth_sendTransaction') {
         const [tx] = read(z.tuple([localTransactionSchema]), params, '本地 Owner 交易格式无效。');
-        if (tx.from.toLowerCase() !== config.ownerAddress.toLowerCase() || tx.to.toLowerCase() !== config.walletAddress.toLowerCase() || BigInt(tx.value) !== 0n) throw new Error('本地 Owner 入口只允许向当前钱包合约发送无附带金额的审批或取消交易。');
+        if (tx.from.toLowerCase() !== config.ownerAddress.toLowerCase() || !isApprovalTarget(tx.to, config.walletAddress.toLowerCase(), config.ccipSenderAddress?.toLowerCase() ?? '') || BigInt(tx.value) !== 0n) throw new Error('本地 Owner 入口只允许向当前钱包合约或已配置的 CCIP Sender 发送无附带金额的审批或取消交易。');
         return read(transactionHashSchema, await rpc(method, [tx]), '本地节点未返回有效交易哈希。');
       }
       throw new Error('本地测试钱包不支持 ' + method + '。');
@@ -193,6 +197,7 @@ async function connectSelected(expectedChainId: number, input: unknown, selected
     provider = selected;
     activeConnection = connection;
     activeWallet = config.walletAddress.toLowerCase();
+    activeCcipSender = config.ccipSenderAddress?.toLowerCase() ?? '';
     activeOwner = config.ownerAddress.toLowerCase();
     return connection;
   } finally {
@@ -273,7 +278,7 @@ export async function sendOwnerTransaction(input: unknown, currentAddress: strin
   const selected = local ? localProvider(local) : provider;
   const revision = connectionRevision;
   if (!selected) throw new Error('请先连接所选 Owner 钱包。');
-  if (!authenticated || !hasSession() || !activeConnection || activeConnection.role !== 'owner' || activeConnection.address.toLowerCase() !== address.toLowerCase() || activeWallet !== tx.to.toLowerCase() || (local && activeWallet !== local.walletAddress.toLowerCase())) throw new Error('请先以当前资金池 Owner 签名登录，再发起审批交易。');
+  if (!authenticated || !hasSession() || !activeConnection || activeConnection.role !== 'owner' || activeConnection.address.toLowerCase() !== address.toLowerCase() || !isApprovalTarget(tx.to, activeWallet, activeCcipSender) || (local && activeWallet !== local.walletAddress.toLowerCase())) throw new Error('请先以当前资金池 Owner 签名登录，再发起审批交易。');
   let changed = false;
   const accountsChanged = (value: unknown) => { const result = accountsSchema.safeParse(value); if (!result.success || result.data[0]?.toLowerCase() !== address.toLowerCase()) changed = true; };
   const chainChanged = (value: unknown) => { const result = chainHexSchema.safeParse(value); if (!result.success || result.data !== tx.chainId) changed = true; };
@@ -285,7 +290,7 @@ export async function sendOwnerTransaction(input: unknown, currentAddress: strin
     const accounts = read(accountsSchema, await selected.request({ method: 'eth_accounts' }), '钱包没有提供有效账户。');
     const chainId = read(chainHexSchema, await selected.request({ method: 'eth_chainId' }), '钱包没有返回有效网络。');
     if (changed || revision !== connectionRevision || !authenticated || !hasSession() || accounts[0]?.toLowerCase() !== address.toLowerCase() || tx.from.toLowerCase() !== address.toLowerCase()) throw new Error('钱包账户已变更或不是任务 Owner，已停止签名。');
-    if (chainId !== tx.chainId || BigInt(tx.value) !== 0n || (local && tx.to.toLowerCase() !== local.walletAddress.toLowerCase()) || (!local && (provider !== selected || activeConnection?.role !== 'owner' || activeConnection.address.toLowerCase() !== address.toLowerCase() || activeWallet !== tx.to.toLowerCase()))) throw new Error('钱包网络或资金池与任务不同，已停止签名。');
+    if (chainId !== tx.chainId || BigInt(tx.value) !== 0n || (local && !isApprovalTarget(tx.to, local.walletAddress.toLowerCase(), local.ccipSenderAddress?.toLowerCase() ?? '')) || (!local && (provider !== selected || activeConnection?.role !== 'owner' || activeConnection.address.toLowerCase() !== address.toLowerCase() || !isApprovalTarget(tx.to, activeWallet, activeCcipSender)))) throw new Error('钱包网络或资金池与任务不同，已停止签名。');
     return read(transactionHashSchema, await selected.request({
       method: 'eth_sendTransaction', params: [{ from: address, to: tx.to, data: tx.data, value: '0x0' }],
     }), '钱包没有返回有效交易哈希，请核对原交易。');

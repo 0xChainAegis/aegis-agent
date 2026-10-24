@@ -11,6 +11,16 @@ async function deployLocal({ env = process.env, persist = true, log = true } = {
   if (fixtureFlag !== undefined && fixtureFlag !== '0' && fixtureFlag !== '1') {
     throw new Error('AEGIS_LOCAL_SUBSCRIPTION_FIXTURE must be 0 or 1');
   }
+  const ccipFixtureFlag = env.AEGIS_LOCAL_CCIP_FIXTURE;
+  if (ccipFixtureFlag !== undefined && ccipFixtureFlag !== '0' && ccipFixtureFlag !== '1') {
+    throw new Error('AEGIS_LOCAL_CCIP_FIXTURE must be 0 or 1');
+  }
+  const ccipFixtureEnabled = ccipFixtureFlag === '1';
+  const selectorText = env.AEGIS_LOCAL_CCIP_DESTINATION_SELECTOR ?? '10344971235874465080';
+  if (!/^[1-9]\d*$/.test(selectorText) || BigInt(selectorText) >= 2n ** 64n) {
+    throw new Error('AEGIS_LOCAL_CCIP_DESTINATION_SELECTOR must be a positive uint64');
+  }
+  const ccipDestinationChainSelector = BigInt(selectorText);
   const [owner, agent, recipient] = await ethers.getSigners();
   if (!owner || !agent || !recipient || new Set([owner.address, agent.address, recipient.address]).size !== 3) {
     throw new Error("Three distinct local owner/agent/recipient accounts required");
@@ -27,9 +37,9 @@ async function deployLocal({ env = process.env, persist = true, log = true } = {
     throw new Error("Local Owner must be an externally owned wallet, not a pool or another contract");
   }
   // Reject an address of a contract this deployment is about to create before
-  // sending any deployment transaction. The six CREATEs retain the default order.
+  // sending any deployment transaction. CCIP adds four opt-in fixture contracts.
   const firstNonce = await ethers.provider.getTransactionCount(owner.address);
-  const predictedContracts = Array.from({ length: 6 }, (_, offset) => ethers.getCreateAddress({ from: owner.address, nonce: firstNonce + offset }));
+  const predictedContracts = Array.from({ length: ccipFixtureEnabled ? 10 : 6 }, (_, offset) => ethers.getCreateAddress({ from: owner.address, nonce: firstNonce + offset }));
   if (predictedContracts.some(address => same(address, presenter))) {
     throw new Error("Local Owner cannot be an address of this deployment's contracts");
   }
@@ -42,7 +52,21 @@ async function deployLocal({ env = process.env, persist = true, log = true } = {
   await policy.waitForDeployment();
   const wallet = await ethers.deployContract("AegisWallet", [owner.address, await acl.getAddress(), await att.getAddress(), await policy.getAddress()]);
   await wallet.waitForDeployment();
+  let ccipTokenFeed;
+  let ccipRouter;
+  let ccipToken;
+  let ccipSender;
+  if (ccipFixtureEnabled) {
+    ccipTokenFeed = await ethers.deployContract('MockV3Aggregator', [8, ethers.parseUnits('1', 8)]);
+    ccipRouter = await ethers.deployContract('MockCCIPRouter');
+    ccipToken = await ethers.deployContract('MockERC20', ['Chainlink CCIP-BnM (local)', 'CCIP-BnM', 18]);
+    ccipSender = await ethers.deployContract('AegisCCIPSender', [owner.address, await ccipRouter.getAddress(), await att.getAddress(), await policy.getAddress()]);
+    await Promise.all([ccipTokenFeed.waitForDeployment(), ccipRouter.waitForDeployment(), ccipToken.waitForDeployment(), ccipSender.waitForDeployment()]);
+  }
   await (await oracle.setFeed(ethers.ZeroAddress, await feed.getAddress(), 18)).wait();
+  if (ccipFixtureEnabled) {
+    await (await oracle.setFeed(await ccipToken.getAddress(), await ccipTokenFeed.getAddress(), 18)).wait();
+  }
   await (await oracle.lockConfiguration()).wait();
   await (await policy.setConsumer(await wallet.getAddress(), true)).wait();
   await (await policy.setPolicyManager(await wallet.getAddress(), true)).wait();
@@ -54,6 +78,19 @@ async function deployLocal({ env = process.env, persist = true, log = true } = {
   // Explicit fixture values only. Normal deployments keep subscriptions disabled.
   if (fixtureFlag === '1') {
     await (await wallet.configureSubscriptionPolicy(10_000_000, 86_400, 24)).wait();
+  }
+  if (ccipFixtureEnabled) {
+    const senderAddress = await ccipSender.getAddress();
+    await (await policy.setConsumer(senderAddress, true)).wait();
+    await (await policy.setPolicyManager(senderAddress, true)).wait();
+    await (await att.grantRole(await att.ATTESTER_ROLE(), senderAddress)).wait();
+    await (await att.grantRole(await att.APPROVER_ROLE(), senderAddress)).wait();
+    await (await ccipSender.setDestinationChainAllowed(ccipDestinationChainSelector, true)).wait();
+    await (await ccipRouter.setFee(ethers.parseEther('0.001'))).wait();
+    await (await ccipToken.mint(owner.address, ethers.parseUnits('1000', 18))).wait();
+    await (await ccipToken.approve(senderAddress, ethers.parseUnits('1000', 18))).wait();
+    await (await ccipSender.depositToken(await ccipToken.getAddress(), ethers.parseUnits('1000', 18))).wait();
+    await (await owner.sendTransaction({ to: senderAddress, value: ethers.parseEther('1') })).wait();
   }
   await (await owner.sendTransaction({ to: await wallet.getAddress(), value: ethers.parseEther("1") })).wait();
   const aclRoles = [await acl.OWNER_ROLE(), await acl.GUARDIAN_ROLE(), await acl.DEFAULT_ADMIN_ROLE()];
@@ -67,7 +104,8 @@ async function deployLocal({ env = process.env, persist = true, log = true } = {
     for (const role of attestationRoles) {
       if (!(await att.hasRole(role, presenter))) throw new Error("Local Owner attestation role handoff failed");
     }
-    for (const contract of [wallet, policy, oracle]) {
+    const ownedContracts = ccipFixtureEnabled ? [wallet, policy, oracle, ccipSender] : [wallet, policy, oracle];
+    for (const contract of ownedContracts) {
       await (await contract.transferOwnership(presenter)).wait();
       if (!same(await contract.owner(), presenter)) throw new Error("Local contract ownership handoff failed");
     }
@@ -81,6 +119,13 @@ async function deployLocal({ env = process.env, persist = true, log = true } = {
     attestationAddress: await att.getAddress(), oracleAddress: await oracle.getAddress(),
     policyEngineAddress: await policy.getAddress(), feedAddress: await feed.getAddress(),
   };
+  const ccipAddresses = ccipFixtureEnabled ? {
+    ccipSenderAddress: await ccipSender.getAddress(),
+    ccipRouterAddress: await ccipRouter.getAddress(),
+    ccipTokenAddress: await ccipToken.getAddress(),
+    ccipTokenFeedAddress: await ccipTokenFeed.getAddress(),
+    ccipDestinationChainSelector: ccipDestinationChainSelector.toString(),
+  } : {};
   const bindingsValid =
     [await wallet.owner(), await policy.owner(), await oracle.owner()].every(address => same(address, presenter)) &&
     same(await wallet.acl(), addresses.aclAddress) && same(await wallet.attestations(), addresses.attestationAddress) &&
@@ -94,6 +139,19 @@ async function deployLocal({ env = process.env, persist = true, log = true } = {
     (await wallet.dailyLimitUsd6()) === 15_000_000n && (await wallet.maxPriceAge()) === 3600n &&
     (await ethers.provider.getBalance(addresses.walletAddress)) === ethers.parseEther("1");
   if (!bindingsValid) throw new Error("Local deployment bindings or policy verification failed");
+  if (ccipFixtureEnabled) {
+    const senderAddress = ccipAddresses.ccipSenderAddress;
+    const ccipBindingsValid =
+      same(await ccipSender.owner(), presenter) && same(await ccipSender.router(), ccipAddresses.ccipRouterAddress) &&
+      same(await ccipSender.attestations(), addresses.attestationAddress) && same(await ccipSender.policyEngine(), addresses.policyEngineAddress) &&
+      same(await oracle.feeds(ccipAddresses.ccipTokenAddress), ccipAddresses.ccipTokenFeedAddress) &&
+      await policy.authorizedConsumers(senderAddress) && await policy.policyManagers(senderAddress) &&
+      await policy.allowedDestinationChains(ccipDestinationChainSelector) && await policy.allowedRecipients(recipient.address) &&
+      await att.hasRole(await att.ATTESTER_ROLE(), senderAddress) && await att.hasRole(await att.APPROVER_ROLE(), senderAddress) &&
+      (await ccipToken.balanceOf(senderAddress)) === ethers.parseUnits('1000', 18) &&
+      (await ethers.provider.getBalance(senderAddress)) === ethers.parseEther('1');
+    if (!ccipBindingsValid) throw new Error('Local CCIP fixture bindings or funding verification failed');
+  }
   for (const [contract, roles] of [[acl, aclRoles], [att, attestationRoles]]) {
     for (const role of roles) {
       if (!(await contract.hasRole(role, presenter))) throw new Error("Local Owner roles were not preserved");
@@ -106,11 +164,12 @@ async function deployLocal({ env = process.env, persist = true, log = true } = {
     chainId: Number(chain.chainId),
     rpcUrl: "http://127.0.0.1:8545",
     ...addresses,
+    ...ccipAddresses,
     ownerAddress: presenter,
     mockUpdaterAddress: owner.address,
     agentAddress: agent.address,
     recipientAddress: recipient.address,
-    abiVersion: "aegis.native-policy.v2",
+    abiVersion: ccipFixtureEnabled ? "aegis.unified-actions.local.v1" : "aegis.native-policy.v2",
   };
   if (persist) {
     const directory = path.join(__dirname, "..", "deployments");

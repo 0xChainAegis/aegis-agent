@@ -12,6 +12,8 @@ const hash = '0x' + 'ab'.repeat(32);
 const signature = '0x' + 'cd'.repeat(65);
 const config = { mode: 'local_chain', chainId: 31337, ownerAddress: owner, walletAddress: treasury, rpcUrl: 'http://127.0.0.1:8545' };
 const tx = { from: owner, to: treasury, chainId: 31337, data: '0x1234', value: '0' };
+const ccipSender = '0x4444444444444444444444444444444444444444';
+const ccipConfig = { ...config, ccipSenderAddress: ccipSender };
 type Request = Parameters<WalletProvider['request']>[0];
 interface FakeWallet extends WalletProvider {
   account: string; chain: string; calls: Request[];
@@ -50,10 +52,10 @@ function challenge(overrides: Record<string, unknown> = {}) {
 function session(overrides: Record<string, unknown> = {}) {
   return { token: 'unit-test-session', address: owner, chainId: 31337, expiresAt: new Date(Date.now() + 60_000).toISOString(), ...overrides };
 }
-async function login(selected: FakeWallet) {
-  const connection = await connectBrowserWallet(31337, config, selected);
+async function login(selected: FakeWallet, deployment: typeof config | typeof ccipConfig = config) {
+  const connection = await connectBrowserWallet(31337, deployment, selected);
   vi.mocked(api).mockResolvedValueOnce(challenge()).mockResolvedValueOnce(session());
-  await authenticateOwner(connection, config);
+  await authenticateOwner(connection, deployment);
   return connection;
 }
 beforeEach(() => {
@@ -214,6 +216,22 @@ describe('Owner login and transaction guards', () => {
     await expect(sendOwnerTransaction({ ...tx, value: '1' }, owner)).rejects.toThrow('已停止签名');
     selected.chain = '0xaa36a7';
     await expect(sendOwnerTransaction(tx, owner)).rejects.toThrow('已停止签名');
+    expect(selected.calls.some(call => call.method === 'eth_sendTransaction')).toBe(false);
+  });
+
+  it('lets the Owner approve a CCIP transfer through the configured sender, and nothing else', async () => {
+    const selected = wallet();
+    await login(selected, ccipConfig);
+    expect(await sendOwnerTransaction({ ...tx, to: ccipSender }, owner)).toBe(hash);
+    expect(await sendOwnerTransaction(tx, owner)).toBe(hash);
+    await expect(sendOwnerTransaction({ ...tx, to: viewer }, owner)).rejects.toThrow();
+    expect(selected.calls.filter(call => call.method === 'eth_sendTransaction')).toHaveLength(2);
+  });
+
+  it('refuses a CCIP sender target when the verified deployment configures no CCIP route', async () => {
+    const selected = wallet();
+    await login(selected);
+    await expect(sendOwnerTransaction({ ...tx, to: ccipSender }, owner)).rejects.toThrow();
     expect(selected.calls.some(call => call.method === 'eth_sendTransaction')).toBe(false);
   });
 

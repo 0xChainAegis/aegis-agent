@@ -14,6 +14,18 @@ try {
     maxPriceAge: config.maxPriceAge.toString(),
     vaultFundingWei: config.vaultFundingWei.toString(),
     confirmations: config.confirmations,
+    ccip: config.ccip === null ? null : {
+      routerAddress: config.ccip.routerAddress,
+      tokenAddress: config.ccip.tokenAddress,
+      destinationTokenAddress: config.ccip.destinationTokenAddress,
+      destinationChainId: config.ccip.destinationChainId,
+      destinationChainSelector: config.ccip.destinationChainSelector.toString(),
+      destinationNetwork: config.ccip.destinationNetwork,
+      tokenFundingWei: config.ccip.tokenFundingWei.toString(),
+      feeFundingWei: config.ccip.feeFundingWei.toString(),
+      testTokenPriceUsd8: config.ccip.testTokenPriceUsd8.toString(),
+      priceSource: "OWNER_MAINTAINED_TESTNET_VALUE",
+    },
   };
   console.log("Sepolia environment validation passed (private key and RPC URL redacted).");
   console.log(JSON.stringify(safeSummary, null, 2));
