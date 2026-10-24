@@ -10,7 +10,7 @@
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts && npm run test:vitest",
-    "test:vitest": "vitest run test/ccip.spec.ts test/ccip-delivery.spec.ts test/readiness-cache.spec.ts test/rpc-concurrency.spec.ts test/sepolia-check.spec.ts test/sepolia-policy-check.spec.ts test/sepolia-policy-write.spec.ts test/sepolia-approval-check.spec.ts",
+    "test:vitest": "vitest run test/ccip.spec.ts test/ccip-delivery.spec.ts test/ccip-reconciler.spec.ts test/readiness-cache.spec.ts test/rpc-concurrency.spec.ts test/sepolia-check.spec.ts test/sepolia-policy-check.spec.ts test/sepolia-policy-write.spec.ts test/sepolia-approval-check.spec.ts",
     "check:sepolia": "node --env-file=../contracts/.env --import tsx src/check-sepolia.ts",
     "test:sepolia:policy": "node --env-file=../contracts/.env --import tsx src/check-sepolia-policy.ts",
     "test:sepolia:ccip": "node --env-file=../contracts/.env --import tsx src/check-sepolia-ccip.ts",

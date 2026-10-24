@@ -9,7 +9,7 @@ import { Store } from './store.js';
 import { type Gateway, type Quote, type Outcome, chainError } from './chain.js';
 import type { DraftInput } from './parser.js';
 import { createLlmClient, parseDraftWithLlm, type LlmIntentClient } from './llm.js';
-import { ApiError, Mutex } from './errors.js';
+import { ApiError, Mutex, errorMessage } from './errors.js';
 import { planHash } from './plan.js';
 import { checkCcipDelivery, terminalCcipDelivery } from './ccip-delivery.js';
 import type { SubscriptionConfig } from '@aegis/shared';
@@ -20,6 +20,14 @@ export interface InternalTask extends Task {
   lastBroadcastAt?: number; ownerObserved?: { hash: Hex; action: 'approve' | 'cancel' };
   eventData?: Record<string, string>; policyEvidence?: PolicyEvidence;
   lastError?: { code: string; message: string };
+  ccipDeliveryTracking?: { attempts: number; nextCheckAt: number; lastCheckedAt: string; lastError?: { code: string; message: string } };
+}
+const CCIP_RETRY_BASE_MS = 15_000;
+const CCIP_RETRY_MAX_MS = 300_000;
+export const CCIP_RECONCILE_BATCH_SIZE = 2;
+export function ccipRetryDelayMs(attempts: number): number {
+  const safeAttempts = Number.isSafeInteger(attempts) && attempts > 0 ? attempts : 1;
+  return Math.min(CCIP_RETRY_MAX_MS, CCIP_RETRY_BASE_MS * 2 ** Math.min(safeAttempts - 1, 5));
 }
 const digest = (text: string) => createHash('sha256').update(text).digest('hex');
 function canonical(value: unknown): string {
@@ -30,6 +38,7 @@ function canonical(value: unknown): string {
 export class AegisService {
   readonly writes = new Mutex();
   readonly worker = new Mutex();
+  readonly deliveryWorker = new Mutex();
   subscriptions?: SubscriptionReader;
   private subscriptionCommitment(intent: Intent) {
     const { status:_status,updatedAt:_updated,...frozen }=intent; return frozen;
@@ -179,7 +188,7 @@ export class AegisService {
     return task;
   }
   publicTask(task: InternalTask): Task & { lastError?: InternalTask['lastError'] } {
-    const { rawTransaction: _raw, broadcastAttempts: _attempts, lastBroadcastAt: _last, senderNonce: _nonce, ownerObserved: _owner, eventData: _event, policyEvidence: _policy, quoteId: _quote, ...safe } = task;
+    const { rawTransaction: _raw, broadcastAttempts: _attempts, lastBroadcastAt: _last, senderNonce: _nonce, ownerObserved: _owner, eventData: _event, policyEvidence: _policy, quoteId: _quote, ccipDeliveryTracking: _deliveryTracking, ...safe } = task;
     return safe;
   }
   private save(task: InternalTask) {
@@ -240,8 +249,47 @@ export class AegisService {
       if (current.ccipDelivery) return current.ccipDelivery;
       if (current.messageId?.toLowerCase() !== terminal.messageId.toLowerCase()) throw new ApiError(409, 'CCIP_DELIVERY_TASK_CHANGED', 'CCIP 任务在核验期间已变化');
       current.ccipDelivery = terminal;
+      delete current.ccipDeliveryTracking;
       this.save(current);
       return terminal;
+    });
+  }
+  async reconcileCcipDeliveries(fetchImpl: typeof fetch = fetch, now = Date.now(), batchSize = CCIP_RECONCILE_BATCH_SIZE) {
+    return this.deliveryWorker.run(async () => {
+      const tasks = this.store.list<InternalTask>('task');
+      const eligible = tasks.filter(task => task.actionKind === 'CCIP_TRANSFER' && task.status === 'EXECUTED' && task.messageId && !task.ccipDelivery);
+      const limit = Number.isSafeInteger(batchSize) && batchSize > 0 ? Math.min(batchSize, CCIP_RECONCILE_BATCH_SIZE) : CCIP_RECONCILE_BATCH_SIZE;
+      const due = eligible.filter(task => !task.ccipDeliveryTracking || task.ccipDeliveryTracking.nextCheckAt <= now).slice(0, limit);
+      let terminal = 0;
+      let failed = 0;
+      for (const candidate of due) {
+        let result: Awaited<ReturnType<typeof checkCcipDelivery>> | undefined;
+        let failure: { code: string; message: string } | undefined;
+        try {
+          result = await this.ccipDelivery(candidate.ownerAddress as Address, candidate.taskId, fetchImpl);
+          if (result.state === 'DELIVERED' || result.state === 'FAILED') terminal += 1;
+        } catch (error) {
+          failed += 1;
+          failure = error instanceof ApiError
+            ? { code: error.code, message: error.message.slice(0, 400) }
+            : { code: 'CCIP_STATUS_UNAVAILABLE', message: errorMessage(error) };
+        }
+        if (result?.state === 'DELIVERED' || result?.state === 'FAILED') continue;
+        await this.worker.run(async () => {
+          const current = this.store.get<InternalTask>('task', candidate.taskId, candidate.ownerAddress);
+          if (!current || current.ccipDelivery || current.messageId?.toLowerCase() !== candidate.messageId?.toLowerCase()) return;
+          const attempts = (current.ccipDeliveryTracking?.attempts ?? 0) + 1;
+          current.ccipDeliveryTracking = {
+            attempts,
+            nextCheckAt: now + ccipRetryDelayMs(attempts),
+            lastCheckedAt: new Date(now).toISOString(),
+            ...(failure ? { lastError: failure } : {}),
+          };
+          // Tracking metadata is private and must not rewrite the task's public business timestamp.
+          this.store.put('task', current.taskId, current.ownerAddress, current);
+        });
+      }
+      return { eligible: eligible.length, due: due.length, checked: due.length, terminal, failed };
     });
   }
   evidence(owner: Address, id: string) {
