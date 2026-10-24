@@ -1,0 +1,15 @@
+{
+  "testedAt": "2026-10-24T05:42:18.666Z",
+  "machine": "presenting computer (Windows), Sepolia demo build",
+  "provider": "anthropic-compatible API",
+  "model": "claude-haiku-4-5",
+  "apiRequests": 2,
+  "scope": "real model extraction and existing draft validation; injection rejected before model; no payment task or chain writes",
+  "secretsIncluded": false,
+  "results": [
+    { "name": "complete Chinese request", "latencyMs": 3880, "parser": { "kind": "llm", "fallback": false, "reason": "LLM_OK" }, "status": "DRAFT", "amountWei": "100000000000000" },
+    { "name": "missing amount asks back", "latencyMs": 3034, "parser": { "kind": "llm", "fallback": false, "reason": "LLM_OK" }, "status": "NEEDS_INPUT", "question": "请补充明确的 ETH 数额（例如 0.001 ETH）。" },
+    { "name": "privilege-escalation instruction rejected", "parser": { "kind": "rule_parser", "fallback": true, "reason": "PROMPT_BLOCKED" }, "status": "NEEDS_INPUT", "modelCalls": 0 }
+  ],
+  "afterTest": "The Sepolia web app was restarted with planner kind=llm, mode=live, model=claude-haiku-4-5; /health returned ready=true at 2026-10-24T05:44Z."
+}
