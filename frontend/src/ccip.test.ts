@@ -1,6 +1,6 @@
 import { encodeFunctionData, parseAbi } from 'viem';
 import { describe, expect, it } from 'vitest';
-import { ccipDeliverySchema, ccipFormSchema, validateOwnerTransaction } from './ccip';
+import { ccipDeliverySchema, ccipFormSchema, ccipTaskBindingSchema, ccipTaskDisplayState, validateOwnerTransaction } from './ccip';
 
 const abi = parseAbi(['function approveAndExecute(uint64 attestationId)', 'function cancelPending(uint64 attestationId)']);
 const owner='0x1111111111111111111111111111111111111111';
@@ -10,7 +10,7 @@ const token='0x4444444444444444444444444444444444444444';
 const destinationToken='0x5555555555555555555555555555555555555555';
 const wallet='0x6666666666666666666666666666666666666666';
 const config={chainId:31337,ownerAddress:owner,walletAddress:wallet,ccipSenderAddress:sender,ccipTokenAddress:token,ccipDestinationChainSelector:'99',capabilities:{ccip:true}};
-const task={actionKind:'CCIP_TRANSFER',taskId:'task',chainId:31337,walletAddress:sender,requestHash:`0x${'ab'.repeat(32)}`,attestationId:'7',recipient,amountWei:'1000000000000',maxUsdCost6:'2',tokenAddress:token,destinationChainSelector:'99',maxFeeWei:'100'};
+const task={actionKind:'CCIP_TRANSFER',taskId:'task',status:'EXECUTED',chainId:31337,walletAddress:sender,requestHash:`0x${'ab'.repeat(32)}`,attestationId:'7',recipient,amountWei:'1000000000000',maxUsdCost6:'2',tokenAddress:token,ccipSenderAddress:sender,destinationChainSelector:'99',maxFeeWei:'100',quotedFeeWei:'90',planHash:`0x${'ef'.repeat(32)}`};
 const tx={from:owner,to:sender,data:encodeFunctionData({abi,functionName:'approveAndExecute',args:[7n]}),value:'0',chainId:31337,action:'approve',chainBindingVerified:true,taskId:'task',requestHash:task.requestHash,attestationId:'7',recipient,amountWei:task.amountWei,maxUsdCost6:'2',tokenAddress:token,destinationChainSelector:'99',maxFeeWei:'100'};
 
 describe('CCIP browser boundaries',()=>{
@@ -31,9 +31,23 @@ describe('CCIP browser boundaries',()=>{
     expect(()=>validateOwnerTransaction({chainId:31337,ownerAddress:owner,walletAddress:wallet},{...nativeTask,walletAddress:sender},nativeTx,'approve')).toThrow();
   });
   it('requires a destination receipt for delivered status and validates all external delivery fields',()=>{
-    const delivery={state:'DELIVERED',messageId:`0x${'11'.repeat(32)}`,apiStatus:'SUCCESS',sourceTransactionHash:`0x${'22'.repeat(32)}`,destinationTransactionHash:`0x${'33'.repeat(32)}`,sourceChainId:11155111,destinationChainId:84532,destinationChainSelector:'99',sourceTokenAddress:token,destinationTokenAddress:destinationToken,amount:'1',explorerUrl:`https://ccip.chain.link/#/side-drawer/msg/0x${'11'.repeat(32)}`};
+    const delivery={state:'DELIVERED',messageId:`0x${'11'.repeat(32)}`,apiStatus:'SUCCESS',sourceTransactionHash:`0x${'22'.repeat(32)}`,destinationTransactionHash:`0x${'33'.repeat(32)}`,sourceChainId:11155111,destinationChainId:84532,destinationChainSelector:'99',sourceTokenAddress:token,destinationTokenAddress:destinationToken,amount:'1',explorerUrl:`https://ccip.chain.link/#/side-drawer/msg/0x${'11'.repeat(32)}`,verifiedAt:'2026-10-24T01:02:03.000Z'};
     expect(ccipDeliverySchema.parse(delivery).state).toBe('DELIVERED');
     expect(ccipDeliverySchema.safeParse({...delivery,destinationTransactionHash:null}).success).toBe(false);
     expect(ccipDeliverySchema.safeParse({...delivery,explorerUrl:'javascript:alert(1)'}).success).toBe(false);
+  });
+  it('keeps source-confirmed CCIP work active until a validated terminal delivery exists',()=>{
+    expect(ccipTaskDisplayState(task)).toEqual({column:'ready',label:'源链已确认 · 等待目标链'});
+    expect(ccipTaskDisplayState({...task,ccipDelivery:{state:'DELIVERED',messageId:`0x${'11'.repeat(32)}`,apiStatus:'SUCCESS',sourceTransactionHash:`0x${'22'.repeat(32)}`,destinationTransactionHash:`0x${'33'.repeat(32)}`,sourceChainId:11155111,destinationChainId:84532,destinationChainSelector:'99',sourceTokenAddress:token,destinationTokenAddress:destinationToken,amount:'1',explorerUrl:`https://ccip.chain.link/#/side-drawer/msg/0x${'11'.repeat(32)}`,verifiedAt:'2026-10-24T01:02:03.000Z'}})).toEqual({column:'done',label:'目标链已到账'});
+  });
+  it('shows a persisted delivery failure as blocked and rejects terminal evidence without verification time',()=>{
+    const failed={state:'FAILED',messageId:`0x${'11'.repeat(32)}`,apiStatus:'FAILED',sourceTransactionHash:`0x${'22'.repeat(32)}`,destinationTransactionHash:null,sourceChainId:11155111,destinationChainId:84532,destinationChainSelector:'99',sourceTokenAddress:token,destinationTokenAddress:destinationToken,amount:'1',explorerUrl:`https://ccip.chain.link/#/side-drawer/msg/0x${'11'.repeat(32)}`,verifiedAt:'2026-10-24T01:02:03.000Z'};
+    expect(ccipTaskDisplayState({...task,ccipDelivery:failed})).toEqual({column:'blocked',label:'跨链交付失败'});
+    expect(ccipTaskBindingSchema.safeParse({...task,ccipDelivery:{...failed,verifiedAt:undefined}}).success).toBe(false);
+  });
+  it('does not apply CCIP labels to empty, malformed, or ordinary payment tasks',()=>{
+    expect(ccipTaskDisplayState(null)).toBeNull();
+    expect(ccipTaskDisplayState({})).toBeNull();
+    expect(ccipTaskDisplayState({...task,actionKind:'NATIVE_TRANSFER'})).toBeNull();
   });
 });

@@ -60,6 +60,7 @@ export const taskResponseSchema = z.looseObject({
   recipient: addressSchema, amountWei: uintSchema, maxUsdCost6: uintSchema,
   txHash: hashSchema.nullable().optional(), requestHash: hashSchema.nullable().optional(),
   reasonCodes: z.array(z.string()).optional(), availableActions: z.array(z.string()).optional(),
+  ccipDelivery: ccipDeliverySchema.optional(),
 });
 export const tasksResponseSchema = z.looseObject({ tasks: z.array(taskResponseSchema) });
 export const ownerTransactionResponseSchema = z.looseObject({

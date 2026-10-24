@@ -12,7 +12,7 @@ import { formatPolicyReasons } from './policy-reasons';
 import { bindingFromConfig, loadSettings, observationFromSnapshot, parseSettings, sameBinding, saveSettings, storageKey, suggestTopUp, suggestionKey, type ReserveBinding, type ReserveObservation, type Suggestion } from './reserve';
 import { createSubscriptionPanel } from './subscription-panel';
 import { createCcipPanel } from './ccip-panel';
-import { validateOwnerTransaction } from './ccip';
+import { ccipTaskDisplayState, validateOwnerTransaction } from './ccip';
 import './style.css';
 
 type View = 'overview' | 'operations' | 'approvals' | 'verification' | 'settings' | 'subscriptions' | 'ccip';
@@ -128,6 +128,8 @@ function usd(amount: unknown): string { try { return `$${Number(formatUnits(BigI
 function id(task: Data): string { return value(task, 'taskId', 'intentId', 'draftId', 'id'); }
 function status(task: Data): string { return value(task, 'status', 'state').toUpperCase(); }
 function column(task: Data): Column {
+  const ccip = ccipTaskDisplayState(task);
+  if (ccip) return ccip.column;
   const s = status(task);
   if (/PENDING_APPROVAL|AWAITING_APPROVAL|NEEDS_APPROVAL|OWNER_APPROVAL|QUEUED/.test(s)) return 'approval';
   if (/EXECUTED|COMPLETED|CONFIRMED|SUCCESS|SETTLED/.test(s)) return 'done';
@@ -136,8 +138,9 @@ function column(task: Data): Column {
   return 'draft';
 }
 function statusLabel(task: Data): string {
+  const ccip = ccipTaskDisplayState(task);
+  if (ccip) return ccip.label;
   const s = status(task);
-  if(isCcip(task)&&s==='EXECUTED')return '源链已确认';
   const labels: Record<string, string> = { DRAFT: '待确认', NEEDS_INPUT: '待补信息', INCOMPLETE: '待补信息', READY: '已通过预检', SUBMITTED: '链上处理中', SUBMITTING: '提交中', EXECUTING: '执行中', PENDING_APPROVAL: '等待 Owner', AWAITING_APPROVAL: '等待 Owner', EXECUTED: '链上已确认', COMPLETED: '已完成', CONFIRMED: '链上已确认', BLOCKED: '规则已拦截', REJECTED: '已拒绝', FAILED: '执行失败', CANCELLED: '已取消', CANCELED: '已取消', EXPIRED: '已过期' };
   return labels[s] || ({ UNKNOWN: '结果待核对', REQUOTE_REQUIRED: '需要重新报价', BROADCAST: '已广播待回执' } as Record<string, string>)[s] || s || '待确认';
 }
@@ -498,7 +501,7 @@ function drawer(): string {
   const s = isDraft && quote ? value(quote, 'status') : status(task);
   const c = isDraft && quote ? column({ status: s }) : column(task);
   const transactions = Array.isArray(task.transactions) ? task.transactions as Data[] : [];
-  return `<div class="drawer-backdrop" data-action="close-drawer"></div><aside class="drawer" aria-label="操作详情" role="dialog" aria-modal="true"><div class="drawer-header"><span>${icon(isDraft ? 'layers' : 'activity')} ${isDraft ? '确认操作' : '操作详情'}</span><button class="icon-button" data-action="close-drawer" aria-label="关闭详情">${icon('close')}</button></div><div class="drawer-body"><div class="drawer-title"><div class="eyebrow">${isDraft ? '提交前确认' : `AEG-${esc(taskId.slice(-6).toUpperCase())}`}</div><h2>${esc(taskName(task))}</h2><span class="badge ${c}">${isDraft && !quote ? '等待预览' : statusLabel({ status: s })}</span></div><div class="transfer-hero"><span>${isCcip(task)?'跨链代币数量':'付款金额'}</span><strong>${displayAmount(task)}<small> ${esc(taskUnit(task))}</small></strong>${get(quote, 'costUsd6') !== undefined ? `<span>预计 ${usd(get(quote, 'costUsd6'))} · 执行时重新计价</span>` : ''}</div>${isDraft ? reserveDraftSection(task) : ''}${subscriptionPaymentSection(task, quote)}${ccipPaymentSection(task,quote)}<div class="detail-section"><h3>付款信息</h3>${detailRow(isCcip(task)?'目标链收款地址':'收款地址', taskRecipient(task), true)}${detailRow('源链网络', `${mode()} · Chain ${expectedChain() || '—'}`)}${detailRow(isCcip(task)?'CCIP Sender 合约':'资金池合约', executionAddress(task), true)}${detailRow('任务 ID', taskId, true)}${detailRow('策略版本', value(quote, 'policyVersion') || value(task, 'policyVersion'))}</div>
+  return `<div class="drawer-backdrop" data-action="close-drawer"></div><aside class="drawer" aria-label="操作详情" role="dialog" aria-modal="true"><div class="drawer-header"><span>${icon(isDraft ? 'layers' : 'activity')} ${isDraft ? '确认操作' : '操作详情'}</span><button class="icon-button" data-action="close-drawer" aria-label="关闭详情">${icon('close')}</button></div><div class="drawer-body"><div class="drawer-title"><div class="eyebrow">${isDraft ? '提交前确认' : `AEG-${esc(taskId.slice(-6).toUpperCase())}`}</div><h2>${esc(taskName(task))}</h2><span class="badge ${c}">${isDraft && !quote ? '等待预览' : statusLabel(task)}</span></div><div class="transfer-hero"><span>${isCcip(task)?'跨链代币数量':'付款金额'}</span><strong>${displayAmount(task)}<small> ${esc(taskUnit(task))}</small></strong>${get(quote, 'costUsd6') !== undefined ? `<span>预计 ${usd(get(quote, 'costUsd6'))} · 执行时重新计价</span>` : ''}</div>${isDraft ? reserveDraftSection(task) : ''}${subscriptionPaymentSection(task, quote)}${ccipPaymentSection(task,quote)}<div class="detail-section"><h3>付款信息</h3>${detailRow(isCcip(task)?'目标链收款地址':'收款地址', taskRecipient(task), true)}${detailRow('源链网络', `${mode()} · Chain ${expectedChain() || '—'}`)}${detailRow(isCcip(task)?'CCIP Sender 合约':'资金池合约', executionAddress(task), true)}${detailRow('任务 ID', taskId, true)}${detailRow('策略版本', value(quote, 'policyVersion') || value(task, 'policyVersion'))}</div>
     ${quote && Object.keys(quote).length ? `<div class="detail-section"><h3>规则预检</h3>${detailRow('状态', s === 'READY' ? '已通过预检，提交时仍会重新检查' : value(quote, 'reason', 'message', 'blockReason') || reasons(quote) || s)}${detailRow('美元最高成本', get(quote, 'maxUsdCost6') !== undefined ? usd(get(quote, 'maxUsdCost6')) : '')}${isCcip(task)?detailRow('Router 当前费用',`${eth(get(quote,'quotedFeeWei'))} ETH`)+detailRow('Router 费用上限',`${eth(get(quote,'maxFeeWei'))} ETH`):''}${detailRow('报价有效至', dateTime(get(quote, 'quoteExpiresAtSeconds', 'expiresAt')))}${detailRow('授权路径', get(quote, 'requiresApproval') === true || /APPROVAL/.test(value(quote, 'decision', 'path')) ? '需要 Owner 审批' : value(quote, 'decision', 'path') || '以提交后链上结果为准')}</div>` : ''}
     ${isDraft && state.previewError ? `<div class="info-panel error-panel">${icon('info')}<p>${esc(state.previewError)} 草稿已保留，可重新预览。</p></div>` : taskReason(task) ? `<div class="info-panel error-panel">${icon('info')}<p>${esc(taskReason(task))}</p></div>` : ''}
     ${transactions.length ? `<div class="detail-section"><h3>交易记录</h3>${transactions.map(tx => { const hash = value(tx, 'txHash', 'hash', 'transactionHash'); const link = explorer(hash); return `<div class="transaction-item"><div><span>${esc(value(tx, 'action', 'kind', 'type') || '链上交易')}</span><span>${esc(value(tx, 'status') || '待核对')}</span></div>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener noreferrer" class="mono">${esc(short(hash, 12))}${icon('external')}</a>` : `<span class="mono">${esc(hash || '尚未取得交易哈希')}</span>`}</div>`; }).join('')}</div>` : ''}

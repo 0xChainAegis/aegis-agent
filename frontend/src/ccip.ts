@@ -45,13 +45,6 @@ export const ccipQuoteBindingSchema = z.looseObject({
   planHash: hash,
 });
 
-export const ccipTaskBindingSchema = z.looseObject({
-  actionKind: z.literal('CCIP_TRANSFER'), taskId: z.string().min(1), chainId: z.number().int().positive(),
-  walletAddress: address, recipient: address, amountWei: positiveUint, tokenAddress: address,
-  ccipSenderAddress: address, destinationChainSelector: positiveUint, maxUsdCost6: positiveUint,
-  maxFeeWei: positiveUint, quotedFeeWei: positiveUint, planHash: hash,
-});
-
 export const ccipDeliverySchema = z.looseObject({
   state: z.enum(['INDEXING', 'IN_FLIGHT', 'DELIVERED', 'FAILED']),
   messageId: hash, apiStatus: z.string().nullable(), sourceTransactionHash: hash,
@@ -59,9 +52,33 @@ export const ccipDeliverySchema = z.looseObject({
   destinationChainId: z.number().int().positive(), destinationChainSelector: positiveUint,
   sourceTokenAddress: address, destinationTokenAddress: address, amount: positiveUint,
   explorerUrl: z.url().refine(value => value.startsWith('https://ccip.chain.link/')),
+  verifiedAt: z.iso.datetime().optional(),
 }).superRefine((value, context) => {
   if (value.state === 'DELIVERED' && value.destinationTransactionHash === null) context.addIssue({ code: 'custom', path: ['destinationTransactionHash'], message: '已送达状态必须有目标链交易' });
+  if ((value.state === 'DELIVERED' || value.state === 'FAILED') && value.verifiedAt === undefined) context.addIssue({ code: 'custom', path: ['verifiedAt'], message: '终态必须有核验时间' });
 });
+
+export const ccipTaskBindingSchema = z.looseObject({
+  actionKind: z.literal('CCIP_TRANSFER'), taskId: z.string().min(1), chainId: z.number().int().positive(),
+  status: z.enum(['DRAFT', 'NEEDS_INPUT', 'READY', 'SUBMITTING', 'BROADCAST', 'UNKNOWN', 'AWAITING_APPROVAL', 'EXECUTED', 'BLOCKED', 'REQUOTE_REQUIRED', 'CANCELLED', 'EXPIRED', 'FAILED']),
+  walletAddress: address, recipient: address, amountWei: positiveUint, tokenAddress: address,
+  ccipSenderAddress: address, destinationChainSelector: positiveUint, maxUsdCost6: positiveUint,
+  maxFeeWei: positiveUint, quotedFeeWei: positiveUint, planHash: hash,
+  ccipDelivery: ccipDeliverySchema.optional(),
+});
+
+export type CcipTaskDisplayState = { column: 'ready' | 'done' | 'blocked'; label: string };
+
+/** A source-chain receipt is not a destination-chain delivery receipt. */
+export function ccipTaskDisplayState(input: unknown): CcipTaskDisplayState | null {
+  const parsed = ccipTaskBindingSchema.safeParse(input);
+  if (!parsed.success) return null;
+  const delivery = parsed.data.ccipDelivery;
+  if (delivery?.state === 'DELIVERED') return { column: 'done', label: '目标链已到账' };
+  if (delivery?.state === 'FAILED') return { column: 'blocked', label: '跨链交付失败' };
+  if (parsed.data.status === 'EXECUTED') return { column: 'ready', label: '源链已确认 · 等待目标链' };
+  return null;
+}
 
 const ownerAbi = parseAbi(['function approveAndExecute(uint64 attestationId)', 'function cancelPending(uint64 attestationId)']);
 const ownerTransactionSchema = z.looseObject({
