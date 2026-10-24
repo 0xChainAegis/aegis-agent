@@ -138,6 +138,36 @@ describe("AegisCCIPSender unified policy", function () {
     await expect(state.sender.connect(state.agent).requestCrossChainTransfer(...parameters)).to.be.revertedWith("NONCE_MISMATCH");
   });
 
+  it("emits CCIPTransferExecuted with the ABI topic and decodable fields", async function () {
+    const state = await fixture();
+    const tx = await request(state);
+    const receipt = await tx.wait();
+    const fragment = state.sender.interface.getEvent("CCIPTransferExecuted");
+    const log = receipt.logs.find((entry) => entry.topics[0] === fragment.topicHash);
+    expect(log, "event topic must match the declared ABI").to.not.equal(undefined);
+    const parsed = state.sender.interface.parseLog(log);
+    expect(parsed.args.agent).to.equal(state.agent.address);
+    expect(parsed.args.receiver).to.equal(state.recipient.address);
+    expect(parsed.args.token).to.equal(await state.token.getAddress());
+    expect(parsed.args.amount).to.equal(3n * TOKEN);
+    expect(parsed.args.costUsd6).to.equal(3n * USD);
+    expect(parsed.args.feeWei).to.equal(FEE);
+    expect(parsed.args.destinationChainSelector).to.equal(DESTINATION);
+    expect(parsed.args.messageId).to.not.equal(ethers.ZeroHash);
+  });
+
+  it("lets Owner cancel but not execute a queued transfer after its deadline", async function () {
+    const state = await fixture();
+    await request(state, 6n * TOKEN);
+    const queued = await state.sender.pending(1);
+    await ethers.provider.send("evm_setNextBlockTimestamp", [Number(queued.deadline) + 1]);
+    await ethers.provider.send("evm_mine", []);
+    await expect(state.sender.approveAndExecute(1)).to.be.revertedWith("REQUEST_EXPIRED");
+    expect((await state.sender.pending(1)).exists).to.equal(true);
+    await expect(state.sender.cancelPending(1)).to.emit(state.sender, "CCIPTransferCancelled");
+    expect(await state.token.balanceOf(state.recipient.address)).to.equal(0);
+  });
+
   it("rolls back nonce, attestation and shared budget when CCIP routing fails", async function () {
     const state = await fixture();
     await state.router.setFailSend(true);

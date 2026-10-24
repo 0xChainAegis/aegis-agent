@@ -87,6 +87,8 @@ contract AegisCCIPSender is Ownable, ReentrancyGuard {
         emit RecipientAllowed(recipient, allowed, policyEngine.policyVersion());
     }
 
+    /// @notice Permissionless top-up. Extra tokens only enlarge the vault balance; spending still
+    ///         requires an Agent request that passes the shared PolicyEngine.
     function depositToken(address token, uint256 amount) external nonReentrant {
         require(token != address(0) && amount > 0, "BAD_DEPOSIT");
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
@@ -118,6 +120,8 @@ contract AegisCCIPSender is Ownable, ReentrancyGuard {
         }
     }
 
+    /// @notice Owner executes a queued transfer after a full re-check. A request past its deadline
+    ///         reverts with REQUEST_EXPIRED and can only be cancelled via `cancelPending`.
     function approveAndExecute(uint64 attestationId) external onlyOwner nonReentrant {
         PendingTransfer memory op = pending[attestationId];
         require(op.exists, "NO_PENDING");
@@ -183,12 +187,16 @@ contract AegisCCIPSender is Ownable, ReentrancyGuard {
     function _emitExecuted(PendingTransfer memory op, uint64 attestationId, bytes32 messageId, uint256 fee, AegisPolicyEngine.RiskResult memory result) internal {
         ExecutionData memory d = ExecutionData(messageId, op.receiver, op.token, op.amount, result.costUsd6, fee, result.roundId, result.updatedAt, op.destinationChainSelector, op.policyVersion);
         bytes memory data = abi.encode(d);
-        bytes32 signature = keccak256("CCIPTransferExecuted(bytes32,uint64,address,bytes32,address,address,uint256,uint256,uint256,uint80,uint256,uint64,uint64)");
+        // Compiler-derived topic: stays in sync with the event declaration. The raw log4 only
+        // avoids stack-too-deep from the 13-field event.
+        bytes32 signature = CCIPTransferExecuted.selector;
         bytes32 requestHash = op.requestHash;
         address agent = op.requester;
         assembly { log4(add(data, 32), mload(data), signature, requestHash, attestationId, agent) }
     }
 
+    /// @dev gasLimit 0 is correct for token-only transfers to EOAs. A contract receiver would need
+    ///      destination gas, so recipients must be EOAs (or gas must be added to extraArgs first).
     function _message(address receiver, address token, uint256 amount) internal pure returns (Client.EVM2AnyMessage memory message) {
         Client.EVMTokenAmount[] memory amounts = new Client.EVMTokenAmount[](1);
         amounts[0] = Client.EVMTokenAmount({token: token, amount: amount});

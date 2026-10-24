@@ -95,6 +95,20 @@ requires the returned `planHash`. Poll the task until its source state is
 `EXECUTED`, then query `/api/v1/tasks/:id/ccip-delivery` until it becomes
 `DELIVERED` or `FAILED`.
 
+## Contract behaviour notes
+
+- A queued transfer past its deadline cannot be executed: `approveAndExecute`
+  reverts with `REQUEST_EXPIRED`, and the Owner can only `cancelPending` it. The
+  Agent must submit a fresh request (new nonce).
+- `depositToken` is permissionless by design. Extra tokens only enlarge the vault;
+  spending still requires an Agent request approved by the shared PolicyEngine.
+- Messages use `gasLimit = 0`, which is correct for token-only delivery to an
+  EOA. Allowlisted receivers must be EOAs; a contract receiver would need
+  destination gas added to the CCIP `extraArgs` first.
+- The `CCIPTransferExecuted` log is emitted with raw `log4` to avoid
+  stack-too-deep. Its topic comes from `CCIPTransferExecuted.selector` and a test
+  decodes the log against the ABI, so the event and the emitter cannot drift.
+
 ## Remaining boundary
 
 - The frontend has a dedicated CCIP page: fixed-route form, preview with fee and
