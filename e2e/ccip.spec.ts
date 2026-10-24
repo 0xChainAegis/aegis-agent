@@ -141,6 +141,9 @@ test('CCIP auto transfer: fixed route, real token movement, source evidence, and
   await expect(panel).toBeVisible();
   await expect(panel).not.toContainText('目标链到账已核实');
   await expect(page.locator('body')).not.toContainText('目标链到账已核实');
+  await closeDrawer(page);
+  await page.locator('[data-nav="operations"]').click();
+  await expect(page.locator(`[data-task-id="${queued.taskId}"]`)).toContainText('源链已确认 · 等待目标链');
   expect(errors).toEqual([]);
 });
 
