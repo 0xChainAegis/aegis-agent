@@ -3,8 +3,9 @@
 This implementation authorizes fixed native ETH payments and finite subscriptions
 through a shared deterministic `AegisPolicyEngine`. A policy-gated
 `AegisCCIPSender` is also implemented and contract-tested for allowlisted ERC20
-CCIP transfers. CCIP is not yet included in the default local or Sepolia
-deployment scripts and is not exposed by the HTTP/UI product flow.
+CCIP transfers. CCIP remains opt-in for local and Sepolia deployment, and a
+validated deployment is exposed through the HTTP API and dedicated web flow.
+The supported public route is Ethereum Sepolia to Base Sepolia using CCIP-BnM.
 
 ## Local integration
 

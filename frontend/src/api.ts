@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ConfigResponseSchema } from './schemas';
-import { subscriptionFieldsSchema, subscriptionListSchema, subscriptionRecordSchema, subscriptionPreviewSchema, subscriptionControlPreviewSchema } from './subscriptions';
+import { subscriptionFieldsSchema, subscriptionListSchema, subscriptionRecordSchema, subscriptionPreviewSchema, subscriptionControlPreviewSchema, subscriptionPolicyPreviewSchema, subscriptionPolicySchema } from './subscriptions';
 import { ccipDeliverySchema, ccipIntentBindingSchema, ccipQuoteBindingSchema, ccipTaskBindingSchema } from './ccip';
 
 export type Data = Record<string, unknown>;
@@ -129,6 +129,8 @@ function responseSchema(path: string, method: string): z.ZodType<Data> {
   if (pathname === '/auth/verify') return authSessionResponseSchema;
   if (pathname === '/wallets/current') return walletSnapshotResponseSchema;
   if (pathname === '/subscriptions') return subscriptionListSchema;
+  if (pathname === '/subscriptions/policy-preview') return subscriptionPolicyPreviewSchema;
+  if (pathname === '/subscriptions/policy-observed') return subscriptionPolicySchema;
   if (pathname === '/subscriptions/preview') return subscriptionPreviewSchema;
   if (/^\/subscriptions\/[^/]+\/control-preview$/.test(pathname)) return subscriptionControlPreviewSchema;
   if (pathname === '/subscriptions/observed' || /^\/subscriptions\/[^/]+\/control-observed$/.test(pathname)) return subscriptionRecordSchema;

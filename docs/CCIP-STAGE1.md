@@ -50,12 +50,16 @@ The feed never updates itself, so a deployment stops working for CCIP one
 the Owner (the configured signer must be the feed Owner):
 
 ```bash
+set -a
+source contracts/.env
+set +a
 npm run refresh:ccip-feed --workspace contracts
 CCIP_FEED_REFRESH=1 npm run refresh:ccip-feed --workspace contracts
 ```
 
-The second command sends a transaction. It re-submits the current value unless
-`CCIP_TOKEN_PRICE_USD8` is set.
+The first invocation is read-only. The second broadcasts an Owner transaction,
+spends a small amount of Sepolia ETH and resubmits the current positive test
+value unless `CCIP_TOKEN_PRICE_USD8` is explicitly provided.
 
 ## Deployment and validation
 

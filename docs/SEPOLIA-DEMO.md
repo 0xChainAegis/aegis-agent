@@ -1,5 +1,9 @@
 # Sepolia demo
 
+For the current Chinese day-to-day startup and web acceptance checklist, begin
+with [Aegis 启动与网页验收](STARTUP.zh-CN.md). This document retains the detailed
+deployment, safety and evidence boundaries.
+
 The stage demo uses Ethereum Sepolia (chain ID **11155111**) and the real Chainlink ETH/USD Feed. A Hardhat receipt, Mock Feed, successful build or LLM-only parsing report is not Sepolia payment evidence.
 
 ## Deployment and signing identities
@@ -92,8 +96,9 @@ with dynamically priced boundary requests. It verifies the configured Feed
 binding and freshness, daily-budget accounting, the exact automatic/approval
 boundary, unauthorized agents, non-allowlisted recipients, zero amounts,
 expired requests, policy-version changes, quote caps, the hard per-transaction
-limit, and the explicit rejection of subscription and CCIP actions that are not
-implemented yet. The report contains only public addresses and chain evidence;
+limit, and malformed or unauthorized action requests. Subscription and CCIP now
+have separate dedicated flows and test suites; this native-policy regression is
+not evidence that either one executed. The report contains only public addresses and chain evidence;
 it never reads a signer key, signs, broadcasts or spends Sepolia ETH.
 
 The public Chainlink Feed cannot safely be forced to publish a negative, zero,

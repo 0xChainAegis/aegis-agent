@@ -108,7 +108,7 @@ npm run dev
 
 打开 [http://127.0.0.1:5173](http://127.0.0.1:5173)。本地链为 31337，API 为 3001，RPC 为 8545，使用 Mock Feed；公开开发私钥只能用于本地。
 
-**Sepolia** 使用真实合约、真实 Feed 与独立配置的 Owner 和执行账户。[Sepolia 部署与启动](docs/SEPOLIA-DEMO.md)说明 `npm run check:sepolia`、`npm run start:sepolia` 和无模型模式。生成的部署文件与私密环境变量不加入 Git，不能复制他人私钥；Windows 启动也可使用文档中的 Python 入口。
+**Sepolia** 使用真实合约、真实 Feed 与独立配置的 Owner 和执行账户。日常操作先看[中文启动与网页验收](docs/STARTUP.zh-CN.md)；部署和证据边界见 [Sepolia 部署与启动](docs/SEPOLIA-DEMO.md)。生成的部署文件与私密环境变量不加入 Git，不能复制他人私钥；Windows 启动也可使用文档中的 Python 入口。
 
 **真实模型**需要服务端 API key、可访问的 Base URL 与准确模型 ID。[live 配置](docs/LLM-LIVE-LOCAL.md)。页面与响应会标识实际解析器及回退原因；`off` 与 `stub` 均不等于真实模型调用。
 
@@ -125,9 +125,9 @@ npm run test:e2e
 
 ## <img src="docs/images/section-features.svg" width="24" height="24" alt="" align="absmiddle"> 功能边界
 
-当前运行实例服务 **一个 Owner 资金池、一个配置的运行钱包、原生 ETH 补给**。储备设置是建议，不是调度器。支持可选 LLM 草稿，但模型不能直接付款。
+当前运行实例服务 **一个 Owner 资金池、一个配置的运行钱包**，并提供原生 ETH 补给、有限订阅和固定路线 CCIP 转账。储备设置是建议，不是调度器。支持可选 LLM 草稿，但模型不能直接付款。
 
-提示词扫描是启发式辅助检查，结构化输出还须校验；资金权限由合约规则约束。当前没有自动多用户建池、多钱包分配、定时付款、订阅或 CCIP 执行，也不声称完成生产安全审计。
+提示词扫描是启发式辅助检查，结构化输出还须校验；资金权限由合约规则约束。当前支持有限 ETH 订阅和固定 Ethereum Sepolia → Base Sepolia CCIP-BnM 路线，但订阅每一期仍需重新预览和人工确认，CCIP 也必须分别核验源链执行与目标链到账。当前没有自动多用户建池、多钱包分配或无人值守定时扣款，也不声称完成生产安全审计。
 
 历史 40 条意图评测的版本和限制见 [评测报告](eval/REPORT.md)，不把历史样本分数当作当前版本准确率。
 

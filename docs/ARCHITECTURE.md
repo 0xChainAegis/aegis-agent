@@ -59,6 +59,8 @@ outside this budget. Reserve settings are recommendations, not on-chain policy,
 and concurrent wallet activity can change the final balance.
 
 See [API and local operation](INTEGRATION.md), [security boundaries](SECURITY.md)
-and the [contract rules](../contracts/README.md). Subscription and CCIP action
-kinds are reserved but rejected in phase one; automatic monitoring, multiple
-wallet profiles, CCIP execution and x402 are outside the current flow.
+and the [contract rules](../contracts/README.md). Current action kinds include
+finite subscriptions and a fixed-route CCIP transfer flow. Automatic monitoring,
+multiple wallet profiles and x402 remain outside the current flow. Subscription
+payments still require a fresh per-occurrence review, and CCIP source execution
+is tracked separately from destination delivery.
