@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ConfigResponseSchema } from './schemas';
 import { subscriptionFieldsSchema, subscriptionListSchema, subscriptionRecordSchema, subscriptionPreviewSchema, subscriptionControlPreviewSchema } from './subscriptions';
+import { ccipDeliverySchema, ccipIntentBindingSchema, ccipQuoteBindingSchema, ccipTaskBindingSchema } from './ccip';
 
 export type Data = Record<string, unknown>;
 
@@ -23,7 +24,7 @@ const timestampSchema = z.string().refine(value => Number.isFinite(Date.parse(va
 const statusSchema = z.enum(['DRAFT', 'NEEDS_INPUT', 'READY', 'SUBMITTING', 'BROADCAST', 'UNKNOWN', 'AWAITING_APPROVAL', 'EXECUTED', 'BLOCKED', 'REQUOTE_REQUIRED', 'CANCELLED', 'EXPIRED', 'FAILED']);
 export const sessionTokenSchema = z.string().min(1).max(4096).regex(/^[\x21-\x7E]+$/);
 
-export const configResponseSchema = ConfigResponseSchema.extend({
+export const configResponseSchema = ConfigResponseSchema.safeExtend({
   chainId: positiveIntegerSchema,
   rpcUrl: httpUrlSchema.nullable().optional(), explorerBaseUrl: httpUrlSchema.nullable().optional(),
   localTestWalletAvailable: z.boolean().optional(),
@@ -132,6 +133,7 @@ function responseSchema(path: string, method: string): z.ZodType<Data> {
   if (pathname === '/subscriptions/observed' || /^\/subscriptions\/[^/]+\/control-observed$/.test(pathname)) return subscriptionRecordSchema;
   if (pathname === '/tasks') return tasksResponseSchema;
   if (/^\/tasks\/[^/]+\/owner-tx$/.test(pathname)) return ownerTransactionResponseSchema;
+  if (/^\/tasks\/[^/]+\/ccip-delivery$/.test(pathname)) return ccipDeliverySchema;
   if (/^\/tasks\/[^/]+\/evidence$/.test(pathname)) return evidenceResponseSchema;
   if (/^\/tasks\/[^/]+(?:\/observed-tx)?$/.test(pathname)) return taskResponseSchema;
   if (/^\/intents\/[^/]+\/submit$/.test(pathname)) return taskResponseSchema;
@@ -194,6 +196,10 @@ export async function api(path: string, method = 'GET', body?: Data): Promise<Da
     if (parsed.data.actionKind === 'SUBSCRIPTION' && /^\/(intents|tasks)(?:\/|$)/.test(path) && !path.endsWith('/evidence')) {
       const binding = z.looseObject({ subscriptionId: uintSchema, occurrenceIndex: uintSchema, subscription: subscriptionFieldsSchema });
       if (!binding.safeParse(parsed.data).success || (/\/(preview|submit)$/.test(path) && !hashSchema.safeParse(parsed.data.planHash).success)) throw invalidResponse(response.status, path);
+    }
+    if (parsed.data.actionKind === 'CCIP_TRANSFER' && /^\/(intents|tasks)(?:\/|$)/.test(path) && !path.endsWith('/evidence')) {
+      const ccipParsed=/\/preview$/.test(path)?ccipQuoteBindingSchema.safeParse(parsed.data):/^\/tasks(?:\/|$)/.test(path)||/\/submit$/.test(path)?ccipTaskBindingSchema.safeParse(parsed.data):ccipIntentBindingSchema.safeParse(parsed.data);
+      if(!ccipParsed.success)throw invalidResponse(response.status,path,ccipParsed.error.issues.map(issue=>String(issue.path[0]??'')));
     }
     if (fingerprint) pendingMutationKeys.delete(fingerprint);
     if (method === 'GET' && path === '/config') {
