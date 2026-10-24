@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getAddress, zeroAddress, type Address, type Hex } from 'viem';
+import { getAddress, isAddress, zeroAddress, type Address, type Hex } from 'viem';
 import { z } from 'zod';
 import type { RuntimeMode } from '@aegis/shared';
 
@@ -30,11 +30,45 @@ export interface Config {
   mode: RuntimeMode; chainId: number; rpcUrl: string; port: number; host: string; dbPath: string;
   walletAddress: Address; aclAddress: Address; attestationAddress: Address; oracleAddress: Address;
   policyEngineAddress: Address; feedAddress: Address; ownerAddress: Address; agentAddress: Address; recipientAddress: Address;
+  ccipSenderAddress?: Address; ccipRouterAddress?: Address; ccipTokenAddress?: Address; ccipTokenFeedAddress?: Address;
+  ccipDestinationChainSelector?: string;
+  ccipDestinationChainId?: number; ccipDestinationNetwork?: string; ccipDestinationTokenAddress?: Address;
+  ccipTokenPriceSource?: 'OWNER_MAINTAINED_TESTNET_VALUE';
   abiVersion: string; deploymentReady: boolean; agentKey?: Hex; origins: string[];
   authDomain: string; sessionSeconds: number; quoteSeconds: number; requestSeconds: number;
   maxAgeSeconds: number; configuredModel: string | null; llm: LlmConfig;
   rpcTimeoutMs: number; rpcRetryCount: number;
 }
+const SEPOLIA_CCIP_ROUTE = {
+  routerAddress: getAddress('0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'),
+  tokenAddress: getAddress('0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'),
+  destinationChainSelector: '10344971235874465080',
+  destinationChainId: 84532,
+  destinationNetwork: 'base-sepolia',
+  destinationTokenAddress: getAddress('0x88A2d74F47a237a62e7A51cdDa67270CE381555e'),
+} as const;
+const deploymentAddress = z.string().refine(value => isAddress(value), 'Invalid deployment address');
+const deploymentSchema = z.object({
+  chainId: z.coerce.number().int().positive().optional(), rpcUrl: z.string().optional(), abiVersion: z.string().optional(),
+  walletAddress: deploymentAddress.optional(), aclAddress: deploymentAddress.optional(), attestationAddress: deploymentAddress.optional(),
+  oracleAddress: deploymentAddress.optional(), policyEngineAddress: deploymentAddress.optional(), feedAddress: deploymentAddress.optional(),
+  ownerAddress: deploymentAddress.optional(), agentAddress: deploymentAddress.optional(), recipientAddress: deploymentAddress.optional(),
+  ccipSenderAddress: deploymentAddress.optional(), ccipRouterAddress: deploymentAddress.optional(), ccipTokenAddress: deploymentAddress.optional(),
+  ccipTokenFeedAddress: deploymentAddress.optional(),
+  ccipDestinationChainSelector: z.string().regex(/^[1-9]\d*$/).refine(value => BigInt(value) < 2n ** 64n).optional(),
+  ccipDestinationChainId: z.coerce.number().int().positive().optional(),
+  ccipDestinationNetwork: z.string().min(1).max(64).optional(),
+  ccipDestinationTokenAddress: deploymentAddress.optional(),
+  ccipTokenPriceSource: z.literal('OWNER_MAINTAINED_TESTNET_VALUE').optional(),
+}).passthrough().superRefine((value, context) => {
+  const ccipValues = [value.ccipSenderAddress, value.ccipRouterAddress, value.ccipTokenAddress, value.ccipTokenFeedAddress, value.ccipDestinationChainSelector];
+  const configured = ccipValues.filter(item => item !== undefined).length;
+  if (configured !== 0 && configured !== ccipValues.length) context.addIssue({ code: 'custom', message: 'CCIP deployment fields must be provided together', path: ['ccipSenderAddress'] });
+  const destinationValues = [value.ccipDestinationChainId, value.ccipDestinationNetwork, value.ccipDestinationTokenAddress, value.ccipTokenPriceSource];
+  const destinationConfigured = destinationValues.filter(item => item !== undefined).length;
+  if (destinationConfigured !== 0 && destinationConfigured !== destinationValues.length) context.addIssue({ code: 'custom', message: 'CCIP destination metadata must be provided together', path: ['ccipDestinationChainId'] });
+  if (destinationConfigured > 0 && configured !== ccipValues.length) context.addIssue({ code: 'custom', message: 'CCIP destination metadata requires a complete CCIP deployment', path: ['ccipDestinationChainId'] });
+});
 const optionalNumber = (schema: z.ZodType<number>) => z.preprocess(value => value === '' ? undefined : value, schema);
 const rpcTuningSchema = z.object({
   AEGIS_RPC_TIMEOUT_MS: optionalNumber(z.coerce.number().int().min(1_000).max(30_000).default(15_000)),
@@ -54,17 +88,40 @@ export function loadConfig(env = process.env): Config {
   if (mode === 'testnet' && !env.AEGIS_DEPLOYMENT_FILE) throw new Error('AEGIS_MODE=testnet requires AEGIS_DEPLOYMENT_FILE');
   const deploymentPath = env.AEGIS_DEPLOYMENT_FILE ?? resolve(root, 'contracts/deployments/localhost.json');
   if (mode === 'testnet' && !existsSync(deploymentPath)) throw new Error(`Sepolia deployment file does not exist: ${deploymentPath}`);
-  const deployment = existsSync(deploymentPath) ? JSON.parse(readFileSync(deploymentPath, 'utf8')) : {};
+  let deploymentInput: unknown = {};
+  if (existsSync(deploymentPath)) {
+    try { deploymentInput = JSON.parse(readFileSync(deploymentPath, 'utf8')); }
+    catch { throw new Error(`Deployment file is not valid JSON: ${deploymentPath}`); }
+  }
+  const parsedDeployment = deploymentSchema.safeParse(deploymentInput);
+  if (!parsedDeployment.success) {
+    const issue = parsedDeployment.error.issues[0];
+    throw new Error(`Invalid deployment file field ${issue?.path.join('.') || 'root'}: ${issue?.message ?? 'invalid value'}`);
+  }
+  const deployment = parsedDeployment.data;
   if (mode === 'testnet' && Number(deployment.chainId) !== 11155111) throw new Error('Sepolia deployment file must declare chainId 11155111');
   const chainId = Number(env.AEGIS_CHAIN_ID ?? deployment.chainId ?? 31337);
   if (!Number.isSafeInteger(chainId) || chainId <= 0) throw new Error('Invalid chain id');
   if (mode === 'local_chain' && chainId !== 31337) throw new Error('local_chain is restricted to chain 31337');
   if (mode === 'testnet' && chainId !== 11155111) throw new Error('This integration supports Sepolia testnet only');
-  const address = (key: string) => getAddress(deployment[key] ?? zeroAddress);
+  const address = (key: typeof deploymentAddressKeys[number]) => getAddress(deployment[key] ?? zeroAddress);
   const deploymentReady = deploymentAddressKeys.every(key => address(key) !== zeroAddress);
   if (mode === 'testnet' && !deploymentReady) throw new Error('Sepolia deployment file is missing one or more required addresses');
+  if (mode === 'testnet' && deployment.ccipSenderAddress && (!deployment.ccipDestinationChainId || !deployment.ccipDestinationNetwork || !deployment.ccipDestinationTokenAddress || !deployment.ccipTokenPriceSource)) {
+    throw new Error('Sepolia CCIP deployment is missing destination metadata');
+  }
+  if (mode === 'testnet' && deployment.ccipSenderAddress) {
+    const routeMatches = getAddress(deployment.ccipRouterAddress ?? zeroAddress) === SEPOLIA_CCIP_ROUTE.routerAddress
+      && getAddress(deployment.ccipTokenAddress ?? zeroAddress) === SEPOLIA_CCIP_ROUTE.tokenAddress
+      && deployment.ccipDestinationChainSelector === SEPOLIA_CCIP_ROUTE.destinationChainSelector
+      && deployment.ccipDestinationChainId === SEPOLIA_CCIP_ROUTE.destinationChainId
+      && deployment.ccipDestinationNetwork === SEPOLIA_CCIP_ROUTE.destinationNetwork
+      && getAddress(deployment.ccipDestinationTokenAddress ?? zeroAddress) === SEPOLIA_CCIP_ROUTE.destinationTokenAddress;
+    if (!routeMatches) throw new Error('Sepolia CCIP deployment must use the canonical Ethereum Sepolia to Base Sepolia CCIP-BnM route');
+  }
   if (mode === 'testnet') {
-    const identities = new Set(['ownerAddress', 'agentAddress', 'recipientAddress'].map(key => address(key).toLowerCase()));
+    const identityKeys = ['ownerAddress', 'agentAddress', 'recipientAddress'] as const;
+    const identities = new Set(identityKeys.map(key => address(key).toLowerCase()));
     if (identities.size !== 3) throw new Error('Sepolia owner, agent, and recipient must be different addresses');
   }
   if (mode === 'testnet' && !env.AEGIS_RPC_URL) throw new Error('AEGIS_MODE=testnet requires AEGIS_RPC_URL');
@@ -90,12 +147,18 @@ export function loadConfig(env = process.env): Config {
   if (llmMode === 'live' && (!llmModel || !llmApiKey)) throw new Error('AEGIS_LLM_MODE=live requires AEGIS_LLM_MODEL and an API key');
   const llmBaseUrl = env.AEGIS_LLM_BASE_URL ?? (provider === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1');
   const llm: LlmConfig = { mode: llmMode as LlmMode, provider, model: llmModel, apiKey: llmApiKey, baseUrl: llmBaseUrl, timeoutMs: llmTimeoutMs };
+  const optionalAddress = (value: string | undefined) => value === undefined ? undefined : getAddress(value);
   return {
     mode: mode as RuntimeMode, chainId, rpcUrl, port: Number(env.AEGIS_PORT ?? 3001), host: '127.0.0.1',
     dbPath: env.AEGIS_DB_PATH ?? resolve(root, 'backend/data/aegis.sqlite'),
     walletAddress: address('walletAddress'), aclAddress: address('aclAddress'), attestationAddress: address('attestationAddress'),
     oracleAddress: address('oracleAddress'), policyEngineAddress: address('policyEngineAddress'), feedAddress: address('feedAddress'), ownerAddress: address('ownerAddress'),
     agentAddress: address('agentAddress'), recipientAddress: address('recipientAddress'),
+    ccipSenderAddress: optionalAddress(deployment.ccipSenderAddress), ccipRouterAddress: optionalAddress(deployment.ccipRouterAddress),
+    ccipTokenAddress: optionalAddress(deployment.ccipTokenAddress), ccipTokenFeedAddress: optionalAddress(deployment.ccipTokenFeedAddress),
+    ccipDestinationChainSelector: deployment.ccipDestinationChainSelector,
+    ccipDestinationChainId: deployment.ccipDestinationChainId, ccipDestinationNetwork: deployment.ccipDestinationNetwork,
+    ccipDestinationTokenAddress: optionalAddress(deployment.ccipDestinationTokenAddress), ccipTokenPriceSource: deployment.ccipTokenPriceSource,
     abiVersion: deployment.abiVersion ?? 'aegis.v1', deploymentReady,
     agentKey: agentKey as Hex | undefined,
     origins: ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:4173', 'http://127.0.0.1:4173'],

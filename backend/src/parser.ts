@@ -2,7 +2,12 @@ import { getAddress, isAddress, parseEther, zeroAddress, type Address } from 'vi
 import type { Intent, ParserInfo } from '@aegis/shared';
 import { ApiError } from './errors.js';
 
-export interface DraftInput { actionKind?: 'NATIVE_TRANSFER' | 'SUBSCRIPTION'; subscriptionId?:string; occurrenceIndex?:string; message?: string; recipient?: string | null; amountWei?: string | null; purpose?: string }
+export interface DraftInput {
+  actionKind?: 'NATIVE_TRANSFER' | 'SUBSCRIPTION' | 'CCIP_TRANSFER';
+  subscriptionId?: string; occurrenceIndex?: string;
+  tokenAddress?: string; destinationChainSelector?: string;
+  message?: string; recipient?: string | null; amountWei?: string | null; purpose?: string;
+}
 
 export interface ParsedDraft {
   message: string;

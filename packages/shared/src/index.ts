@@ -10,8 +10,10 @@ export interface SubscriptionConfig {
   currentOccurrenceIndex: string | null; status: string;
 }
 export interface SubscriptionAction {
-  actionKind?: 'NATIVE_TRANSFER' | 'SUBSCRIPTION'; subscriptionId?: string; occurrenceIndex?: string;
+  actionKind?: 'NATIVE_TRANSFER' | 'SUBSCRIPTION' | 'CCIP_TRANSFER'; subscriptionId?: string; occurrenceIndex?: string;
   subscription?: SubscriptionConfig; planHash?: Hex;
+  ccipSenderAddress?: Hex; tokenAddress?: Hex; destinationChainSelector?: string;
+  maxFeeWei?: string; quotedFeeWei?: string; messageId?: Hex;
 }
 export interface Intent extends SubscriptionAction {
   draftId: string; intentId: string; version: number; revision: number; status: TaskStatus;
@@ -22,6 +24,13 @@ export interface Intent extends SubscriptionAction {
 export interface TransactionEvidence {
   role: 'request' | 'approve' | 'cancel'; hash: Hex; receiptStatus?: number; blockNumber?: string;
   blockHash?: Hex; event?: string; senderNonce?: string; finality?: 'mined' | 'pending';
+}
+export interface CcipDeliveryEvidence {
+  state: 'DELIVERED' | 'FAILED'; messageId: Hex; apiStatus: string | null;
+  sourceTransactionHash: Hex; destinationTransactionHash: Hex | null;
+  sourceChainId: number; destinationChainId: number; destinationChainSelector: string;
+  sourceTokenAddress: Hex; destinationTokenAddress: Hex; amount: string;
+  explorerUrl: string; verifiedAt: string;
 }
 export const POLICY_EVIDENCE_VERIFICATION_SCOPE = 'MATCHED_WALLET_AND_POLICY_RECEIPT_EVENTS' as const;
 export const POLICY_EVIDENCE_VERIFIED_FIELDS = [
@@ -34,7 +43,7 @@ export interface ConfiguredPriceSource {
   verified: false; scope: 'CURRENT_CONFIGURATION';
 }
 export interface PolicyEvidence {
-  engineAddress: Hex; event: 'BudgetConsumed'; actionType: 'NATIVE_TRANSFER' | 'SUBSCRIPTION';
+  engineAddress: Hex; event: 'BudgetConsumed'; actionType: 'NATIVE_TRANSFER' | 'SUBSCRIPTION' | 'CCIP_TRANSFER';
   decision: 'ALLOW' | 'REQUIRE_APPROVAL'; requestHash: Hex; actor: Hex;
   costUsd6: string; day: string; spentUsd6: string; transactionHash: Hex;
   policyVersion: string;
@@ -52,6 +61,7 @@ export interface Task extends SubscriptionAction {
   triggerType: 'manual'; ruleId: null; reasonCodes: string[]; transactions: TransactionEvidence[];
   availableActions: string[]; createdAt: string; updatedAt: string; parser: ParserInfo;
   verification: { kind: 'chain' | 'mock'; chainVerified: boolean; hashVerified: boolean };
+  ccipDelivery?: CcipDeliveryEvidence;
 }
 export const subscriptionAbiSignatures = [
   'function configureSubscriptionPolicy(uint256 maxPeriodCapUsd6,uint64 maxDurationSeconds,uint64 maxPayments)',
@@ -97,8 +107,26 @@ export const walletAbiSignatures = [
 ] as const;
 export const oracleAbiSignatures = [
   'function latestEthQuote(uint256 amountWei) view returns (uint256 costUsd6,uint80 roundId,int256 answer,uint256 updatedAt,uint8 decimals)',
+  'function latestQuote(address token,uint256 amount) view returns (uint256 costUsd6,uint80 roundId,int256 answer,uint256 updatedAt,uint8 decimals)',
   'function feeds(address token) view returns (address)',
 ] as const;
 export const policyEngineAbiSignatures = [
   'event BudgetConsumed(bytes32 indexed requestHash,uint8 indexed actionType,address indexed actor,uint8 decision,uint256 costUsd6,uint256 day,uint256 spentUsd6)',
+] as const;
+export const ccipSenderAbiSignatures = [
+  'function owner() view returns (address)',
+  'function router() view returns (address)',
+  'function attestations() view returns (address)',
+  'function policyEngine() view returns (address)',
+  'function nextNonce(address agent) view returns (uint256)',
+  'function pending(uint64 attestationId) view returns (address requester,address receiver,address token,uint256 amount,uint256 maxUsdCost6,uint256 maxFeeWei,uint256 nonce,uint64 deadline,uint64 policyVersion,uint64 destinationChainSelector,bytes32 requestHash,bool exists)',
+  'function quoteCrossChainFee(uint64 destinationChainSelector,address receiver,address token,uint256 amount) view returns (uint256)',
+  'function previewCrossChainTransfer(address requester,address receiver,address token,uint256 amount,uint256 maxUsdCost6,uint256 maxFeeWei,uint64 deadline,uint64 version,uint64 destinationChainSelector) view returns ((uint256 costUsd6,uint256 feeWei,uint80 roundId,uint256 updatedAt,bool requiresApproval))',
+  'function requestCrossChainTransfer(address receiver,address token,uint256 amount,uint256 maxUsdCost6,uint256 maxFeeWei,uint256 nonce,uint64 deadline,uint64 version,uint64 destinationChainSelector) returns (uint64 attestationId)',
+  'function hashRequest(address agent,address receiver,address token,uint256 amount,uint256 maxUsdCost6,uint256 maxFeeWei,uint256 nonce,uint64 deadline,uint64 version,uint64 destinationChainSelector) view returns (bytes32)',
+  'function approveAndExecute(uint64 attestationId)',
+  'function cancelPending(uint64 attestationId)',
+  'event CCIPTransferExecuted(bytes32 indexed requestHash,uint64 indexed attestationId,address indexed agent,bytes32 messageId,address receiver,address token,uint256 amount,uint256 costUsd6,uint256 feeWei,uint80 roundId,uint256 updatedAt,uint64 destinationChainSelector,uint64 policyVersion)',
+  'event CCIPTransferQueued(bytes32 indexed requestHash,uint64 indexed attestationId,address indexed agent,address receiver,address token,uint256 amount,uint256 maxUsdCost6,uint256 maxFeeWei,uint64 destinationChainSelector,uint64 deadline,uint64 policyVersion)',
+  'event CCIPTransferCancelled(bytes32 indexed requestHash,uint64 indexed attestationId)',
 ] as const;

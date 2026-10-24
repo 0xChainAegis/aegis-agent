@@ -25,6 +25,7 @@ export const sepoliaCheckReportSchema = z.object({
   checkedAt: z.string().datetime(),
   chainId: z.literal(11155111),
   readiness: readinessSchema,
+  ccip: z.object({ configured: z.boolean(), ready: z.boolean() }).strict(),
   snapshot: snapshotSchema.optional(),
 }).strict();
 export type SepoliaCheckReport = z.infer<typeof sepoliaCheckReportSchema>;
@@ -37,11 +38,14 @@ export async function runSepoliaCheck(config: Config, gateway: Gateway): Promise
   // fresh authoritative sweep without coupling the CLI to HTTP cache policy.
   const readiness = readinessSchema.parse(await gateway.readiness());
   const snapshot = readiness.ready ? snapshotSchema.parse(await gateway.snapshot()) : undefined;
+  const ccipConfigured = config.ccipSenderAddress !== undefined;
+  const ccipReady = ccipConfigured ? await gateway.ccipEnabled?.() === true : false;
   return sepoliaCheckReportSchema.parse({
-    ok: readiness.ready && snapshot?.chainId === 11155111,
+    ok: readiness.ready && snapshot?.chainId === 11155111 && (!ccipConfigured || ccipReady),
     checkedAt: new Date().toISOString(),
     chainId: 11155111,
     readiness,
+    ccip: { configured: ccipConfigured, ready: ccipReady },
     ...(snapshot ? { snapshot } : {}),
   });
 }

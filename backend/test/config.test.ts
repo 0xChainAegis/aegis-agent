@@ -66,3 +66,105 @@ test('testnet config accepts a complete deployment and rejects a public local ke
     assert.throws(() => loadConfig({ ...base, AEGIS_AGENT_PRIVATE_KEY: LOCAL_AGENT_KEY }), /known local development key/);
   });
 });
+
+test('optional CCIP deployment fields are accepted only as one validated set', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'aegis-ccip-config-'));
+  const path = join(directory, 'local.json');
+  const base = {
+    chainId: 31337,
+    walletAddress: '0x1000000000000000000000000000000000000001',
+    aclAddress: '0x2000000000000000000000000000000000000002',
+    attestationAddress: '0x3000000000000000000000000000000000000003',
+    oracleAddress: '0x4000000000000000000000000000000000000004',
+    policyEngineAddress: '0x5000000000000000000000000000000000000005',
+    feedAddress: '0x6000000000000000000000000000000000000006',
+    ownerAddress: '0x7000000000000000000000000000000000000007',
+    agentAddress: '0x8000000000000000000000000000000000000008',
+    recipientAddress: '0x9000000000000000000000000000000000000009',
+  };
+  try {
+    writeFileSync(path, JSON.stringify({ ...base, ccipSenderAddress: '0xA00000000000000000000000000000000000000A' }));
+    assert.throws(() => loadConfig({ AEGIS_DEPLOYMENT_FILE: path }), /CCIP deployment fields/);
+    writeFileSync(path, JSON.stringify({
+      ...base,
+      ccipSenderAddress: '0xA00000000000000000000000000000000000000A',
+      ccipRouterAddress: '0xB00000000000000000000000000000000000000B',
+      ccipTokenAddress: '0xC00000000000000000000000000000000000000C',
+      ccipTokenFeedAddress: '0xD00000000000000000000000000000000000000D',
+      ccipDestinationChainSelector: '10344971235874465080',
+    }));
+    const config = loadConfig({ AEGIS_DEPLOYMENT_FILE: path });
+    assert.equal(config.ccipSenderAddress, '0xA00000000000000000000000000000000000000A');
+    assert.equal(config.ccipDestinationChainSelector, '10344971235874465080');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('Sepolia CCIP config requires and exposes validated destination evidence metadata', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'aegis-sepolia-ccip-config-'));
+  const path = join(directory, 'sepolia.json');
+  const deployment = {
+    chainId: 11155111,
+    walletAddress: '0x1000000000000000000000000000000000000001',
+    aclAddress: '0x2000000000000000000000000000000000000002',
+    attestationAddress: '0x3000000000000000000000000000000000000003',
+    oracleAddress: '0x4000000000000000000000000000000000000004',
+    policyEngineAddress: '0x5000000000000000000000000000000000000005',
+    feedAddress: '0x6000000000000000000000000000000000000006',
+    ownerAddress: '0x7000000000000000000000000000000000000007',
+    agentAddress: '0x8000000000000000000000000000000000000008',
+    recipientAddress: '0x9000000000000000000000000000000000000009',
+    ccipSenderAddress: '0xA00000000000000000000000000000000000000A',
+    ccipRouterAddress: '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59',
+    ccipTokenAddress: '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05',
+    ccipTokenFeedAddress: '0xD00000000000000000000000000000000000000D',
+    ccipDestinationChainSelector: '10344971235874465080',
+  };
+  const env = { AEGIS_MODE: 'testnet', AEGIS_DEPLOYMENT_FILE: path, AEGIS_RPC_URL: 'https://rpc.invalid', AEGIS_AGENT_PRIVATE_KEY: safeKey };
+  try {
+    writeFileSync(path, JSON.stringify(deployment));
+    assert.throws(() => loadConfig(env), /destination metadata/);
+    writeFileSync(path, JSON.stringify({
+      ...deployment,
+      ccipDestinationChainId: 84532,
+      ccipDestinationNetwork: 'base-sepolia',
+      ccipDestinationTokenAddress: '0x88A2d74F47a237a62e7A51cdDa67270CE381555e',
+      ccipTokenPriceSource: 'OWNER_MAINTAINED_TESTNET_VALUE',
+    }));
+    const config = loadConfig(env);
+    assert.equal(config.ccipDestinationChainId, 84532);
+    assert.equal(config.ccipDestinationNetwork, 'base-sepolia');
+    assert.equal(config.ccipDestinationTokenAddress, '0x88A2d74F47a237a62e7A51cdDa67270CE381555e');
+    assert.equal(config.ccipTokenPriceSource, 'OWNER_MAINTAINED_TESTNET_VALUE');
+    writeFileSync(path, JSON.stringify({
+      ...deployment,
+      ccipDestinationChainId: 84532,
+      ccipDestinationNetwork: 'base-sepolia',
+      ccipDestinationTokenAddress: '0x0000000000000000000000000000000000000001',
+      ccipTokenPriceSource: 'OWNER_MAINTAINED_TESTNET_VALUE',
+    }));
+    assert.throws(() => loadConfig(env), /canonical Ethereum Sepolia to Base Sepolia/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('deployment files reject invalid JSON and out-of-range CCIP selectors', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'aegis-invalid-deployment-'));
+  const path = join(directory, 'local.json');
+  try {
+    writeFileSync(path, '{');
+    assert.throws(() => loadConfig({ AEGIS_DEPLOYMENT_FILE: path }), /not valid JSON/);
+    writeFileSync(path, JSON.stringify({
+      ccipSenderAddress: '0xA00000000000000000000000000000000000000A',
+      ccipRouterAddress: '0xB00000000000000000000000000000000000000B',
+      ccipTokenAddress: '0xC00000000000000000000000000000000000000C',
+      ccipTokenFeedAddress: '0xD00000000000000000000000000000000000000D',
+      ccipDestinationChainSelector: (2n ** 64n).toString(),
+    }));
+    assert.throws(() => loadConfig({ AEGIS_DEPLOYMENT_FILE: path }), /ccipDestinationChainSelector/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

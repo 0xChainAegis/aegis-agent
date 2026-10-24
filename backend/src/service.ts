@@ -1,5 +1,5 @@
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
-import { verifyMessage, getAddress, type Address, type Hex } from 'viem';
+import { verifyMessage, getAddress, zeroAddress, type Address, type Hex } from 'viem';
 import {
   POLICY_EVIDENCE_VERIFICATION_SCOPE, POLICY_EVIDENCE_VERIFIED_FIELDS,
   type ConfiguredPriceSource, type Intent, type PolicyEvidence, type Task,
@@ -11,6 +11,7 @@ import type { DraftInput } from './parser.js';
 import { createLlmClient, parseDraftWithLlm, type LlmIntentClient } from './llm.js';
 import { ApiError, Mutex } from './errors.js';
 import { planHash } from './plan.js';
+import { checkCcipDelivery, terminalCcipDelivery } from './ccip-delivery.js';
 import type { SubscriptionConfig } from '@aegis/shared';
 interface SubscriptionReader { get(id:string):Promise<SubscriptionConfig> }
 
@@ -34,8 +35,8 @@ export class AegisService {
     const { status:_status,updatedAt:_updated,...frozen }=intent; return frozen;
   }
   private requirePlan(intent:Intent,quote:Quote,expected?:Hex) {
-    if(intent.actionKind!=='SUBSCRIPTION') return;
-    if(!expected || expected!==quote.planHash || planHash(this.subscriptionCommitment(intent),quote)!==expected) throw new ApiError(409,'PLAN_HASH_MISMATCH','订阅草稿或报价已变化，请重新预览');
+    if(intent.actionKind!=='SUBSCRIPTION' && intent.actionKind!=='CCIP_TRANSFER') return;
+    if(!expected || expected!==quote.planHash || planHash(this.subscriptionCommitment(intent),quote)!==expected) throw new ApiError(409,'PLAN_HASH_MISMATCH','动作草稿或报价已变化，请重新预览');
   }
   constructor(readonly config: Config, readonly store: Store, readonly chain: Gateway, readonly llmClient: LlmIntentClient | null = createLlmClient(config.llm)) {
     if (!config.deploymentReady) return;
@@ -99,6 +100,15 @@ export class AegisService {
       if(input.message || input.purpose || input.recipient || input.amountWei) throw new ApiError(400,'SUBSCRIPTION_FIELDS_DERIVED','订阅收款人与金额只从链上计划读取');
       const subscription=await this.subscriptions.get(input.subscriptionId);
       intent={draftId:id,intentId:id,version:1,revision:1,createdAt:now,updatedAt:now,status:'DRAFT',message:'',purpose:'',recipient:subscription.recipient,to:subscription.recipient,amountWei:subscription.amountWei,missingFields:[],question:null,parser:{kind:'rule_parser',model:null,configuredModel:null,fallback:false,reason:'STRUCTURED_SUBSCRIPTION'},actionKind:'SUBSCRIPTION',subscriptionId:input.subscriptionId,occurrenceIndex:input.occurrenceIndex,subscription};
+    } else if(input.actionKind==='CCIP_TRANSFER') {
+      const {ccipSenderAddress,ccipTokenAddress,ccipDestinationChainSelector}=this.config;
+      if(!ccipSenderAddress||!ccipTokenAddress||!ccipDestinationChainSelector) throw new ApiError(422,'CCIP_CONFIG_REQUIRED','当前部署尚未配置 CCIP 路线');
+      if(input.message) throw new ApiError(400,'CCIP_STRUCTURED_ONLY','CCIP 阶段只接受结构化字段，不接受自然语言降级');
+      if(!input.recipient||!input.amountWei||!input.tokenAddress||!input.destinationChainSelector) throw new ApiError(422,'CCIP_FIELDS_REQUIRED','CCIP 需要收款地址、代币、数量和目标链');
+      const recipient=getAddress(input.recipient);const token=getAddress(input.tokenAddress);
+      if(recipient===zeroAddress) throw new ApiError(422,'CCIP_RECIPIENT_REQUIRED','CCIP 目标链收款地址不能是零地址');
+      if(token.toLowerCase()!==ccipTokenAddress.toLowerCase()||input.destinationChainSelector!==ccipDestinationChainSelector) throw new ApiError(422,'CCIP_ROUTE_NOT_CONFIGURED','代币或目标链不属于已配置 CCIP 路线');
+      intent={draftId:id,intentId:id,version:1,revision:1,createdAt:now,updatedAt:now,status:'DRAFT',message:'',purpose:(input.purpose??'').slice(0,500),recipient,to:recipient,amountWei:input.amountWei,missingFields:[],question:null,parser:{kind:'rule_parser',model:null,configuredModel:null,fallback:false,reason:'STRUCTURED_CCIP'},actionKind:'CCIP_TRANSFER',ccipSenderAddress,tokenAddress:token,destinationChainSelector:ccipDestinationChainSelector};
     } else intent = { ...await parseDraftWithLlm(input, this.config, undefined, this.llmClient), draftId: id, intentId: id, version: 1, revision: 1, createdAt: now, updatedAt: now };
     this.store.put('intent', id, owner, intent);
     return intent;
@@ -111,20 +121,25 @@ export class AegisService {
   async patchIntent(owner: Address, id: string, expected: number, input: DraftInput): Promise<Intent> {
     const previous = this.getIntent(owner, id);
     if(previous.actionKind==='SUBSCRIPTION' || input.actionKind==='SUBSCRIPTION') throw new ApiError(409,'NEW_SUBSCRIPTION_DRAFT_REQUIRED','更改订阅请新建当期草稿');
+    if(previous.actionKind==='CCIP_TRANSFER' || input.actionKind==='CCIP_TRANSFER') throw new ApiError(409,'NEW_CCIP_DRAFT_REQUIRED','更改跨链动作请新建草稿');
     if (previous.version !== expected) throw new ApiError(409, 'REVISION_CONFLICT', '草稿已更新，请读取最新版本');
     if (this.store.list<InternalTask>('task', owner).some(task => task.draftId === id)) throw new ApiError(409, 'INTENT_ALREADY_SUBMITTED', '已提交的付款内容不能编辑；请新建草稿');
     const intent: Intent = { ...previous, ...await parseDraftWithLlm(input, this.config, previous, this.llmClient), version: previous.version + 1, revision: previous.version + 1, updatedAt: new Date().toISOString() };
     this.store.put('intent', id, owner, intent);
     return intent;
   }
-  async preview(owner: Address, id: string, expected: number, maxUsdCost6?: string): Promise<Quote> {
+  async preview(owner: Address, id: string, expected: number, maxUsdCost6?: string, maxFeeWei?: string): Promise<Quote> {
     const intent = this.getIntent(owner, id);
     if (intent.version !== expected) throw new ApiError(409, 'REVISION_CONFLICT', '草稿已更新，请重新预览');
     if (!intent.recipient || !intent.amountWei || intent.missingFields.length) throw new ApiError(422, 'NEEDS_INPUT', '请先补齐地址、数额和单位', intent.missingFields);
     if (this.store.list<InternalTask>('task', owner).some(task => task.draftId === id)) throw new ApiError(409, 'INTENT_ALREADY_SUBMITTED', '该草稿已提交');
-    const result=intent.actionKind==='SUBSCRIPTION' ? await (()=>{if(!this.chain.previewSubscription) throw new ApiError(422,'SUBSCRIPTION_CONFIG_REQUIRED','订阅能力未配置'); return this.chain.previewSubscription(intent,maxUsdCost6);})() : await this.chain.preview(intent.recipient,intent.amountWei,maxUsdCost6);
+    const result=intent.actionKind==='SUBSCRIPTION'
+      ? await (()=>{if(!this.chain.previewSubscription) throw new ApiError(422,'SUBSCRIPTION_CONFIG_REQUIRED','订阅能力未配置'); return this.chain.previewSubscription(intent,maxUsdCost6);})()
+      : intent.actionKind==='CCIP_TRANSFER'
+        ? await (()=>{if(!this.chain.previewCcip) throw new ApiError(422,'CCIP_CONFIG_REQUIRED','CCIP 能力未配置'); return this.chain.previewCcip(intent,maxUsdCost6,maxFeeWei);})()
+        : await this.chain.preview(intent.recipient,intent.amountWei,maxUsdCost6);
     const quote: Quote = { ...result, quoteId: randomUUID(), draftId: id, draftVersion: intent.version };
-    if(intent.actionKind==='SUBSCRIPTION') quote.planHash=planHash(this.subscriptionCommitment(intent),quote);
+    if(intent.actionKind==='SUBSCRIPTION'||intent.actionKind==='CCIP_TRANSFER') quote.planHash=planHash(this.subscriptionCommitment(intent),quote);
     this.store.put('quote', quote.quoteId, owner, quote);
     this.store.put('intent', id, owner, { ...intent, status: quote.status, updatedAt: new Date().toISOString() });
     return quote;
@@ -146,8 +161,9 @@ export class AegisService {
     const now = new Date().toISOString(); const taskId = randomUUID();
     const task: InternalTask = {
       ...(intent.actionKind==='SUBSCRIPTION'?{actionKind:'SUBSCRIPTION' as const,subscriptionId:intent.subscriptionId,occurrenceIndex:intent.occurrenceIndex,subscription:intent.subscription,planHash:quote.planHash}:{}),
+      ...(intent.actionKind==='CCIP_TRANSFER'?{actionKind:'CCIP_TRANSFER' as const,ccipSenderAddress:intent.ccipSenderAddress,tokenAddress:intent.tokenAddress,destinationChainSelector:intent.destinationChainSelector,maxFeeWei:quote.maxFeeWei,quotedFeeWei:quote.quotedFeeWei,planHash:quote.planHash}:{}),
       taskId, draftId: id, intentId: id, quoteId, draftVersion: expected, stateVersion: 1, status: 'SUBMITTING',
-      chainId: this.config.chainId, walletAddress: this.config.walletAddress, ownerAddress: this.config.ownerAddress, agentAddress: this.config.agentAddress,
+      chainId: this.config.chainId, walletAddress: quote.walletAddress, ownerAddress: this.config.ownerAddress, agentAddress: this.config.agentAddress,
       recipient: quote.recipient, to: quote.recipient, amountWei: quote.amountWei, maxUsdCost6: quote.maxUsdCost6, previewCostUsd6: quote.costUsd6,
       requestDeadlineSeconds: quote.requestDeadlineSeconds, policyVersion: quote.policyVersion, requestNonce: null, requestHash: null, attestationId: null, txHash: null,
       triggerType: 'manual', ruleId: null, reasonCodes: quote.reasonCodes, transactions: [], availableActions: [],
@@ -182,6 +198,10 @@ export class AegisService {
       task.reasonCodes = outcome.reasonCode ? [outcome.reasonCode] : outcome.status === 'AWAITING_APPROVAL' ? task.reasonCodes.length ? task.reasonCodes : ['OWNER_APPROVAL_REQUIRED'] : [];
       task.eventData = outcome.eventData;
       task.policyEvidence = outcome.policyEvidence;
+      const messageId = outcome.eventData?.messageId;
+      if (task.actionKind === 'CCIP_TRANSFER' && outcome.status === 'EXECUTED' && typeof messageId === 'string' && /^0x[0-9a-fA-F]{64}$/.test(messageId)) {
+        task.messageId = messageId as Hex;
+      }
       task.verification = { kind: 'chain', chainVerified: outcome.status !== 'FAILED', hashVerified: outcome.status !== 'FAILED' };
       delete task.lastError;
       if (ownerAction) delete task.ownerObserved;
@@ -207,7 +227,22 @@ export class AegisService {
     const task = this.getTask(owner, id);
     if (task.status !== 'AWAITING_APPROVAL') throw new ApiError(409, 'NOT_PENDING', '只有链上 pending 任务可由 owner 审批或取消');
     await this.chain.preflightOwner?.(task, action);
-    return { ...this.chain.ownerTx(task, action), taskId: id, requestHash: task.requestHash, attestationId: task.attestationId, approvalMode: 'owner_approve_and_execute', chainBindingVerified: !!this.chain.preflightOwner, recipient: task.recipient, amountWei: task.amountWei, maxUsdCost6: task.maxUsdCost6, requestNonce: task.requestNonce, requestDeadlineSeconds: task.requestDeadlineSeconds, policyVersion: task.policyVersion };
+    return { ...this.chain.ownerTx(task, action), taskId: id, requestHash: task.requestHash, attestationId: task.attestationId, approvalMode: 'owner_approve_and_execute', chainBindingVerified: !!this.chain.preflightOwner, recipient: task.recipient, amountWei: task.amountWei, maxUsdCost6: task.maxUsdCost6, maxFeeWei:task.maxFeeWei,tokenAddress:task.tokenAddress,destinationChainSelector:task.destinationChainSelector,requestNonce: task.requestNonce, requestDeadlineSeconds: task.requestDeadlineSeconds, policyVersion: task.policyVersion };
+  }
+  async ccipDelivery(owner: Address, id: string, fetchImpl: typeof fetch = fetch) {
+    const task = this.getTask(owner, id);
+    if (task.ccipDelivery) return task.ccipDelivery;
+    const checked = await checkCcipDelivery(this.config, { actionKind: task.actionKind, messageId: task.messageId, txHash: task.txHash, recipient: task.recipient, tokenAddress: task.tokenAddress, amountWei: task.amountWei, destinationChainSelector: task.destinationChainSelector, transactions: task.transactions }, fetchImpl);
+    const terminal = terminalCcipDelivery(checked);
+    if (!terminal) return checked;
+    return this.worker.run(async () => {
+      const current = this.getTask(owner, id);
+      if (current.ccipDelivery) return current.ccipDelivery;
+      if (current.messageId?.toLowerCase() !== terminal.messageId.toLowerCase()) throw new ApiError(409, 'CCIP_DELIVERY_TASK_CHANGED', 'CCIP 任务在核验期间已变化');
+      current.ccipDelivery = terminal;
+      this.save(current);
+      return terminal;
+    });
   }
   evidence(owner: Address, id: string) {
     const task = this.getTask(owner, id);
@@ -235,15 +270,15 @@ export class AegisService {
       state: task.status === 'AWAITING_APPROVAL' ? 'WAITING_FOR_EXECUTION' : task.status === 'CANCELLED' ? 'NOT_CONSUMED' : 'UNVERIFIED',
     };
     const configuredPriceSource: ConfiguredPriceSource = {
-      oracleAddress: this.config.oracleAddress, feedAddress: this.config.feedAddress,
+      oracleAddress: this.config.oracleAddress, feedAddress: task.actionKind==='CCIP_TRANSFER'&&this.config.ccipTokenFeedAddress?this.config.ccipTokenFeedAddress:this.config.feedAddress,
       verified: false, scope: 'CURRENT_CONFIGURATION',
     };
     return {
       taskId: id, status: task.status, chainId: task.chainId, verification: task.verification,
-      provenance: task.planHash ? {version:'aegis.draft-plan.v2',planHash:task.planHash,scope:'CONFIRMED_SUBSCRIPTION_DRAFT_AND_QUOTE'} : null,
+      provenance: task.planHash ? {version:'aegis.draft-plan.v2',planHash:task.planHash,scope:task.actionKind==='CCIP_TRANSFER'?'CONFIRMED_CCIP_DRAFT_AND_QUOTE':'CONFIRMED_SUBSCRIPTION_DRAFT_AND_QUOTE'} : null,
       subscription: task.subscription ?? null,
-      intent: { actionKind:task.actionKind ?? 'NATIVE_TRANSFER',subscriptionId:task.subscriptionId,occurrenceIndex:task.occurrenceIndex,planHash:task.planHash,draftId: task.draftId, draftVersion: task.draftVersion, walletAddress: task.walletAddress, agentAddress: task.agentAddress, recipient: task.recipient, amountWei: task.amountWei, maxUsdCost6: task.maxUsdCost6, policyVersion: task.policyVersion, requestNonce: task.requestNonce, requestDeadlineSeconds: task.requestDeadlineSeconds, requestHash: task.requestHash },
-      attestationId: task.attestationId, transactions: task.transactions, outcome: task.eventData ?? null, previewPolicy, policy, configuredPriceSource,
+      intent: { actionKind:task.actionKind ?? 'NATIVE_TRANSFER',subscriptionId:task.subscriptionId,occurrenceIndex:task.occurrenceIndex,ccipSenderAddress:task.ccipSenderAddress,tokenAddress:task.tokenAddress,destinationChainSelector:task.destinationChainSelector,maxFeeWei:task.maxFeeWei,quotedFeeWei:task.quotedFeeWei,planHash:task.planHash,draftId: task.draftId, draftVersion: task.draftVersion, walletAddress: task.walletAddress, agentAddress: task.agentAddress, recipient: task.recipient, amountWei: task.amountWei, maxUsdCost6: task.maxUsdCost6, policyVersion: task.policyVersion, requestNonce: task.requestNonce, requestDeadlineSeconds: task.requestDeadlineSeconds, requestHash: task.requestHash },
+      attestationId: task.attestationId, transactions: task.transactions, outcome: task.eventData ?? null, ccipDelivery: task.ccipDelivery ?? null, previewPolicy, policy, configuredPriceSource,
       approvalMode: 'owner_approve_and_execute', finality: 'mined_is_not_irreversible', confirmationsRequired: 1,
       explorerBaseUrl: this.config.mode === 'testnet' ? 'https://sepolia.etherscan.io' : null,
       sources: { planner: task.parser.kind, quote: this.config.mode === 'mock' ? 'mock' : 'chain', transaction: this.config.mode === 'mock' ? 'none' : 'chain', evidence: task.policyEvidence ? 'wallet_and_policy_contract_events' : task.verification.chainVerified ? 'wallet_contract_event' : 'unverified' },
@@ -266,13 +301,20 @@ export class AegisService {
               this.requirePlan(original,savedQuote,active.planHash);
               if(active.subscriptionId!==original.subscriptionId || active.occurrenceIndex!==original.occurrenceIndex || active.recipient!==original.recipient || active.amountWei!==original.amountWei || active.maxUsdCost6!==savedQuote.maxUsdCost6 || active.policyVersion!==savedQuote.policyVersion || active.requestDeadlineSeconds!==savedQuote.requestDeadlineSeconds) throw new ApiError(409,'PLAN_HASH_MISMATCH','任务与确认计划不一致');
             }
+            if(active.actionKind==='CCIP_TRANSFER') {
+              const original=this.getIntent(active.ownerAddress,active.draftId);const savedQuote=this.store.get<Quote>('quote',active.quoteId,active.ownerAddress);
+              if(!savedQuote) throw new ApiError(409,'PLAN_HASH_MISMATCH','CCIP 报价丢失');
+              this.requirePlan(original,savedQuote,active.planHash);
+              if(active.ccipSenderAddress!==original.ccipSenderAddress||active.tokenAddress!==original.tokenAddress||active.destinationChainSelector!==original.destinationChainSelector||active.recipient!==original.recipient||active.amountWei!==original.amountWei||active.maxUsdCost6!==savedQuote.maxUsdCost6||active.maxFeeWei!==savedQuote.maxFeeWei||active.policyVersion!==savedQuote.policyVersion||active.requestDeadlineSeconds!==savedQuote.requestDeadlineSeconds) throw new ApiError(409,'PLAN_HASH_MISMATCH','CCIP 任务与确认计划不一致');
+            }
             const prepared = await this.chain.prepare(active);
             active.rawTransaction = prepared.rawTransaction; active.txHash = prepared.hash;
             active.senderNonce = prepared.senderNonce; active.requestNonce = prepared.requestNonce; active.requestHash = prepared.requestHash;
             active.transactions = [{ role: 'request', hash: prepared.hash, senderNonce: prepared.senderNonce, finality: 'pending' }];
             this.save(active); // Commit raw bytes/hash/nonce before ANY network broadcast.
           }
-          const outcome = await this.chain.outcome(active, active.txHash!, 'request');
+          if (!active.txHash) throw new ApiError(503,'TRANSACTION_HASH_MISSING','已签交易缺少确定性 hash');
+          const outcome = await this.chain.outcome(active, active.txHash, 'request');
           if (outcome) this.apply(active, outcome);
           else if (active.status === 'BROADCAST' && active.lastBroadcastAt && Date.now() - active.lastBroadcastAt > 60_000) {
             active.status = 'UNKNOWN'; active.reasonCodes = ['BROADCAST_UNKNOWN']; this.save(active);
@@ -282,7 +324,7 @@ export class AegisService {
             this.save(active);
             try {
               const sentHash = await this.chain.broadcast(active.rawTransaction);
-              if (sentHash.toLowerCase() !== active.txHash!.toLowerCase()) throw new Error('RPC returned another hash');
+              if (!active.txHash || sentHash.toLowerCase() !== active.txHash.toLowerCase()) throw new Error('RPC returned another hash');
               active.status = 'BROADCAST'; active.reasonCodes = []; delete active.lastError; this.save(active);
             } catch {
               active.status = 'UNKNOWN'; active.reasonCodes = ['BROADCAST_UNKNOWN'];
@@ -308,7 +350,8 @@ export class AegisService {
           const failure = chainError(error);
           pending.lastError = { code: failure.code, message: failure.message };
           if (failure.code === 'TX_BINDING_MISMATCH' && pending.ownerObserved) {
-            pending.transactions = pending.transactions.filter(tx => tx.hash !== pending.ownerObserved!.hash);
+            const rejectedHash=pending.ownerObserved.hash;
+            pending.transactions = pending.transactions.filter(tx => tx.hash !== rejectedHash);
             delete pending.ownerObserved;
           }
           this.save(pending);

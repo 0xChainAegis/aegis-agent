@@ -10,7 +10,8 @@
     "deploy:local": "hardhat run scripts/deploy-local.js --network localhost",
     "node": "hardhat node",
     "validate:sepolia": "node scripts/validate-sepolia.js",
-    "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia"
+    "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia",
+    "refresh:ccip-feed": "hardhat run scripts/refresh-ccip-feed.js --network sepolia"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "3.0.8",
