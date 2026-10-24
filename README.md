@@ -10,11 +10,26 @@
   <a href="https://github.com/0xChainAegis/aegis-agent/actions/workflows/ci.yml"><img src="https://github.com/0xChainAegis/aegis-agent/actions/workflows/ci.yml/badge.svg?branch=main" alt="Integration checks"></a>
   <a href="https://sepolia.etherscan.io/tx/0x47340b28f1b5eaa11c4ce8e2ffadc2937dfb0f3d55ffb35add32c40fb2bfcec2"><img src="https://img.shields.io/badge/Sepolia-payment%20verified-4f6b5a" alt="Verified Sepolia payment"></a>
   <a href="docs/CHAINLINK.md"><img src="https://img.shields.io/badge/Chainlink-Data%20Feeds-375bd2" alt="Chainlink Data Feeds"></a>
+  <a href="docs/CCIP-STAGE1.md"><img src="https://img.shields.io/badge/Chainlink-CCIP-375bd2" alt="Chainlink CCIP"></a>
+  <a href="docs/evidence/llm-live-2026-10-24.json"><img src="https://img.shields.io/badge/LLM-live%20verified-4f6b5a" alt="Live LLM verified"></a>
   <img src="https://img.shields.io/badge/Node.js-24%2B-252b2a" alt="Node.js 24 or newer">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-66716b" alt="MIT license"></a>
 </p>
 
 <p align="center"><a href="#问题与方案">产品</a> · <a href="#sepolia-实测">测试网证据</a> · <a href="#chainlink-如何参与付款">Chainlink</a> · <a href="#快速开始">运行</a> · <a href="#功能边界">范围</a> · <a href="#团队">团队</a></p>
+
+## 一句话
+
+**让 AI Agent 能付钱，但能付多少由合约决定。** 用户用自然语言提出付款，模型只整理草稿；用户确认后，合约按 Chainlink 实时价格执行美元预算，原生 ETH 与 CCIP 跨链共用同一套规则，每一笔都能在链上核对。
+
+| 能力 | 做什么 | 当前状态 |
+|---|---|---|
+| **自然语言下单** | Claude Haiku 4.5 把一句话整理成付款草稿，缺金额或地址会追问 | 演示机实测（2026-10-24） |
+| **Chainlink Data Feeds** | 执行时按 ETH/USD 换算美元：$5 自动、$10 单笔硬上限、$15 每日上限 | Sepolia 真实付款已核验 |
+| **Chainlink CCIP** | Sepolia → Base Sepolia 跨链转账，计入同一份美元预算，按 messageId 核对送达 | 已合入 main，有合约与 E2E 测试 |
+| **Owner 审批** | 超过自动阈值由 Owner 钱包签署执行；硬上限任何人都不能绕过 | 合约与浏览器测试 |
+| **注入防护** | “忽略规则 / 跳过审批”类指令整条拒绝，不调用模型 | 实测 |
+| **可核查证据** | 交易回执、合约事件、Chainlink 轮次与余额变化逐项核对 | 13 项独立 RPC 核验 |
 
 ## <img src="docs/images/section-problem.svg" width="24" height="24" alt="" align="absmiddle"> 问题与方案
 
@@ -34,7 +49,7 @@ Aegis 面向运行链上任务的 Agent 运营者：读取一个运行钱包的�
 - 同一交易的 Wallet `NativeTransferExecuted` 与 PolicyEngine `BudgetConsumed` 匹配请求哈希、执行账户和美元成本。
 - 独立只读 RPC 复核通过 13 项回执、事件与余额检查。[公开核验记录](docs/evidence/sepolia-payment-2026-10-22.json) · [核验范围](docs/EVIDENCE.md)。
 
-这笔验收使用规则解析器。实时 LLM 与其余测试网安全场景分别验收，当前记录只对应上述付款。
+这笔付款使用规则解析器。**2026-10-24，实时模型已在演示机上单独验收**：`claude-haiku-4-5`（Anthropic 兼容接口）把完整中文请求整理为有效草稿（3.9 秒），缺少金额时主动追问（3.0 秒），越权指令在调用模型前整条拒绝；测试未提交付款。随后 Sepolia 网页以 live 模型模式启动，健康检查通过。[脱敏记录](docs/evidence/llm-live-2026-10-24.json)。
 
 ## <img src="docs/images/section-chainlink.svg" width="24" height="24" alt="" align="absmiddle"> Chainlink 如何参与付款
 
@@ -48,6 +63,21 @@ Chainlink 参与合约的最终支付判断。ETH/USD Feed 将 ETH 转账本金�
 Sepolia ETH/USD Feed 为 [`0x694AA1769357215DE4FAC081bf1f309aDC325306`](https://sepolia.etherscan.io/address/0x694AA1769357215DE4FAC081bf1f309aDC325306)。在已验证付款中，0.0001 ETH 的本金按向上取整的 USD6 估值为 **0.240072 USD**。
 
 ETH/USD Feed **不提供网络 Gas 价格**。补给本金与执行账户支付的交易手续费分开计算。[集成路径、公式与限制](docs/CHAINLINK.md)。
+
+### Chainlink CCIP：跨链也受同一份美元预算约束
+
+- `AegisCCIPSender` 通过 Chainlink CCIP 把白名单代币从 **Ethereum Sepolia 发往 Base Sepolia**（CCIP-BnM），与原生 ETH 补给共用 `AegisPolicyEngine`：角色、收款人、目标链、单笔美元上限、共享日预算、策略版本与期限。
+- 用户确认的代币估值上限与 Router 手续费上限写入 plan hash；源链成功要求同一回执内匹配 `CCIPTransferExecuted` 与 `BudgetConsumed` 事件，并保留 CCIP `messageId`。
+- 后端按 `messageId` 自动对账 Chainlink CCIP 状态服务，绑定发送方、收款方、两条链、代币与数量；只有匹配目标链交易才显示 `DELIVERED`。
+- 状态：已合入 main（PR #24–#26），合约测试与浏览器 E2E 覆盖自动执行、Owner 审批、单笔超限、手续费上涨与输入拒绝。公网送达以目标链回执为准；CCIP-BnM 没有市场价，策略估值使用明确标注的测试 Feed。[CCIP 说明](docs/CCIP-STAGE1.md)。
+
+### 使用的 Chainlink 技术与文件
+
+| 技术 | 在资金路径中的作用 | 关键文件 |
+|---|---|---|
+| **Data Feeds**（Sepolia ETH/USD） | 执行时把 ETH 本金换算为美元，决定自动 / Owner 审批 / 拒绝；价格过期即停止 | `contracts/contracts/AegisPriceOracle.sol` · `AegisPolicyEngine.sol` · `AegisWallet.sol` · `backend/src/chain.ts` |
+| **CCIP**（Sepolia → Base Sepolia） | 受同一预算约束的跨链转账，`messageId` 与目标链回执核对送达 | `contracts/contracts/AegisCCIPSender.sol` · `backend/src/ccip-delivery.ts` · `frontend/src/ccip-panel.ts` |
+| 部署校验 | Feed 地址、Router lane、源代币与新鲜度校验 | `contracts/scripts/sepolia-config.js` · `deploy.js` · `validate-sepolia.js` |
 
 ## <img src="docs/images/section-flow.svg" width="24" height="24" alt="" align="absmiddle"> 使用流程
 
@@ -80,12 +110,12 @@ ETH/USD Feed **不提供网络 Gas 价格**。补给本金与执行账户支付�
 
 ## <img src="docs/images/section-architecture.svg" width="24" height="24" alt="" align="absmiddle"> 架构与技术栈
 
-`Vite / TypeScript 界面 → Node.js 24 API / SQLite → viem → Solidity 资金池与策略合约 → Chainlink ETH/USD Feed`
+`Vite / TypeScript 界面 → Node.js 24 API / SQLite → viem → Solidity 资金池与策略合约 → Chainlink ETH/USD Feed · Chainlink CCIP Router`
 
 - **界面**：钱包发现、储备建议、自然语言与手动输入、预览、审批及验证记录。
 - **后端**：Zod 运行时校验、Owner 登录、持久化任务、幂等提交和原交易核对。
 - **合约**：ACL、锁定价格源、统一风险策略、资金池和行为存证。
-- **AI 输入层**：规则解析默认可用；Anthropic 与 OpenAI-compatible 接口为可选 live 模式。Python Agent 为早期原型，不在当前运行链路中。
+- **AI 输入层**：规则解析默认可用；Anthropic 与 OpenAI-compatible 接口为可选 live 模式，演示机使用 `claude-haiku-4-5`。模型只产出经 Zod 校验的草稿。Python Agent 为早期原型，不在当前运行链路中。
 
 ## <img src="docs/images/section-start.svg" width="24" height="24" alt="" align="absmiddle"> 快速开始
 
@@ -134,6 +164,15 @@ npm run test:e2e
 ## <img src="docs/images/section-team.svg" width="24" height="24" alt="" align="absmiddle"> 活动来源
 
 本项目在 **ETH Shenzhen 2026** 赛期内新开发。以 Agent 支付执行安全与可核查结果为切入点。
+
+赛期内交付的主要内容：
+
+- 资金池、ACL 与统一 PolicyEngine，按 Chainlink ETH/USD 美元额度决定自动 / 审批 / 拒绝
+- Owner 签名登录、预览、明确确认、审批、取消与刷新恢复的完整网页流程
+- Sepolia 部署与独立核验的真实付款（2026-10-22）
+- 实时模型意图解析、缺参追问与越权指令整条拒绝（2026-10-24 验收）
+- Chainlink CCIP 跨链转账与送达自动对账（2026-10-24 合入）
+- 有限 ETH 订阅、CI 与浏览器端到端测试
 
 <img src="docs/images/eth-shenzhen-2026-poster.png" width="100%" alt="ETH Shenzhen 2026 Hackathon 活动海报">
 
